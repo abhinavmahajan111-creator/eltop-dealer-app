@@ -30,13 +30,16 @@ export default function Dashboard() {
         <div className="stat-cards">
           <div className="stat-card">
             <div className="stat-label">Outstanding</div>
-            <div className="stat-value red">Rs. 1,25,000</div>
+            <div className="stat-value red">Rs. {dealer.outstanding.toLocaleString()}</div>
           </div>
           <div className="stat-card">
             <div className="stat-label">Credit Limit</div>
-            <div className="stat-value">Rs. 5,00,000</div>
+            <div className="stat-value">Rs. {dealer.credit_limit.toLocaleString()}</div>
             <div className="credit-bar-bg">
-              <div className="credit-bar-fill"></div>
+              <div
+                className="credit-bar-fill"
+                style={{ width: `${Math.min(100, Math.round((dealer.outstanding / dealer.credit_limit) * 100))}%` }}
+              ></div>
             </div>
           </div>
         </div>

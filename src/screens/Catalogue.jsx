@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
-import { products } from "../data/products";
+import { useApp } from "../context/AppContext";
 
 const CATEGORIES = ["all", "Fans", "Coolers", "Geysers", "Heaters", "Kitchen"];
 
 export default function Catalogue() {
   const navigate = useNavigate();
+  const { products } = useApp();
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("all");
 
@@ -17,7 +18,7 @@ export default function Catalogue() {
       const searchMatch = p.name.toLowerCase().includes(term);
       return catMatch && searchMatch;
     });
-  }, [search, cat]);
+  }, [search, cat, products]);
 
   return (
     <div className="screen" id="screen-catalogue">

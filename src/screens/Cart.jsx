@@ -3,14 +3,14 @@ import { useApp } from "../context/AppContext";
 
 export default function Cart() {
   const navigate = useNavigate();
-  const { cart, changeCartQty, removeFromCart, clearCart } = useApp();
+  const { cart, changeCartQty, removeFromCart, placeOrder } = useApp();
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const tax = Math.round(subtotal * 0.18);
   const total = subtotal + tax;
 
-  function placeOrder() {
-    clearCart();
+  async function handlePlaceOrder() {
+    await placeOrder({ items: cart, subtotal, tax, total });
     navigate("/confirm");
   }
 
@@ -63,7 +63,7 @@ export default function Cart() {
                 <span>Rs. {total.toLocaleString()}</span>
               </div>
             </div>
-            <button className="btn" onClick={placeOrder}>Place Order</button>
+            <button className="btn" onClick={handlePlaceOrder}>Place Order</button>
           </>
         )}
       </div>

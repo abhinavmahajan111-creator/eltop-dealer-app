@@ -4,15 +4,21 @@ import { useApp } from "../context/AppContext";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { setMobile } = useApp();
+  const { sendOtp, verifyOtp, authBusy, authError } = useApp();
   const [step, setStep] = useState(1);
   const [mobileInput, setMobileInput] = useState("");
   const otpRefs = [useRef(), useRef(), useRef(), useRef()];
 
-  function goOtp() {
+  async function goOtp() {
     const m = mobileInput || "9876543210";
-    setMobile(m);
-    setStep(2);
+    const ok = await sendOtp(m);
+    if (ok) setStep(2);
+  }
+
+  async function verify() {
+    const otp = otpRefs.map((r) => r.current?.value || "").join("");
+    const ok = await verifyOtp(otp);
+    if (ok) navigate("/dashboard");
   }
 
   function handleOtpInput(e, i) {
@@ -37,7 +43,12 @@ export default function Login() {
               value={mobileInput}
               onChange={(e) => setMobileInput(e.target.value)}
             />
-            <button className="btn" onClick={goOtp}>Send OTP</button>
+            {authError && (
+              <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{authError}</div>
+            )}
+            <button className="btn" onClick={goOtp} disabled={authBusy}>
+              {authBusy ? "Sending..." : "Send OTP"}
+            </button>
           </div>
         )}
 
@@ -57,10 +68,13 @@ export default function Login() {
                 />
               ))}
             </div>
-            <button className="btn" onClick={() => navigate("/dashboard")}>
-              Verify &amp; Login
+            {authError && (
+              <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{authError}</div>
+            )}
+            <button className="btn" onClick={verify} disabled={authBusy}>
+              {authBusy ? "Verifying..." : "Verify & Login"}
             </button>
-            <div className="resend">Resend OTP</div>
+            <div className="resend" onClick={goOtp}>Resend OTP</div>
           </div>
         )}
       </div>

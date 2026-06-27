@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { products } from "../data/products";
 import { useApp } from "../context/AppContext";
 
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { addToCart } = useApp();
+  const { products, addToCart } = useApp();
   const [qty, setQty] = useState(1);
 
   const product = products.find((p) => p.id === Number(id));

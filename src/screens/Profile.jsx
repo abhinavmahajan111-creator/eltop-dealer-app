@@ -4,13 +4,18 @@ import { useApp } from "../context/AppContext";
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { dealer } = useApp();
+  const { dealer, mobile, signOut } = useApp();
   const initials = dealer.name
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0])
     .join("")
     .toUpperCase();
+
+  async function handleLogout() {
+    await signOut();
+    navigate("/login");
+  }
 
   return (
     <div className="screen" id="screen-profile">
@@ -22,10 +27,10 @@ export default function Profile() {
         <div className="profile-head">
           <div className="avatar">{initials}</div>
           <div className="profile-name">{dealer.name}</div>
-          <div className="profile-sub">Dealer ID: {dealer.dealerId}</div>
+          <div className="profile-sub">Dealer ID: {dealer.dealer_code}</div>
         </div>
         <div className="list-card">
-          <div className="list-row"><span className="ic">&#128222;</span><span>+91 98765 43210</span></div>
+          <div className="list-row"><span className="ic">&#128222;</span><span>+91 {mobile || "98765 43210"}</span></div>
           <div className="list-row"><span className="ic">&#128205;</span><span>{dealer.address}</span></div>
           <div className="list-row"><span className="ic">&#127970;</span><span>GSTIN: {dealer.gstin}</span></div>
         </div>
@@ -43,7 +48,7 @@ export default function Profile() {
             <span className="ic">&#9742;</span><span>Support</span><span className="arrow">&#8250;</span>
           </div>
         </div>
-        <button className="btn outline" onClick={() => navigate("/login")}>Logout</button>
+        <button className="btn outline" onClick={handleLogout}>Logout</button>
       </div>
       <BottomNav />
     </div>
