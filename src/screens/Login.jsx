@@ -6,12 +6,12 @@ export default function Login() {
   const navigate = useNavigate();
   const { sendOtp, verifyOtp, authBusy, authError } = useApp();
   const [step, setStep] = useState(1);
-  const [mobileInput, setMobileInput] = useState("");
-  const otpRefs = [useRef(), useRef(), useRef(), useRef()];
+  const [emailInput, setEmailInput] = useState("");
+  const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
 
   async function goOtp() {
-    const m = mobileInput || "9876543210";
-    const ok = await sendOtp(m);
+    const e = emailInput.trim();
+    const ok = await sendOtp(e);
     if (ok) setStep(2);
   }
 
@@ -37,16 +37,15 @@ export default function Login() {
         {step === 1 && (
           <div>
             <input
-              type="tel"
-              maxLength={10}
-              placeholder="Enter Mobile Number"
-              value={mobileInput}
-              onChange={(e) => setMobileInput(e.target.value)}
+              type="email"
+              placeholder="Enter Email Address"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
             />
             {authError && (
               <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{authError}</div>
             )}
-            <button className="btn" onClick={goOtp} disabled={authBusy}>
+            <button className="btn" onClick={goOtp} disabled={authBusy || !emailInput.trim()}>
               {authBusy ? "Sending..." : "Send OTP"}
             </button>
           </div>
@@ -55,7 +54,7 @@ export default function Login() {
         {step === 2 && (
           <div>
             <div className="login-sub" style={{ marginBottom: 14 }}>
-              OTP sent to <b>+91 {mobileInput || "9876543210"}</b>
+              OTP sent to <b>{emailInput}</b>
             </div>
             <div className="otp-row">
               {otpRefs.map((ref, i) => (

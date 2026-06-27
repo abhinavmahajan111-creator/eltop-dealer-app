@@ -4,7 +4,7 @@ import { useApp } from "../context/AppContext";
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { dealer, mobile, signOut } = useApp();
+  const { dealer, email, signOut } = useApp();
   const initials = dealer.name
     .split(" ")
     .slice(0, 2)
@@ -30,7 +30,7 @@ export default function Profile() {
           <div className="profile-sub">Dealer ID: {dealer.dealer_code}</div>
         </div>
         <div className="list-card">
-          <div className="list-row"><span className="ic">&#128222;</span><span>+91 {mobile || "98765 43210"}</span></div>
+          <div className="list-row"><span className="ic">&#128231;</span><span>{email || dealer.email || "dealer@example.com"}</span></div>
           <div className="list-row"><span className="ic">&#128205;</span><span>{dealer.address}</span></div>
           <div className="list-row"><span className="ic">&#127970;</span><span>GSTIN: {dealer.gstin}</span></div>
         </div>

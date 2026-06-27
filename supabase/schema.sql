@@ -6,7 +6,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text not null default 'New Dealer',
   dealer_code text unique,
-  phone text,
+  email text,
   gstin text,
   address text,
   credit_limit numeric not null default 500000,
@@ -24,14 +24,14 @@ create policy "Dealers can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
--- Auto-create a profile row whenever a new auth user signs up (e.g. via phone OTP)
+-- Auto-create a profile row whenever a new auth user signs up (e.g. via email OTP)
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, phone, dealer_code)
+  insert into public.profiles (id, email, dealer_code)
   values (
     new.id,
-    new.phone,
+    new.email,
     'ETP-DLR-' || lpad((floor(random() * 9999))::text, 4, '0')
   );
   return new;

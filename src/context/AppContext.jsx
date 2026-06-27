@@ -21,14 +21,9 @@ const DEMO_PROFILE = {
   outstanding: 125000,
 };
 
-function toE164(mobile) {
-  const digits = mobile.replace(/\D/g, "");
-  return digits.startsWith("91") ? `+${digits}` : `+91${digits}`;
-}
-
 export function AppProvider({ children }) {
   const [cart, setCart] = useState([]);
-  const [mobile, setMobile] = useState("");
+  const [email, setEmail] = useState("");
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(DEMO_PROFILE);
   const [products, setProducts] = useState(staticProducts);
@@ -70,13 +65,14 @@ export function AppProvider({ children }) {
       });
   }, [session]);
 
-  const sendOtp = useCallback(async (mobileNumber) => {
-    setMobile(mobileNumber);
+  const sendOtp = useCallback(async (emailAddress) => {
+    setEmail(emailAddress);
     setAuthError("");
-    if (!isSupabaseConfigured) return true; // demo mode, no real SMS
+    if (!isSupabaseConfigured) return true; // demo mode, no real email sent
     setAuthBusy(true);
     const { error } = await supabase.auth.signInWithOtp({
-      phone: toE164(mobileNumber),
+      email: emailAddress,
+      options: { shouldCreateUser: true },
     });
     setAuthBusy(false);
     if (error) {
@@ -91,9 +87,9 @@ export function AppProvider({ children }) {
     if (!isSupabaseConfigured) return true; // demo mode, any OTP passes
     setAuthBusy(true);
     const { error } = await supabase.auth.verifyOtp({
-      phone: toE164(mobile),
+      email,
       token: otp,
-      type: "sms",
+      type: "email",
     });
     setAuthBusy(false);
     if (error) {
@@ -101,7 +97,7 @@ export function AppProvider({ children }) {
       return false;
     }
     return true;
-  }, [mobile]);
+  }, [email]);
 
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured) await supabase.auth.signOut();
@@ -225,8 +221,8 @@ export function AppProvider({ children }) {
     removeFromCart,
     clearCart,
     placeOrder,
-    mobile,
-    setMobile,
+    email,
+    setEmail,
     session,
     isLoggedIn: isSupabaseConfigured ? Boolean(session) : null,
     dealer: profile,
