@@ -72,7 +72,7 @@ export function AppProvider({ children }) {
     setAuthBusy(true);
     const { error } = await supabase.auth.signInWithOtp({
       email: emailAddress,
-      options: { shouldCreateUser: true },
+      options: { shouldCreateUser: true, emailRedirectTo: undefined },
     });
     setAuthBusy(false);
     if (error) {
