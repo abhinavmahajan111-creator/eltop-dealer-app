@@ -96,7 +96,7 @@ export default function AdminOrders() {
       setSortTotal((prev) => prev === "asc" ? "desc" : prev === "desc" ? null : "asc");
       setSortDate(null);
     } else {
-      setSortDate((prev) => prev === "asc" ? "desc" : "asc");
+      setSortDate((prev) => prev === "desc" ? "asc" : "desc");
       setSortTotal(null);
     }
   };
@@ -235,7 +235,12 @@ export default function AdminOrders() {
                       )}
                     </td>
                     <td>Rs. {Number(o.total).toLocaleString()}</td>
-                    <td>{new Date(o.created_at).toLocaleDateString()}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {new Date(o.created_at).toLocaleString("en-IN", {
+                        day: "2-digit", month: "2-digit", year: "numeric",
+                        hour: "2-digit", minute: "2-digit", hour12: true,
+                      })}
+                    </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap" }}>
                       <select
                         className="admin-select"
