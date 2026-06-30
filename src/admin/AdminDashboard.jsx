@@ -21,6 +21,8 @@ export default function AdminDashboard() {
       supabase.from("profiles").select("id", { count: "exact", head: true }).eq("is_blocked", false),
     ]).then(([ordersRes, dealersRes]) => {
       if (cancelled) return;
+      console.log("[AdminDashboard] orders result:", ordersRes.data, "error:", ordersRes.error);
+      console.log("[AdminDashboard] dealers count:", dealersRes.count, "error:", dealersRes.error);
       const orders = ordersRes.data || [];
       const revenue = orders.reduce((sum, o) => sum + Number(o.total || 0), 0);
       setStats({
