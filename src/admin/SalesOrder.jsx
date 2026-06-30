@@ -65,6 +65,7 @@ const COMPANY = {
   state:   "Delhi, Code: 07",
   email:   "embassyelectricindia@gmail.com",
   website: "www.EltopByEmbassy.com",
+  udyam:   "UDYAM-DL-06-0006878 (MEDIUM)",
 };
 
 export default function SalesOrder() {
@@ -131,6 +132,7 @@ export default function SalesOrder() {
               <div style={s.small}>GSTIN/UIN: {COMPANY.gstin}</div>
               <div style={s.small}>State: {COMPANY.state}</div>
               <div style={s.small}>{COMPANY.email} | {COMPANY.website}</div>
+              <div style={s.small}>Udyam Reg. No.: {COMPANY.udyam}</div>
             </td>
             <td style={{ ...s.td, textAlign: "center", borderLeft: "none" }}>
               <div style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 2 }}>SALES ORDER</div>
@@ -183,7 +185,7 @@ export default function SalesOrder() {
       <table style={{ ...s.box, marginTop: -1 }}>
         <thead>
           <tr>
-            {["Sl No", "Description of Goods", "MRP", "DLP", "Disc %", "Net Rate", "Qty", "Amount"].map((h) => (
+            {["Sl No", "Description of Goods", "Qty", "MRP", "DLP", "Disc %", "Net Rate", "Amount"].map((h) => (
               <th key={h} style={s.th}>{h}</th>
             ))}
           </tr>
@@ -215,11 +217,11 @@ export default function SalesOrder() {
                     </div>
                   </div>
                 </td>
+                <td style={{ ...s.td, ...s.center }}>{item.qty}</td>
                 <td style={{ ...s.td, ...s.right }}>{mrp != null ? `₹${mrp.toLocaleString("en-IN")}` : "—"}</td>
                 <td style={{ ...s.td, ...s.right }}>₹{dlp.toLocaleString("en-IN")}</td>
                 <td style={{ ...s.td, ...s.center }}>{discStr}</td>
                 <td style={{ ...s.td, ...s.right }}>₹{netRate.toFixed(2)}</td>
-                <td style={{ ...s.td, ...s.center }}>{item.qty}</td>
                 <td style={{ ...s.td, ...s.right }}>₹{lineAmt.toFixed(2)}</td>
               </tr>
             );
@@ -237,8 +239,8 @@ export default function SalesOrder() {
         <tfoot>
           <tr>
             <td style={{ ...s.td, ...s.bold }} colSpan={2}>Total</td>
-            <td style={s.td}></td><td style={s.td}></td><td style={s.td}></td><td style={s.td}></td>
             <td style={{ ...s.td, ...s.center, ...s.bold }}>{totalQty}</td>
+            <td style={s.td}></td><td style={s.td}></td><td style={s.td}></td><td style={s.td}></td>
             <td style={{ ...s.td, ...s.right, ...s.bold }}>
               ₹{grossTotal.toFixed(2)}
             </td>
@@ -272,15 +274,29 @@ export default function SalesOrder() {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td style={{ ...s.td, ...s.center }}>—</td>
-            <td style={{ ...s.td, ...s.right }}>₹{totalBasic.toFixed(2)}</td>
-            <td style={{ ...s.td, ...s.center }}>9%</td>
-            <td style={{ ...s.td, ...s.right }}>₹{totalCgst.toFixed(2)}</td>
-            <td style={{ ...s.td, ...s.center }}>9%</td>
-            <td style={{ ...s.td, ...s.right }}>₹{totalSgst.toFixed(2)}</td>
-            <td style={{ ...s.td, ...s.right }}>₹{(totalCgst + totalSgst).toFixed(2)}</td>
-          </tr>
+          {(() => {
+            const groups = {};
+            items.forEach((it) => {
+              const hsn = it.hsn_code || "—";
+              if (!groups[hsn]) groups[hsn] = 0;
+              groups[hsn] += (Number(it.net_rate ?? it.price) / 1.18) * it.qty;
+            });
+            return Object.entries(groups).map(([hsn, basic]) => {
+              const cgst = basic * 0.09;
+              const sgst = basic * 0.09;
+              return (
+                <tr key={hsn}>
+                  <td style={{ ...s.td, ...s.center }}>{hsn}</td>
+                  <td style={{ ...s.td, ...s.right }}>₹{basic.toFixed(2)}</td>
+                  <td style={{ ...s.td, ...s.center }}>9%</td>
+                  <td style={{ ...s.td, ...s.right }}>₹{cgst.toFixed(2)}</td>
+                  <td style={{ ...s.td, ...s.center }}>9%</td>
+                  <td style={{ ...s.td, ...s.right }}>₹{sgst.toFixed(2)}</td>
+                  <td style={{ ...s.td, ...s.right }}>₹{(cgst + sgst).toFixed(2)}</td>
+                </tr>
+              );
+            });
+          })()}
           <tr style={{ background: "#f5f5f5" }}>
             <td style={{ ...s.td, ...s.bold }}>Total</td>
             <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalBasic.toFixed(2)}</td>
@@ -322,23 +338,31 @@ export default function SalesOrder() {
         <tbody>
           <tr>
             <td style={{ ...s.td, width: "60%", verticalAlign: "top" }}>
-              <div style={s.bold}>Company's Bank Details</div>
-              <table style={{ marginTop: 6, fontSize: 11, borderCollapse: "collapse" }}>
-                <tbody>
-                  {[
-                    ["A/c Holder",  BANK.holder],
-                    ["Bank Name",   BANK.name],
-                    ["Branch",      BANK.branch],
-                    ["A/c No.",     BANK.acNo],
-                    ["IFS Code",    BANK.ifsc],
-                  ].map(([l, v]) => (
-                    <tr key={l}>
-                      <td style={{ paddingRight: 10, color: "#555" }}>{l}:</td>
-                      <td style={s.bold}>{v}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={s.bold}>Company's Bank Details</div>
+                  <table style={{ marginTop: 6, fontSize: 11, borderCollapse: "collapse" }}>
+                    <tbody>
+                      {[
+                        ["A/c Holder",  BANK.holder],
+                        ["Bank Name",   BANK.name],
+                        ["Branch",      BANK.branch],
+                        ["A/c No.",     BANK.acNo],
+                        ["IFS Code",    BANK.ifsc],
+                      ].map(([l, v]) => (
+                        <tr key={l}>
+                          <td style={{ paddingRight: 10, color: "#555" }}>{l}:</td>
+                          <td style={s.bold}>{v}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ textAlign: "center", flexShrink: 0 }}>
+                  <img src="/assets/upi-qr.png" alt="UPI QR" style={{ width: 120, height: 120, display: "block" }} />
+                  <div style={{ ...s.small, marginTop: 2 }}>Scan to Pay</div>
+                </div>
+              </div>
             </td>
             <td style={{ ...s.td, textAlign: "center", verticalAlign: "bottom", paddingTop: 60 }}>
               <div>for <strong>{COMPANY.name}</strong></div>
