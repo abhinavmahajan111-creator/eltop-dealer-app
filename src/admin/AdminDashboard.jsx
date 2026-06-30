@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 export default function AdminDashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalOrders: 0,
     revenue: 0,
@@ -45,17 +47,17 @@ export default function AdminDashboard() {
         <div className="admin-loading">Loading&hellip;</div>
       ) : (
         <div className="admin-stat-grid">
-          <div className="admin-stat-card">
+          <div className="admin-stat-card admin-stat-card--link" onClick={() => navigate("/admin/orders")}>
             <div className="admin-stat-label">Total Orders</div>
             <div className="admin-stat-value">{stats.totalOrders}</div>
           </div>
-          <div className="admin-stat-card">
+          <div className="admin-stat-card admin-stat-card--link" onClick={() => navigate("/admin/orders")}>
             <div className="admin-stat-label">Revenue</div>
             <div className="admin-stat-value red">
               Rs. {stats.revenue.toLocaleString()}
             </div>
           </div>
-          <div className="admin-stat-card">
+          <div className="admin-stat-card admin-stat-card--link" onClick={() => navigate("/admin/dealers")}>
             <div className="admin-stat-label">Active Dealers</div>
             <div className="admin-stat-value">{stats.activeDealers}</div>
           </div>
