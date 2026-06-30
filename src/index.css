@@ -405,3 +405,59 @@
   .admin-form input{width:170px;margin-bottom:0;}
   .admin-form-actions{display:flex;gap:10px;align-items:center;}
   .admin-error{color:#c62828;font-size:13px;width:100%;}
+
+  /* Product gallery — dealer-facing */
+  .gallery-main{
+    width:100%;height:260px;background:#f3eaf0;border-radius:14px;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;margin-bottom:10px;
+  }
+  .gallery-thumbs{
+    display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:4px;
+  }
+  .gallery-thumb{
+    flex-shrink:0;width:62px;height:62px;border-radius:10px;overflow:hidden;
+    border:2.5px solid var(--border);cursor:pointer;background:#f3eaf0;
+  }
+  .gallery-thumb.active{border-color:var(--red);}
+  .gallery-play-wrap{position:relative;width:100%;height:100%;}
+  .gallery-play{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(0,0,0,.55);color:#fff;border-radius:50%;
+    width:24px;height:24px;display:flex;align-items:center;justify-content:center;
+    font-size:11px;padding-left:2px;
+  }
+
+  /* Admin media section */
+  .admin-media-section{
+    background:#fff;border-radius:14px;padding:18px;margin-bottom:20px;
+    box-shadow:0 1px 4px rgba(0,0,0,.05);max-width:760px;
+  }
+  .admin-media-title{font-size:15px;font-weight:700;margin-bottom:14px;color:var(--text);}
+  .admin-media-row{margin-bottom:10px;}
+  .admin-media-label{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;display:block;}
+  .admin-img-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;}
+  .admin-img-thumb{
+    position:relative;width:100px;height:100px;border-radius:10px;overflow:hidden;
+    border:1.5px solid var(--border);background:#f3eaf0;
+  }
+  .admin-img-thumb img{width:100%;height:100%;object-fit:cover;}
+  .admin-img-badge{
+    position:absolute;top:4px;left:4px;background:var(--red);color:#fff;
+    font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px;z-index:1;
+  }
+  .admin-img-controls{
+    position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);
+    display:flex;justify-content:space-around;padding:4px 0;
+  }
+  .admin-img-btn{
+    background:none;border:none;color:#fff;font-size:13px;cursor:pointer;padding:0 4px;
+    line-height:1;
+  }
+  .admin-img-btn:disabled{opacity:.3;cursor:default;}
+  .admin-img-btn.danger{color:#ff8a80;}
+  .admin-img-add{
+    width:100px;height:100px;border-radius:10px;border:2px dashed var(--border);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    cursor:pointer;font-size:11px;color:var(--muted);text-align:center;line-height:1.4;
+  }
+  .admin-img-add:hover{border-color:var(--red);color:var(--red);}

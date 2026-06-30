@@ -50,7 +50,7 @@ export default function Catalogue() {
           {filtered.map((p) => (
             <div className="prod-card" key={p.id} onClick={() => navigate(`/product/${p.id}`)}>
               <div className="prod-img">
-                <img src={p.img} alt={p.name} />
+                <img src={p.image_urls?.[0] || p.img} alt={p.name} />
               </div>
               <div className="prod-body">
                 <div className="prod-name">{p.name}</div>

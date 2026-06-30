@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useApp } from "../context/AppContext";
+import ProductGallery from "../components/ProductGallery";
 
 export default function ProductDetail() {
   const { id } = useParams();
@@ -24,31 +25,32 @@ export default function ProductDetail() {
         <h1>Product Detail</h1>
       </div>
       <div className="content">
-        <div className="pd-img">
-          <img src={product.img} alt={product.name} />
-        </div>
+        <ProductGallery images={product.image_urls} videoUrl={product.video_url} />
+
         <div className="pd-title">{product.name}</div>
         <div className="pd-sku">SKU: {product.sku}</div>
         <div className="pd-price-row">
           <div className="pd-dealer-price">Rs. {product.price}</div>
-          <div className="pd-mrp">Rs. {product.mrp}</div>
-          <div className="pd-save">
-            Save {Math.round((1 - product.price / product.mrp) * 100)}%
-          </div>
+          {product.mrp && <div className="pd-mrp">Rs. {product.mrp}</div>}
+          {product.mrp && (
+            <div className="pd-save">
+              Save {Math.round((1 - product.price / product.mrp) * 100)}%
+            </div>
+          )}
         </div>
         <div className="section-title">Warehouse Stock</div>
         <div className="wh-table">
           <div className="wh-row">
             <span>Delhi Warehouse</span>
-            <span className="wh-stock">{product.wh.delhi} units</span>
+            <span className="wh-stock">{product.wh?.delhi ?? 0} units</span>
           </div>
           <div className="wh-row">
             <span>Ludhiana Warehouse</span>
-            <span className="wh-stock">{product.wh.ludhiana} units</span>
+            <span className="wh-stock">{product.wh?.ludhiana ?? 0} units</span>
           </div>
           <div className="wh-row">
             <span>Jaipur Warehouse</span>
-            <span className="wh-stock">{product.wh.jaipur} units</span>
+            <span className="wh-stock">{product.wh?.jaipur ?? 0} units</span>
           </div>
         </div>
         <div className="section-title">Quantity</div>

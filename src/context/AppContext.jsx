@@ -125,6 +125,8 @@ export function AppProvider({ children }) {
             mrp: p.mrp,
             stock: p.stock,
             img: p.image_url,
+            image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
+            video_url: p.video_url || null,
             wh: {
               delhi: p.warehouse_delhi,
               ludhiana: p.warehouse_ludhiana,
