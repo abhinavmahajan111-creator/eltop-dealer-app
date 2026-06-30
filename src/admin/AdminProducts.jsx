@@ -73,8 +73,8 @@ export default function AdminProducts() {
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files);
     if (!form.id) { setError("Save the product first before uploading images."); return; }
-    const remaining = 5 - form.image_urls.length;
-    if (remaining <= 0) { setError("Maximum 5 images reached."); return; }
+    const remaining = 9 - form.image_urls.length;
+    if (remaining <= 0) { setError("Maximum 9 images reached."); return; }
     const toUpload = files.slice(0, remaining);
     setUploading(true);
     setError("");
@@ -193,7 +193,7 @@ export default function AdminProducts() {
 
           {/* Image thumbnails */}
           <div className="admin-media-label" style={{ marginTop: 16 }}>
-            &#128247; Images ({form.image_urls.length}/5)
+            &#128247; Images ({form.image_urls.length}/9)
           </div>
           <div className="admin-img-grid">
             {form.image_urls.map((url, i) => (
@@ -221,7 +221,7 @@ export default function AdminProducts() {
                 </div>
               </div>
             ))}
-            {form.image_urls.length < 5 && (
+            {form.image_urls.length < 9 && (
               <div
                 className="admin-img-add"
                 onClick={() => fileInputRef.current?.click()}

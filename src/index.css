@@ -415,7 +415,7 @@
     display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:4px;
   }
   .gallery-thumb{
-    flex-shrink:0;width:62px;height:62px;border-radius:10px;overflow:hidden;
+    flex-shrink:0;width:54px;height:54px;border-radius:8px;overflow:hidden;
     border:2.5px solid var(--border);cursor:pointer;background:#f3eaf0;
   }
   .gallery-thumb.active{border-color:var(--red);}
