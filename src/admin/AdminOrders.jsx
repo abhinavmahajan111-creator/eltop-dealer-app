@@ -1,13 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const STATUSES = ["pending", "confirmed", "dispatched", "delivered"];
 
 function dealerLabel(profile) {
   if (!profile) return "—";
-  // "New Dealer" is the DB default — treat it as unset
   const name = profile.name && profile.name !== "New Dealer" ? profile.name : null;
   return name || profile.email || profile.dealer_code || "Unknown";
+}
+
+function SortIcon({ dir }) {
+  if (!dir) return <span style={{ opacity: 0.3, marginLeft: 4 }}>⇅</span>;
+  return <span style={{ marginLeft: 4 }}>{dir === "asc" ? "↑" : "↓"}</span>;
 }
 
 export default function AdminOrders() {
@@ -17,6 +21,15 @@ export default function AdminOrders() {
   const [expandedId, setExpandedId] = useState(null);
   const [itemsCache, setItemsCache] = useState({});
   const [itemsLoading, setItemsLoading] = useState(false);
+
+  // ── Filter / sort state ───────────────────────────────────────────────────
+  const [filterOrderId, setFilterOrderId] = useState("");
+  const [filterDealer, setFilterDealer] = useState("__all__");
+  const [filterStatus, setFilterStatus] = useState("__all__");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [sortTotal, setSortTotal] = useState(null);   // null | "asc" | "desc"
+  const [sortDate, setSortDate] = useState("desc");   // default newest-first
 
   const loadOrders = () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -32,6 +45,61 @@ export default function AdminOrders() {
   };
 
   useEffect(() => { loadOrders(); }, []);
+
+  // Unique dealer options derived from loaded orders
+  const dealerOptions = useMemo(() => {
+    const seen = new Map();
+    orders.forEach((o) => {
+      const key = o.dealer_id;
+      if (!seen.has(key)) seen.set(key, dealerLabel(o.profiles));
+    });
+    return Array.from(seen.entries()).map(([id, label]) => ({ id, label }));
+  }, [orders]);
+
+  // ── Combined filter + sort ────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    let rows = [...orders];
+
+    if (filterOrderId.trim())
+      rows = rows.filter((o) => o.id.toLowerCase().includes(filterOrderId.trim().toLowerCase()));
+
+    if (filterDealer !== "__all__")
+      rows = rows.filter((o) => o.dealer_id === filterDealer);
+
+    if (filterStatus !== "__all__")
+      rows = rows.filter((o) => o.status === filterStatus);
+
+    if (filterDateFrom)
+      rows = rows.filter((o) => new Date(o.created_at) >= new Date(filterDateFrom));
+
+    if (filterDateTo) {
+      const to = new Date(filterDateTo);
+      to.setHours(23, 59, 59, 999);
+      rows = rows.filter((o) => new Date(o.created_at) <= to);
+    }
+
+    // Sort: total takes priority if set, otherwise date
+    if (sortTotal) {
+      rows.sort((a, b) => sortTotal === "asc" ? a.total - b.total : b.total - a.total);
+    } else if (sortDate) {
+      rows.sort((a, b) => {
+        const diff = new Date(a.created_at) - new Date(b.created_at);
+        return sortDate === "asc" ? diff : -diff;
+      });
+    }
+
+    return rows;
+  }, [orders, filterOrderId, filterDealer, filterStatus, filterDateFrom, filterDateTo, sortTotal, sortDate]);
+
+  const toggleSort = (col) => {
+    if (col === "total") {
+      setSortTotal((prev) => prev === "asc" ? "desc" : prev === "desc" ? null : "asc");
+      setSortDate(null);
+    } else {
+      setSortDate((prev) => prev === "asc" ? "desc" : "asc");
+      setSortTotal(null);
+    }
+  };
 
   const handleStatusChange = async (orderId, status, e) => {
     e.stopPropagation();
@@ -54,6 +122,13 @@ export default function AdminOrders() {
     setItemsLoading(false);
   };
 
+  // Shared style for compact in-header controls
+  const filterInput = {
+    width: "100%", marginTop: 4, padding: "3px 6px", fontSize: 11,
+    border: "1px solid #d0c0d0", borderRadius: 4, background: "#fff",
+    boxSizing: "border-box",
+  };
+
   return (
     <div className="admin-page">
       <h1 className="admin-title">Orders</h1>
@@ -65,17 +140,77 @@ export default function AdminOrders() {
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
-              <tr>
-                <th></th>
-                <th>Order ID</th>
-                <th>Dealer</th>
-                <th>Total</th>
-                <th>Placed</th>
-                <th>Status</th>
+              <tr style={{ verticalAlign: "top" }}>
+                <th style={{ width: 24 }}></th>
+
+                {/* Order ID filter */}
+                <th>
+                  Order ID
+                  <input
+                    style={filterInput}
+                    placeholder="Search…"
+                    value={filterOrderId}
+                    onChange={(e) => setFilterOrderId(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </th>
+
+                {/* Dealer dropdown */}
+                <th>
+                  Dealer
+                  <select
+                    style={filterInput}
+                    value={filterDealer}
+                    onChange={(e) => setFilterDealer(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value="__all__">All Dealers</option>
+                    {dealerOptions.map(({ id, label }) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </select>
+                </th>
+
+                {/* Total — sortable */}
+                <th style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+                    onClick={() => toggleSort("total")}>
+                  Total <SortIcon dir={sortTotal} />
+                </th>
+
+                {/* Date — sortable + date range */}
+                <th style={{ cursor: "pointer", userSelect: "none" }}
+                    onClick={() => toggleSort("date")}>
+                  Placed <SortIcon dir={sortDate} />
+                  <div style={{ display: "flex", gap: 4, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                    <input type="date" style={{ ...filterInput, marginTop: 0, flex: 1 }}
+                      value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
+                    <input type="date" style={{ ...filterInput, marginTop: 0, flex: 1 }}
+                      value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
+                  </div>
+                </th>
+
+                {/* Status dropdown */}
+                <th>
+                  Status
+                  <select
+                    style={filterInput}
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value="__all__">All</option>
+                    {STATUSES.map((s) => (
+                      <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+                    ))}
+                  </select>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {orders.map((o) => {
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>No orders match the current filters.</td></tr>
+              )}
+              {filtered.map((o) => {
                 const isOpen = expandedId === o.id;
                 const items = itemsCache[o.id] || [];
                 const profile = o.profiles;
@@ -128,7 +263,6 @@ export default function AdminOrders() {
                     <tr key={`${o.id}-detail`} className="admin-order-detail-row">
                       <td colSpan={6} style={{ padding: 0 }}>
                         <div className="admin-order-detail">
-                          {/* Dealer info */}
                           <div className="admin-order-detail-section">
                             <div className="admin-order-detail-heading">Dealer Info</div>
                             <div className="admin-order-detail-grid">
@@ -143,7 +277,6 @@ export default function AdminOrders() {
                             </div>
                           </div>
 
-                          {/* Order items */}
                           <div className="admin-order-detail-section">
                             <div className="admin-order-detail-heading">Order Items</div>
                             {itemsLoading && !itemsCache[o.id] ? (
@@ -174,7 +307,6 @@ export default function AdminOrders() {
                             )}
                           </div>
 
-                          {/* Print button */}
                           <div style={{ width: "100%", paddingTop: 4 }}>
                             <button
                               className="btn small"
@@ -184,7 +316,6 @@ export default function AdminOrders() {
                             </button>
                           </div>
 
-                          {/* Order totals */}
                           <div className="admin-order-detail-section od-totals">
                             <span>Subtotal</span><span>Rs. {Number(o.subtotal).toLocaleString()}</span>
                             <span>Tax</span><span>Rs. {Number(o.tax).toLocaleString()}</span>
