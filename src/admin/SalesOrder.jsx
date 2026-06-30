@@ -51,20 +51,20 @@ const s = {
 
 // ── Placeholder bank details (admin can fill in real ones later) ──────────────
 const BANK = {
-  name:    "HDFC Bank Ltd.",
-  branch:  "Karol Bagh, New Delhi",
-  acNo:    "XXXXXXXXXXXX",
-  ifsc:    "HDFC0000000",
-  pan:     "AAACE1234F",
+  holder:  "Embassy Electricals (India) Pvt Ltd",
+  name:    "Union Bank of India",
+  branch:  "Ashok Vihar",
+  acNo:    "255215130000001",
+  ifsc:    "UBIN0825522",
 };
 
 const COMPANY = {
-  name:    "Embassy Electricals (India) Pvt. Ltd.",
-  address: "Karol Bagh, New Delhi - 110005",
-  gstin:   "07AAACE1234F1Z5",
-  state:   "Delhi - 07",
-  phone:   "+91-11-XXXXXXXX",
-  email:   "info@eltopbyembassy.com",
+  name:    "EMBASSY ELECTRICALS (INDIA) Pvt. Ltd.",
+  address: "Kh. No. 154/632, Phirni Road, Pooth Khurd, Bawana Ind. Area, Delhi - 110039",
+  gstin:   "07AAGCE1173M1ZH",
+  state:   "Delhi, Code: 07",
+  email:   "embassyelectricindia@gmail.com",
+  website: "www.EltopByEmbassy.com",
 };
 
 export default function SalesOrder() {
@@ -120,9 +120,9 @@ export default function SalesOrder() {
             <td style={{ ...s.td, width: "50%", borderRight: "1px solid #000" }}>
               <div style={{ fontSize: 15, fontWeight: "bold" }}>{COMPANY.name}</div>
               <div style={s.small}>{COMPANY.address}</div>
-              <div style={s.small}>GSTIN: {COMPANY.gstin}</div>
+              <div style={s.small}>GSTIN/UIN: {COMPANY.gstin}</div>
               <div style={s.small}>State: {COMPANY.state}</div>
-              <div style={s.small}>Ph: {COMPANY.phone} | {COMPANY.email}</div>
+              <div style={s.small}>{COMPANY.email} | {COMPANY.website}</div>
             </td>
             <td style={{ ...s.td, textAlign: "center", borderLeft: "none" }}>
               <div style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 2 }}>SALES ORDER</div>
@@ -280,11 +280,11 @@ export default function SalesOrder() {
               <table style={{ marginTop: 6, fontSize: 11, borderCollapse: "collapse" }}>
                 <tbody>
                   {[
+                    ["A/c Holder",  BANK.holder],
                     ["Bank Name",   BANK.name],
                     ["Branch",      BANK.branch],
                     ["A/c No.",     BANK.acNo],
                     ["IFS Code",    BANK.ifsc],
-                    ["PAN No.",     BANK.pan],
                   ].map(([l, v]) => (
                     <tr key={l}>
                       <td style={{ paddingRight: 10, color: "#555" }}>{l}:</td>
