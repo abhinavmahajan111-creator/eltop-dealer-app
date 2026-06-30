@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const EMPTY_FORM = {
-  id: null, name: "", mrp: "", dlp: "", price: "", unit: "", stock: "",
-  hsn_code: "", video_url: "", image_urls: [],
+  id: null, name: "", mrp: "", dlp: "", price: "", unit: "pc", stock: "",
+  hsn_code: "", category: "", video_url: "", image_urls: [],
 };
 
 export default function AdminProducts() {
@@ -21,8 +21,9 @@ export default function AdminProducts() {
     setLoading(true);
     supabase
       .from("products")
-      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, image_urls, video_url")
-      .order("id")
+      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, image_urls, video_url")
+      .order("category", { nullsFirst: true })
+      .order("name")
       .then(({ data, error: err }) => {
         if (!err && data) setProducts(data);
         setLoading(false);
@@ -40,9 +41,10 @@ export default function AdminProducts() {
       mrp: p.mrp ?? "",
       dlp: p.dlp ?? "",
       price: p.price ?? "",
-      unit: p.unit || "",
+      unit: p.unit || "pc",
       stock: p.stock,
       hsn_code: p.hsn_code || "",
+      category: p.category || "",
       video_url: p.video_url || "",
       image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
     });
@@ -56,13 +58,14 @@ export default function AdminProducts() {
     setSaving(true);
     setError("");
     const payload = {
-      name: form.name,
-      mrp:      form.mrp  !== "" ? Number(form.mrp)  : null,
-      dlp:      form.dlp  !== "" ? Number(form.dlp)  : null,
-      price:    form.price !== "" ? Number(form.price) : null,
-      unit:     form.unit,
-      stock:    Number(form.stock) || 0,
-      hsn_code: form.hsn_code || null,
+      name:      form.name,
+      mrp:       form.mrp      !== "" ? Number(form.mrp)   : null,
+      dlp:       form.dlp      !== "" ? Number(form.dlp)   : null,
+      price:     form.price    !== "" ? Number(form.price)  : null,
+      unit:      form.unit     || "pc",
+      stock:     Number(form.stock) || 0,
+      hsn_code:  form.hsn_code || null,
+      category:  form.category || null,
       video_url: form.video_url || null,
       image_urls: form.image_urls,
     };
@@ -71,7 +74,6 @@ export default function AdminProducts() {
       : await supabase.from("products").insert(payload).select().single();
     setSaving(false);
     if (err) { setError(err.message); return; }
-    // If new product, switch to edit mode so images can be uploaded
     if (!form.id && saved) {
       setForm((prev) => ({ ...prev, id: saved.id }));
       setFormOpen(false);
@@ -111,7 +113,6 @@ export default function AdminProducts() {
   const handleImageDelete = async (index) => {
     const url = form.image_urls[index];
     const newUrls = form.image_urls.filter((_, i) => i !== index);
-    // Best-effort remove from storage
     const pathMatch = url.match(/product-images\/(.+)$/);
     if (pathMatch) {
       await supabase.storage.from("product-images").remove([pathMatch[1]]);
@@ -139,6 +140,17 @@ export default function AdminProducts() {
     loadProducts();
   };
 
+  // Group products by category for section headings
+  const grouped = useMemo(() => {
+    const map = new Map();
+    products.forEach((p) => {
+      const cat = p.category?.trim() || "Uncategorised";
+      if (!map.has(cat)) map.set(cat, []);
+      map.get(cat).push(p);
+    });
+    return Array.from(map.entries());
+  }, [products]);
+
   return (
     <div className="admin-page">
       <h1 className="admin-title">Products</h1>
@@ -156,6 +168,10 @@ export default function AdminProducts() {
           <input
             type="text" placeholder="Product name" value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+          <input
+            type="text" placeholder="Category (e.g. Geysers, Fans)" value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value })}
           />
           <input
             type="number" placeholder="MRP (₹)" value={form.mrp}
@@ -181,6 +197,16 @@ export default function AdminProducts() {
             <button className="btn small" type="submit" disabled={saving}>
               {saving ? "Saving…" : form.id ? "Update Product" : "Add Product"}
             </button>
+            {form.id && (
+              <button
+                className="btn small outline danger"
+                type="button"
+                onClick={() => handleDelete(form.id)}
+                style={{ color: "#c0392b", borderColor: "#c0392b" }}
+              >
+                Delete Product
+              </button>
+            )}
             <button className="btn small outline" type="button" onClick={resetForm}>✕ Cancel</button>
           </div>
           {error && <div className="admin-error">{error}</div>}
@@ -192,7 +218,6 @@ export default function AdminProducts() {
         <div className="admin-media-section">
           <div className="admin-media-title">Media — {form.name}</div>
 
-          {/* Video URL */}
           <div className="admin-media-row">
             <label className="admin-media-label">&#127910; YouTube / Vimeo URL</label>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -215,7 +240,6 @@ export default function AdminProducts() {
             </div>
           </div>
 
-          {/* Image thumbnails */}
           <div className="admin-media-label" style={{ marginTop: 16 }}>
             &#128247; Images ({form.image_urls.length}/9)
           </div>
@@ -225,47 +249,23 @@ export default function AdminProducts() {
                 {i === 0 && <span className="admin-img-badge">Main</span>}
                 <img src={url} alt={`img-${i}`} />
                 <div className="admin-img-controls">
-                  <button
-                    className="admin-img-btn"
-                    title="Move left"
-                    disabled={i === 0}
-                    onClick={() => moveImage(i, -1)}
-                  >&#8592;</button>
-                  <button
-                    className="admin-img-btn danger"
-                    title="Delete"
-                    onClick={() => handleImageDelete(i)}
-                  >&#10005;</button>
-                  <button
-                    className="admin-img-btn"
-                    title="Move right"
-                    disabled={i === form.image_urls.length - 1}
-                    onClick={() => moveImage(i, 1)}
-                  >&#8594;</button>
+                  <button className="admin-img-btn" title="Move left" disabled={i === 0} onClick={() => moveImage(i, -1)}>&#8592;</button>
+                  <button className="admin-img-btn danger" title="Delete" onClick={() => handleImageDelete(i)}>&#10005;</button>
+                  <button className="admin-img-btn" title="Move right" disabled={i === form.image_urls.length - 1} onClick={() => moveImage(i, 1)}>&#8594;</button>
                 </div>
               </div>
             ))}
             {form.image_urls.length < 9 && (
-              <div
-                className="admin-img-add"
-                onClick={() => fileInputRef.current?.click()}
-              >
+              <div className="admin-img-add" onClick={() => fileInputRef.current?.click()}>
                 {uploading ? "Uploading…" : <><span style={{ fontSize: 28 }}>+</span><br />Add image</>}
               </div>
             )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: "none" }}
-            onChange={handleImageUpload}
-          />
+          <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleImageUpload} />
         </div>
       )}
 
-      {/* ── Product table ── */}
+      {/* ── Product table grouped by category ── */}
       {loading ? (
         <div className="admin-loading">Loading…</div>
       ) : products.length === 0 ? (
@@ -285,31 +285,41 @@ export default function AdminProducts() {
               </tr>
             </thead>
             <tbody>
-              {products.map((p) => (
-                <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : {}}>
-                  <td style={{ position: "relative" }}>
-                    {p.image_urls?.[0] ? (
-                      <span className="admin-img-hover-wrap">
-                        <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
-                        <span className="admin-img-hover-preview">
-                          <img src={p.image_urls[0]} alt="" />
+              {grouped.map(([cat, rows]) => [
+                <tr key={`cat-${cat}`}>
+                  <td colSpan={7} style={{
+                    background: "var(--red-dark)", color: "#fff",
+                    fontWeight: 700, fontSize: 12, padding: "5px 10px",
+                    letterSpacing: "0.5px", textTransform: "uppercase",
+                  }}>
+                    {cat}
+                  </td>
+                </tr>,
+                ...rows.map((p) => (
+                  <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : {}}>
+                    <td>
+                      {p.image_urls?.[0] ? (
+                        <span className="admin-img-hover-wrap">
+                          <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                          <span className="admin-img-hover-preview">
+                            <img src={p.image_urls[0]} alt="" />
+                          </span>
                         </span>
-                      </span>
-                    ) : (
-                      <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
-                    )}
-                  </td>
-                  <td>{p.name}</td>
-                  <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
-                  <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
-                  <td>{p.unit || "—"}</td>
-                  <td>{p.stock}</td>
-                  <td className="admin-row-actions">
-                    <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
-                    <button className="admin-link danger" onClick={() => handleDelete(p.id)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
+                      ) : (
+                        <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
+                      )}
+                    </td>
+                    <td>{p.name}</td>
+                    <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
+                    <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
+                    <td>{p.unit || "pc"}</td>
+                    <td>{p.stock}</td>
+                    <td className="admin-row-actions">
+                      <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
+                    </td>
+                  </tr>
+                )),
+              ])}
             </tbody>
           </table>
         </div>
