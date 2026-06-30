@@ -437,6 +437,15 @@
   .admin-media-title{font-size:15px;font-weight:700;margin-bottom:14px;color:var(--text);}
   .admin-media-row{margin-bottom:10px;}
   .admin-media-label{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px;display:block;}
+  .admin-img-hover-wrap{position:relative;display:inline-block;cursor:zoom-in;}
+  .admin-img-hover-preview{
+    display:none;position:fixed;z-index:9999;
+    background:#fff;border:1px solid #ccc;border-radius:8px;
+    box-shadow:0 8px 32px rgba(0,0,0,.2);padding:4px;
+    pointer-events:none;top:50%;left:50%;transform:translate(-50%,-50%);
+  }
+  .admin-img-hover-preview img{width:220px;height:220px;object-fit:contain;display:block;border-radius:6px;}
+  .admin-img-hover-wrap:hover .admin-img-hover-preview{display:block;}
   .admin-img-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;}
   .admin-img-thumb{
     position:relative;width:100px;height:100px;border-radius:10px;overflow:hidden;

@@ -277,7 +277,8 @@ export default function AdminProducts() {
               <tr>
                 <th>Img</th>
                 <th>Name</th>
-                <th>Price</th>
+                <th>MRP</th>
+                <th>DLP</th>
                 <th>Unit</th>
                 <th>Stock</th>
                 <th></th>
@@ -286,13 +287,21 @@ export default function AdminProducts() {
             <tbody>
               {products.map((p) => (
                 <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : {}}>
-                  <td>
-                    {p.image_urls?.[0]
-                      ? <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6 }} />
-                      : <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>}
+                  <td style={{ position: "relative" }}>
+                    {p.image_urls?.[0] ? (
+                      <span className="admin-img-hover-wrap">
+                        <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                        <span className="admin-img-hover-preview">
+                          <img src={p.image_urls[0]} alt="" />
+                        </span>
+                      </span>
+                    ) : (
+                      <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
+                    )}
                   </td>
                   <td>{p.name}</td>
-                  <td>Rs. {Number(p.price).toLocaleString()}</td>
+                  <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
+                  <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
                   <td>{p.unit || "—"}</td>
                   <td>{p.stock}</td>
                   <td className="admin-row-actions">
