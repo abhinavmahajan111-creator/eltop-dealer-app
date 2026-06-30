@@ -3,14 +3,21 @@ import { useApp } from "../context/AppContext";
 
 export default function Cart() {
   const navigate = useNavigate();
-  const { cart, changeCartQty, removeFromCart, placeOrder } = useApp();
+  const { cart, changeCartQty, removeFromCart, placeOrder, dealer } = useApp();
 
-  const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const tax = Math.round(subtotal * 0.18);
-  const total = subtotal + tax;
+  const d1 = Number(dealer?.discount1 || 0);
+  const d2 = Number(dealer?.discount2 || 0);
+
+  const netRate = (item) => Number(item.dlp ?? item.price) * (1 - d1 / 100) * (1 - d2 / 100);
+  const lineTotal = (item) => netRate(item) * item.qty;
+
+  const grossTotal = cart.reduce((s, c) => s + lineTotal(c), 0);
+  const subtotal   = cart.reduce((s, c) => s + (netRate(c) / 1.18) * c.qty, 0);
+  const tax        = subtotal * 0.18;
+  const total      = Math.round(grossTotal);
 
   async function handlePlaceOrder() {
-    await placeOrder({ items: cart, subtotal, tax, total });
+    await placeOrder({ items: cart });
     navigate("/confirm");
   }
 
@@ -32,14 +39,16 @@ export default function Cart() {
           </div>
         ) : (
           <>
-            {cart.map((c, i) => (
+            {cart.map((c) => (
               <div className="cart-item" key={c.id}>
                 <div className="cart-img">
-                  <img src={c.img} alt={c.name} />
+                  <img src={c.image_urls?.[0] || c.img} alt={c.name} />
                 </div>
                 <div className="cart-info">
                   <div className="cart-name">{c.name}</div>
-                  <div className="cart-price">Rs. {c.price} x {c.qty}</div>
+                  <div className="cart-price">
+                    Rs. {netRate(c).toFixed(2)} × {c.qty}
+                  </div>
                   <div className="cart-qty">
                     <button onClick={() => changeCartQty(c.id, -1)}>-</button>
                     <span>{c.qty}</span>
@@ -51,15 +60,19 @@ export default function Cart() {
             ))}
             <div className="summary-box">
               <div className="summary-row">
-                <span>Subtotal</span>
-                <span>Rs. {subtotal.toLocaleString()}</span>
+                <span>Basic Amount</span>
+                <span>Rs. {subtotal.toFixed(2)}</span>
               </div>
               <div className="summary-row">
-                <span>GST (18%)</span>
-                <span>Rs. {tax.toLocaleString()}</span>
+                <span>CGST (9%)</span>
+                <span>Rs. {(tax / 2).toFixed(2)}</span>
+              </div>
+              <div className="summary-row">
+                <span>SGST (9%)</span>
+                <span>Rs. {(tax / 2).toFixed(2)}</span>
               </div>
               <div className="summary-row total">
-                <span>Total</span>
+                <span>Total (Rounded)</span>
                 <span>Rs. {total.toLocaleString()}</span>
               </div>
             </div>

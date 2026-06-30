@@ -100,10 +100,18 @@ export default function SalesOrder() {
   if (loading) return <div style={{ padding: 40, textAlign: "center" }}>Loading Sales Order…</div>;
   if (error)   return <div style={{ padding: 40, color: "red" }}>{error}</div>;
 
-  const totalQty = items.reduce((s, i) => s + i.qty, 0);
-  const dateStr  = new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const voucherNo = order.id.toUpperCase();
+  const totalQty   = items.reduce((s, i) => s + i.qty, 0);
+  const dateStr    = new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const voucherNo  = order.id.toUpperCase();
   const dealerName = profile?.name && profile.name !== "New Dealer" ? profile.name : profile?.email || "—";
+
+  // Per-line GST calculations (Net Rate is GST-inclusive at 18%)
+  const grossTotal  = items.reduce((s, it) => s + Number(it.net_rate ?? it.price) * it.qty, 0);
+  const totalBasic  = items.reduce((s, it) => s + (Number(it.net_rate ?? it.price) / 1.18) * it.qty, 0);
+  const totalCgst   = totalBasic * 0.09;
+  const totalSgst   = totalBasic * 0.09;
+  const grandTotal  = Math.round(grossTotal);
+  const roundingOff = grandTotal - grossTotal;
 
   return (
     <div style={s.page}>
@@ -175,97 +183,135 @@ export default function SalesOrder() {
       <table style={{ ...s.box, marginTop: -1 }}>
         <thead>
           <tr>
-            {["Sl No", "Description of Goods", "Quantity", "Rate", "Per", "Disc %", "Amount"].map((h) => (
+            {["Sl No", "Description of Goods", "MRP", "DLP", "Disc %", "Net Rate", "Qty", "Amount"].map((h) => (
               <th key={h} style={s.th}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {items.map((item, i) => {
-            const thumb = item.products?.image_urls?.[0];
-            const lineTotal = Number(item.price) * item.qty;
+            const thumb    = item.products?.image_urls?.[0];
+            const netRate  = Number(item.net_rate ?? item.price);
+            const dlp      = Number(item.dlp ?? item.price);
+            const mrp      = item.mrp != null ? Number(item.mrp) : null;
+            const d1       = item.discount1 != null ? Number(item.discount1) : null;
+            const d2       = item.discount2 != null ? Number(item.discount2) : null;
+            const discStr  = d1 != null
+              ? (d2 ? `${d1}% + ${d2}%` : `${d1}%`)
+              : "—";
+            const lineAmt  = netRate * item.qty;
             return (
               <tr key={item.id}>
                 <td style={{ ...s.td, ...s.center }}>{i + 1}</td>
                 <td style={s.td}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     {thumb && (
-                      <img
-                        src={thumb}
-                        alt=""
-                        style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0, border: "1px solid #eee" }}
-                      />
+                      <img src={thumb} alt="" style={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0, border: "1px solid #eee" }} />
                     )}
                     <div>
                       <div style={s.bold}>{item.name}</div>
+                      {item.hsn_code && <div style={s.small}>HSN: {item.hsn_code}</div>}
                       {item.products?.sku && <div style={s.small}>SKU: {item.products.sku}</div>}
                     </div>
                   </div>
                 </td>
+                <td style={{ ...s.td, ...s.right }}>{mrp != null ? `₹${mrp.toLocaleString("en-IN")}` : "—"}</td>
+                <td style={{ ...s.td, ...s.right }}>₹{dlp.toLocaleString("en-IN")}</td>
+                <td style={{ ...s.td, ...s.center }}>{discStr}</td>
+                <td style={{ ...s.td, ...s.right }}>₹{netRate.toFixed(2)}</td>
                 <td style={{ ...s.td, ...s.center }}>{item.qty}</td>
-                <td style={{ ...s.td, ...s.right }}>₹{Number(item.price).toLocaleString("en-IN")}</td>
-                <td style={{ ...s.td, ...s.center }}>{item.unit || "Pc"}</td>
-                <td style={{ ...s.td, ...s.center }}>—</td>
-                <td style={{ ...s.td, ...s.right }}>₹{lineTotal.toLocaleString("en-IN")}</td>
+                <td style={{ ...s.td, ...s.right }}>₹{lineAmt.toFixed(2)}</td>
               </tr>
             );
           })}
 
-          {/* Padding rows so table looks full */}
-          {items.length < 8 &&
-            Array.from({ length: 8 - items.length }).map((_, i) => (
+          {/* Padding rows */}
+          {items.length < 7 &&
+            Array.from({ length: 7 - items.length }).map((_, i) => (
               <tr key={`pad-${i}`}>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
-                <td style={s.td}>&nbsp;</td>
+                {Array.from({ length: 8 }).map((__, j) => <td key={j} style={s.td}>&nbsp;</td>)}
               </tr>
             ))}
         </tbody>
 
-        {/* Totals row */}
         <tfoot>
           <tr>
             <td style={{ ...s.td, ...s.bold }} colSpan={2}>Total</td>
+            <td style={s.td}></td><td style={s.td}></td><td style={s.td}></td><td style={s.td}></td>
             <td style={{ ...s.td, ...s.center, ...s.bold }}>{totalQty}</td>
-            <td style={s.td}></td>
-            <td style={s.td}></td>
-            <td style={s.td}></td>
             <td style={{ ...s.td, ...s.right, ...s.bold }}>
-              ₹{Number(order.total).toLocaleString("en-IN")}
+              ₹{grossTotal.toFixed(2)}
             </td>
           </tr>
         </tfoot>
       </table>
 
-      {/* ── Tax / Amount breakdown ── */}
+      {/* ── Amount in words ── */}
       <table style={{ ...s.box, marginTop: -1 }}>
         <tbody>
           <tr>
-            <td style={{ ...s.td, width: "60%" }}>
-              <span style={s.bold}>Amount Chargeable (in words):</span><br />
-              <span style={{ fontStyle: "italic" }}>{amountInWords(order.total)}</span>
-            </td>
             <td style={s.td}>
-              <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-                <tbody>
-                  <tr>
-                    <td>Subtotal</td>
-                    <td style={s.right}>₹{Number(order.subtotal).toLocaleString("en-IN")}</td>
-                  </tr>
-                  <tr>
-                    <td>Tax (GST)</td>
-                    <td style={s.right}>₹{Number(order.tax).toLocaleString("en-IN")}</td>
-                  </tr>
-                  <tr style={{ borderTop: "1px solid #000" }}>
-                    <td style={s.bold}>Grand Total</td>
-                    <td style={{ ...s.right, ...s.bold }}>₹{Number(order.total).toLocaleString("en-IN")}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <span style={s.bold}>Amount Chargeable (in words): </span>
+              <span style={{ fontStyle: "italic" }}>{amountInWords(grandTotal)}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── GST Breakup ── */}
+      <table style={{ ...s.box, marginTop: -1 }}>
+        <thead>
+          <tr>
+            <th style={s.th}>HSN/SAC</th>
+            <th style={s.th}>Taxable Value</th>
+            <th style={s.th}>CGST Rate</th>
+            <th style={s.th}>CGST Amt</th>
+            <th style={s.th}>SGST Rate</th>
+            <th style={s.th}>SGST Amt</th>
+            <th style={s.th}>Total Tax</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style={{ ...s.td, ...s.center }}>—</td>
+            <td style={{ ...s.td, ...s.right }}>₹{totalBasic.toFixed(2)}</td>
+            <td style={{ ...s.td, ...s.center }}>9%</td>
+            <td style={{ ...s.td, ...s.right }}>₹{totalCgst.toFixed(2)}</td>
+            <td style={{ ...s.td, ...s.center }}>9%</td>
+            <td style={{ ...s.td, ...s.right }}>₹{totalSgst.toFixed(2)}</td>
+            <td style={{ ...s.td, ...s.right }}>₹{(totalCgst + totalSgst).toFixed(2)}</td>
+          </tr>
+          <tr style={{ background: "#f5f5f5" }}>
+            <td style={{ ...s.td, ...s.bold }}>Total</td>
+            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalBasic.toFixed(2)}</td>
+            <td style={s.td}></td>
+            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalCgst.toFixed(2)}</td>
+            <td style={s.td}></td>
+            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalSgst.toFixed(2)}</td>
+            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{(totalCgst + totalSgst).toFixed(2)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── Grand Total with rounding ── */}
+      <table style={{ ...s.box, marginTop: -1 }}>
+        <tbody>
+          <tr>
+            <td style={s.td} rowSpan={3}>
+              <span style={s.bold}>Amount Chargeable (in words):</span><br />
+              <span style={{ fontStyle: "italic" }}>{amountInWords(grandTotal)}</span>
+            </td>
+            <td style={{ ...s.td, width: 160 }}>Sum Total</td>
+            <td style={{ ...s.td, ...s.right, width: 120 }}>₹{grossTotal.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style={s.td}>Rounding Off</td>
+            <td style={{ ...s.td, ...s.right }}>{roundingOff >= 0 ? "+" : ""}₹{roundingOff.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td style={{ ...s.td, ...s.bold, background: "#f0f0f0" }}>Grand Total</td>
+            <td style={{ ...s.td, ...s.right, ...s.bold, fontSize: 14, background: "#f0f0f0" }}>
+              ₹{grandTotal.toLocaleString("en-IN")}
             </td>
           </tr>
         </tbody>

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const EMPTY_FORM = {
-  id: null, name: "", price: "", unit: "", stock: "", video_url: "", image_urls: [],
+  id: null, name: "", mrp: "", dlp: "", price: "", unit: "", stock: "",
+  hsn_code: "", video_url: "", image_urls: [],
 };
 
 export default function AdminProducts() {
@@ -19,7 +20,7 @@ export default function AdminProducts() {
     setLoading(true);
     supabase
       .from("products")
-      .select("id, name, price, unit, stock, image_urls, video_url")
+      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, image_urls, video_url")
       .order("id")
       .then(({ data, error: err }) => {
         if (!err && data) setProducts(data);
@@ -35,9 +36,12 @@ export default function AdminProducts() {
     setForm({
       id: p.id,
       name: p.name,
-      price: p.price,
+      mrp: p.mrp ?? "",
+      dlp: p.dlp ?? "",
+      price: p.price ?? "",
       unit: p.unit || "",
       stock: p.stock,
+      hsn_code: p.hsn_code || "",
       video_url: p.video_url || "",
       image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
     });
@@ -52,9 +56,12 @@ export default function AdminProducts() {
     setError("");
     const payload = {
       name: form.name,
-      price: Number(form.price),
-      unit: form.unit,
-      stock: Number(form.stock) || 0,
+      mrp:      form.mrp  !== "" ? Number(form.mrp)  : null,
+      dlp:      form.dlp  !== "" ? Number(form.dlp)  : null,
+      price:    form.price !== "" ? Number(form.price) : null,
+      unit:     form.unit,
+      stock:    Number(form.stock) || 0,
+      hsn_code: form.hsn_code || null,
       video_url: form.video_url || null,
       image_urls: form.image_urls,
     };
@@ -141,8 +148,16 @@ export default function AdminProducts() {
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
         <input
-          type="number" placeholder="Price" value={form.price}
-          onChange={(e) => setForm({ ...form, price: e.target.value })}
+          type="number" placeholder="MRP (₹)" value={form.mrp}
+          onChange={(e) => setForm({ ...form, mrp: e.target.value })}
+        />
+        <input
+          type="number" placeholder="DLP — Dealer List Price (₹)" value={form.dlp}
+          onChange={(e) => setForm({ ...form, dlp: e.target.value })}
+        />
+        <input
+          type="text" placeholder="HSN Code" value={form.hsn_code}
+          onChange={(e) => setForm({ ...form, hsn_code: e.target.value })}
         />
         <input
           type="text" placeholder="Unit (e.g. pc, box)" value={form.unit}

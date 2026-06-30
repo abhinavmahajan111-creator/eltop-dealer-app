@@ -19,6 +19,8 @@ const DEMO_PROFILE = {
   address: "Karol Bagh, New Delhi - 110005",
   credit_limit: 500000,
   outstanding: 125000,
+  discount1: 0,
+  discount2: 0,
 };
 
 export function AppProvider({ children }) {
@@ -127,6 +129,8 @@ export function AppProvider({ children }) {
             img: p.image_url,
             image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
             video_url: p.video_url || null,
+            dlp: p.dlp ?? p.price,
+            hsn_code: p.hsn_code || null,
             wh: {
               delhi: p.warehouse_delhi,
               ludhiana: p.warehouse_ludhiana,
@@ -187,14 +191,28 @@ export function AppProvider({ children }) {
   const clearCart = useCallback(() => setCart([]), []);
 
   // ---------- ORDERS ----------
-  const placeOrder = useCallback(async ({ items, subtotal, tax, total, address }) => {
+  const placeOrder = useCallback(async ({ items, address }) => {
     if (isSupabaseConfigured && session?.user) {
+      const d1 = Number(profile.discount1 || 0);
+      const d2 = Number(profile.discount2 || 0);
+
+      const enriched = items.map((it) => {
+        const dlp      = Number(it.dlp ?? it.price);
+        const netRate  = dlp * (1 - d1 / 100) * (1 - d2 / 100);
+        return { ...it, dlp, netRate };
+      });
+
+      const grossTotal = enriched.reduce((s, it) => s + it.netRate * it.qty, 0);
+      const total      = Math.round(grossTotal);
+      const subtotal   = enriched.reduce((s, it) => s + (it.netRate / 1.18) * it.qty, 0);
+      const tax        = subtotal * 0.18;
+
       const { data: order, error } = await supabase
         .from("orders")
         .insert({
           dealer_id: session.user.id,
-          subtotal,
-          tax,
+          subtotal: Math.round(subtotal * 100) / 100,
+          tax:      Math.round(tax * 100) / 100,
           total,
           delivery_address: address || profile.address || "",
         })
@@ -203,12 +221,18 @@ export function AppProvider({ children }) {
 
       if (!error && order) {
         await supabase.from("order_items").insert(
-          items.map((it) => ({
-            order_id: order.id,
+          enriched.map((it) => ({
+            order_id:  order.id,
             product_id: it.id,
-            name: it.name,
-            price: it.price,
-            qty: it.qty,
+            name:       it.name,
+            price:      Math.round(it.netRate * 100) / 100,
+            qty:        it.qty,
+            mrp:        it.mrp ?? null,
+            dlp:        it.dlp,
+            net_rate:   Math.round(it.netRate * 100) / 100,
+            discount1:  d1,
+            discount2:  d2,
+            hsn_code:   it.hsn_code ?? null,
           }))
         );
       }
