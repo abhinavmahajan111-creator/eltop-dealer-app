@@ -366,12 +366,15 @@ export default function SalesOrder() {
             </td>
             <td style={{ ...s.td, textAlign: "center", verticalAlign: "bottom", paddingTop: 20 }}>
               <div>for <strong>{COMPANY.name}</strong></div>
-              <div style={{ position: "relative", height: 100, margin: "8px auto 0", width: 120 }}>
-                <img
-                  src="/assets/company-stamp.png"
-                  alt="Company Stamp"
-                  style={{ width: 110, height: 110, objectFit: "contain", position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", mixBlendMode: "multiply", opacity: 1, filter: "contrast(3) brightness(0.25) saturate(2)" }}
-                />
+              <div style={{ position: "relative", height: 110, margin: "8px auto 0", width: 120 }}>
+                {[0, 1, 2].map((i) => (
+                  <img
+                    key={i}
+                    src="/assets/company-stamp.png"
+                    alt=""
+                    style={{ width: 110, height: 110, objectFit: "contain", position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", mixBlendMode: "multiply", opacity: 1 }}
+                  />
+                ))}
               </div>
               <div style={{ borderTop: "1px solid #000", paddingTop: 4, marginTop: 4 }}>
                 Authorised Signatory
