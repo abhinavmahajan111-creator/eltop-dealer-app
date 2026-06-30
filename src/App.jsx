@@ -16,6 +16,7 @@ import AdminDashboard from "./admin/AdminDashboard";
 import AdminOrders from "./admin/AdminOrders";
 import AdminProducts from "./admin/AdminProducts";
 import AdminDealers from "./admin/AdminDealers";
+import SalesOrder from "./admin/SalesOrder";
 
 export default function App() {
   return (
@@ -40,6 +41,8 @@ export default function App() {
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/dealers" element={<AdminDealers />} />
         </Route>
+        {/* Full-page print view — no sidebar */}
+        <Route path="/admin/orders/:id/print" element={<SalesOrder />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -101,7 +101,7 @@ export default function AdminOrders() {
                     </td>
                     <td>Rs. {Number(o.total).toLocaleString()}</td>
                     <td>{new Date(o.created_at).toLocaleDateString()}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap" }}>
                       <select
                         className="admin-select"
                         value={o.status}
@@ -114,6 +114,13 @@ export default function AdminOrders() {
                           </option>
                         ))}
                       </select>
+                      <button
+                        className="admin-link"
+                        style={{ marginLeft: 10 }}
+                        onClick={() => window.open(`/admin/orders/${o.id}/print`, "_blank")}
+                      >
+                        🖨
+                      </button>
                     </td>
                   </tr>,
 
@@ -165,6 +172,16 @@ export default function AdminOrders() {
                                 </tbody>
                               </table>
                             )}
+                          </div>
+
+                          {/* Print button */}
+                          <div style={{ width: "100%", paddingTop: 4 }}>
+                            <button
+                              className="btn small"
+                              onClick={() => window.open(`/admin/orders/${o.id}/print`, "_blank")}
+                            >
+                              🖨 Print Sales Order
+                            </button>
                           </div>
 
                           {/* Order totals */}
