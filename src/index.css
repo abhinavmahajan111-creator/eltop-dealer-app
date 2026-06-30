@@ -461,3 +461,29 @@
     cursor:pointer;font-size:11px;color:var(--muted);text-align:center;line-height:1.4;
   }
   .admin-img-add:hover{border-color:var(--red);color:var(--red);}
+
+  /* Order expandable rows */
+  .admin-order-row:hover{background:#fdf8fd;}
+  .admin-order-row.expanded{background:#f8f4f8;}
+  .admin-order-detail-row td{border-top:none !important;}
+  .admin-order-detail{
+    background:#f8f4f8;border-top:2px solid var(--red-light);
+    padding:16px 20px;display:flex;flex-wrap:wrap;gap:20px;
+  }
+  .admin-order-detail-section{flex:1;min-width:220px;}
+  .admin-order-detail-heading{
+    font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--red);margin-bottom:10px;
+  }
+  .admin-order-detail-grid{
+    display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;font-size:13px;
+  }
+  .od-label{color:var(--muted);font-size:12px;}
+  .od-items-table{background:transparent;}
+  .od-items-table th{background:#ede6f0;}
+  .od-totals{
+    display:grid;grid-template-columns:max-content 1fr;gap:4px 20px;
+    font-size:13px;align-content:start;
+  }
+  .od-total-label{font-weight:700;}
+  .od-total-value{font-weight:700;color:var(--red);}
