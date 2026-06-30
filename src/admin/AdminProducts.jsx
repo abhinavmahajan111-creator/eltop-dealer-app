@@ -13,6 +13,7 @@ export default function AdminProducts() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
   const fileInputRef = useRef(null);
 
   const loadProducts = () => {
@@ -30,7 +31,7 @@ export default function AdminProducts() {
 
   useEffect(() => { loadProducts(); }, []);
 
-  const resetForm = () => { setForm(EMPTY_FORM); setError(""); };
+  const resetForm = () => { setForm(EMPTY_FORM); setError(""); setFormOpen(false); };
 
   const handleEdit = (p) => {
     setForm({
@@ -73,6 +74,7 @@ export default function AdminProducts() {
     // If new product, switch to edit mode so images can be uploaded
     if (!form.id && saved) {
       setForm((prev) => ({ ...prev, id: saved.id }));
+      setFormOpen(false);
     }
     loadProducts();
   };
@@ -141,42 +143,49 @@ export default function AdminProducts() {
     <div className="admin-page">
       <h1 className="admin-title">Products</h1>
 
-      {/* ── Basic info form ── */}
-      <form className="admin-form" onSubmit={handleSubmit}>
-        <input
-          type="text" placeholder="Product name" value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-        <input
-          type="number" placeholder="MRP (₹)" value={form.mrp}
-          onChange={(e) => setForm({ ...form, mrp: e.target.value })}
-        />
-        <input
-          type="number" placeholder="DLP — Dealer List Price (₹)" value={form.dlp}
-          onChange={(e) => setForm({ ...form, dlp: e.target.value })}
-        />
-        <input
-          type="text" placeholder="HSN Code" value={form.hsn_code}
-          onChange={(e) => setForm({ ...form, hsn_code: e.target.value })}
-        />
-        <input
-          type="text" placeholder="Unit (e.g. pc, box)" value={form.unit}
-          onChange={(e) => setForm({ ...form, unit: e.target.value })}
-        />
-        <input
-          type="number" placeholder="Stock" value={form.stock}
-          onChange={(e) => setForm({ ...form, stock: e.target.value })}
-        />
-        <div className="admin-form-actions">
-          <button className="btn small" type="submit" disabled={saving}>
-            {saving ? "Saving…" : form.id ? "Update Product" : "Add Product"}
-          </button>
-          {form.id && (
-            <button className="btn small outline" type="button" onClick={resetForm}>Cancel</button>
-          )}
-        </div>
-        {error && <div className="admin-error">{error}</div>}
-      </form>
+      {/* ── Add Product toggle ── */}
+      {!form.id && !formOpen && (
+        <button className="btn" style={{ marginBottom: 20, width: "fit-content" }} onClick={() => setFormOpen(true)}>
+          + Add Product
+        </button>
+      )}
+
+      {/* ── Basic info form (new product or editing existing) ── */}
+      {(formOpen || form.id) && (
+        <form className="admin-form" onSubmit={handleSubmit}>
+          <input
+            type="text" placeholder="Product name" value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+          <input
+            type="number" placeholder="MRP (₹)" value={form.mrp}
+            onChange={(e) => setForm({ ...form, mrp: e.target.value })}
+          />
+          <input
+            type="number" placeholder="DLP — Dealer List Price (₹)" value={form.dlp}
+            onChange={(e) => setForm({ ...form, dlp: e.target.value })}
+          />
+          <input
+            type="text" placeholder="HSN Code" value={form.hsn_code}
+            onChange={(e) => setForm({ ...form, hsn_code: e.target.value })}
+          />
+          <input
+            type="text" placeholder="Unit (e.g. pc, box)" value={form.unit}
+            onChange={(e) => setForm({ ...form, unit: e.target.value })}
+          />
+          <input
+            type="number" placeholder="Stock" value={form.stock}
+            onChange={(e) => setForm({ ...form, stock: e.target.value })}
+          />
+          <div className="admin-form-actions">
+            <button className="btn small" type="submit" disabled={saving}>
+              {saving ? "Saving…" : form.id ? "Update Product" : "Add Product"}
+            </button>
+            <button className="btn small outline" type="button" onClick={resetForm}>✕ Cancel</button>
+          </div>
+          {error && <div className="admin-error">{error}</div>}
+        </form>
+      )}
 
       {/* ── Media section (only visible when editing) ── */}
       {form.id && (
