@@ -364,9 +364,16 @@ export default function SalesOrder() {
                 </div>
               </div>
             </td>
-            <td style={{ ...s.td, textAlign: "center", verticalAlign: "bottom", paddingTop: 60 }}>
+            <td style={{ ...s.td, textAlign: "center", verticalAlign: "bottom", paddingTop: 20 }}>
               <div>for <strong>{COMPANY.name}</strong></div>
-              <div style={{ marginTop: 40, borderTop: "1px solid #000", paddingTop: 4 }}>
+              <div style={{ position: "relative", height: 100, margin: "8px auto 0", width: 120 }}>
+                <img
+                  src="/assets/company-stamp.png"
+                  alt="Company Stamp"
+                  style={{ width: 110, height: 110, objectFit: "contain", opacity: 0.85, position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)" }}
+                />
+              </div>
+              <div style={{ borderTop: "1px solid #000", paddingTop: 4, marginTop: 4 }}>
                 Authorised Signatory
               </div>
             </td>
