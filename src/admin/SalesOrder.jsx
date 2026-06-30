@@ -370,7 +370,7 @@ export default function SalesOrder() {
                 <img
                   src="/assets/company-stamp.png"
                   alt="Company Stamp"
-                  style={{ width: 110, height: 110, objectFit: "contain", position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", mixBlendMode: "multiply", opacity: 0.85 }}
+                  style={{ width: 110, height: 110, objectFit: "contain", position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)", mixBlendMode: "multiply", opacity: 1, filter: "contrast(3) brightness(0.25) saturate(2)" }}
                 />
               </div>
               <div style={{ borderTop: "1px solid #000", paddingTop: 4, marginTop: 4 }}>
