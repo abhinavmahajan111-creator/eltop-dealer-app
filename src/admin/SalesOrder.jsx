@@ -81,7 +81,7 @@ export default function SalesOrder() {
 
     Promise.all([
       supabase.from("orders").select("*").eq("id", id).single(),
-      supabase.from("order_items").select("*, products(image_urls, sku)").eq("order_id", id),
+      supabase.from("order_items").select("*, products(image_urls, sku, standard_packing)").eq("order_id", id),
     ]).then(async ([orderRes, itemsRes]) => {
       if (orderRes.error || !orderRes.data) { setError("Order not found."); setLoading(false); return; }
       const ord = orderRes.data;
@@ -193,6 +193,8 @@ export default function SalesOrder() {
         <tbody>
           {items.map((item, i) => {
             const thumb    = item.products?.image_urls?.[0];
+            const stdPack  = item.products?.standard_packing;
+            const boxes    = stdPack && item.qty % stdPack === 0 ? item.qty / stdPack : null;
             const netRate  = Number(item.net_rate ?? item.price);
             const dlp      = Number(item.dlp ?? item.price);
             const mrp      = item.mrp != null ? Number(item.mrp) : null;
@@ -214,6 +216,7 @@ export default function SalesOrder() {
                       <div style={s.bold}>{item.name}</div>
                       {item.hsn_code && <div style={s.small}>HSN: {item.hsn_code}</div>}
                       {item.products?.sku && <div style={s.small}>SKU: {item.products.sku}</div>}
+                      {stdPack && <div style={s.small}>Pack: {stdPack} pcs/box{boxes ? ` · ${boxes} box${boxes > 1 ? "es" : ""}` : ""}</div>}
                     </div>
                   </div>
                 </td>

@@ -3,7 +3,7 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const EMPTY_FORM = {
   id: null, name: "", mrp: "", dlp: "", price: "", unit: "pc", stock: "",
-  hsn_code: "", category: "", video_url: "", image_urls: [],
+  hsn_code: "", category: "", standard_packing: "", video_url: "", image_urls: [],
 };
 
 export default function AdminProducts() {
@@ -21,7 +21,7 @@ export default function AdminProducts() {
     setLoading(true);
     supabase
       .from("products")
-      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, image_urls, video_url")
+      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, standard_packing, image_urls, video_url")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error: err }) => {
@@ -45,6 +45,7 @@ export default function AdminProducts() {
       stock: p.stock,
       hsn_code: p.hsn_code || "",
       category: p.category || "",
+      standard_packing: p.standard_packing ?? "",
       video_url: p.video_url || "",
       image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
     });
@@ -65,8 +66,9 @@ export default function AdminProducts() {
       unit:      form.unit     || "pc",
       stock:     Number(form.stock) || 0,
       hsn_code:  form.hsn_code || null,
-      category:  form.category || null,
-      video_url: form.video_url || null,
+      category:         form.category || null,
+      standard_packing: form.standard_packing !== "" ? Number(form.standard_packing) : null,
+      video_url:        form.video_url || null,
       image_urls: form.image_urls,
     };
     const { data: saved, error: err } = form.id
@@ -190,6 +192,10 @@ export default function AdminProducts() {
             onChange={(e) => setForm({ ...form, unit: e.target.value })}
           />
           <input
+            type="number" placeholder="Standard Packing (pcs/box, e.g. 12)" value={form.standard_packing}
+            onChange={(e) => setForm({ ...form, standard_packing: e.target.value })}
+          />
+          <input
             type="number" placeholder="Stock" value={form.stock}
             onChange={(e) => setForm({ ...form, stock: e.target.value })}
           />
@@ -280,6 +286,7 @@ export default function AdminProducts() {
                 <th>MRP</th>
                 <th>DLP</th>
                 <th>Unit</th>
+                <th>Packing</th>
                 <th>Stock</th>
                 <th></th>
               </tr>
@@ -313,6 +320,7 @@ export default function AdminProducts() {
                     <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
                     <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
                     <td>{p.unit || "pc"}</td>
+                    <td>{p.standard_packing ? `${p.standard_packing} pcs` : "—"}</td>
                     <td>{p.stock}</td>
                     <td className="admin-row-actions">
                       <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
