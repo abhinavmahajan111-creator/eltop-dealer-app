@@ -126,18 +126,12 @@ export default function SalesOrder() {
       <table style={{ ...s.box, marginBottom: 0 }}>
         <tbody>
           <tr>
-            {/* Left: logos stacked */}
+            {/* Left: logo */}
             <td style={{ ...s.td, width: 130, verticalAlign: "middle", textAlign: "center", padding: "8px 10px", borderRight: "1px solid #000" }}>
               <img
-                src="/assets/eltop-logo.png"
+                src="/assets/eltop-logo.png.jpg"
                 alt="Eltop"
-                style={{ maxWidth: 110, maxHeight: 54, objectFit: "contain", display: "block", margin: "0 auto" }}
-              />
-              <div style={{ borderTop: "1px solid #ddd", margin: "6px 0" }} />
-              <img
-                src="/assets/embassy-logo.png"
-                alt="Embassy Electricals"
-                style={{ maxWidth: 110, maxHeight: 48, objectFit: "contain", display: "block", margin: "0 auto" }}
+                style={{ maxWidth: 110, maxHeight: 110, objectFit: "contain", display: "block", margin: "0 auto" }}
               />
             </td>
 
