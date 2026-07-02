@@ -334,6 +334,27 @@ export default function AdminOrders() {
                 ];
               })}
             </tbody>
+            {filtered.length > 0 && (() => {
+              const filteredTotal = filtered.reduce((sum, o) => sum + Number(o.total || 0), 0);
+              const hasFilters = filterOrderId.trim() || filterDealer !== "__all__" || filterStatus !== "__all__" || filterDateFrom || filterDateTo;
+              return (
+                <tfoot>
+                  <tr style={{ background: "#f8f4f8", borderTop: "2px solid var(--red-light)" }}>
+                    <td colSpan={3} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--red-dark)" }}>
+                      {hasFilters ? "Filtered" : "All"} Orders: {filtered.length}
+                      {hasFilters && orders.length !== filtered.length && (
+                        <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginLeft: 8 }}>
+                          (of {orders.length} total)
+                        </span>
+                      )}
+                    </td>
+                    <td colSpan={3} style={{ padding: "10px 14px", fontSize: 14, fontWeight: 800, color: "var(--red-dark)", textAlign: "right", whiteSpace: "nowrap" }}>
+                      Rs. {filteredTotal.toLocaleString("en-IN")}
+                    </td>
+                  </tr>
+                </tfoot>
+              );
+            })()}
           </table>
         </div>
       )}
