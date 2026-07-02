@@ -4,9 +4,10 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 export default function AdminDealers() {
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null);
+  const [selected, setSelected] = useState(null); // dealer object
+  const [editing, setEditing] = useState(false);
   const [edits, setEdits] = useState({});
-  const [savingId, setSavingId] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const loadDealers = () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -23,47 +24,180 @@ export default function AdminDealers() {
 
   useEffect(() => { loadDealers(); }, []);
 
-  const openEdit = (d) => {
-    setExpandedId(d.id);
-    setEdits({
-      name:      d.name || "",
-      address:   d.address || "",
-      gstin:     d.gstin || "",
-      discount1: d.discount1 ?? 0,
-      discount2: d.discount2 ?? 0,
-    });
+  const openDealer = (d) => {
+    setSelected(d);
+    setEditing(false);
+    setEdits({});
   };
 
-  const closeEdit = () => { setExpandedId(null); setEdits({}); };
+  const goBack = () => {
+    setSelected(null);
+    setEditing(false);
+    setEdits({});
+  };
 
-  const setField = (field, value) => setEdits((prev) => ({ ...prev, [field]: value }));
+  const startEdit = () => {
+    setEdits({
+      name:      selected.name || "",
+      address:   selected.address || "",
+      gstin:     selected.gstin || "",
+      discount1: selected.discount1 ?? 0,
+      discount2: selected.discount2 ?? 0,
+    });
+    setEditing(true);
+  };
 
-  const handleSave = async (dealerId) => {
-    setSavingId(dealerId + "_save");
-    await supabase.from("profiles").update({
+  const cancelEdit = () => { setEditing(false); setEdits({}); };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const payload = {
       name:      edits.name,
       address:   edits.address,
       gstin:     edits.gstin,
       discount1: Number(edits.discount1) || 0,
       discount2: Number(edits.discount2) || 0,
-    }).eq("id", dealerId);
-    setDealers((prev) => prev.map((d) =>
-      d.id === dealerId
-        ? { ...d, ...edits, discount1: Number(edits.discount1) || 0, discount2: Number(edits.discount2) || 0 }
-        : d
-    ));
-    setSavingId(null);
-    closeEdit();
+    };
+    await supabase.from("profiles").update(payload).eq("id", selected.id);
+    const updated = { ...selected, ...payload };
+    setSelected(updated);
+    setDealers((prev) => prev.map((d) => d.id === selected.id ? updated : d));
+    setSaving(false);
+    setEditing(false);
+    setEdits({});
   };
 
-  const handleToggleBlock = async (dealer) => {
-    setSavingId(dealer.id + "_block");
-    const next = !dealer.is_blocked;
-    await supabase.from("profiles").update({ is_blocked: next }).eq("id", dealer.id);
-    setDealers((prev) => prev.map((d) => d.id === dealer.id ? { ...d, is_blocked: next } : d));
-    setSavingId(null);
+  const handleToggleBlock = async () => {
+    setSaving(true);
+    const next = !selected.is_blocked;
+    await supabase.from("profiles").update({ is_blocked: next }).eq("id", selected.id);
+    const updated = { ...selected, is_blocked: next };
+    setSelected(updated);
+    setDealers((prev) => prev.map((d) => d.id === selected.id ? updated : d));
+    setSaving(false);
   };
 
+  const f = (field) => editing ? edits[field] : (selected?.[field] ?? "");
+  const setField = (field, val) => setEdits((prev) => ({ ...prev, [field]: val }));
+
+  // ── DETAIL VIEW ────────────────────────────────────────────────────────────
+  if (selected) {
+    const d1 = Number(editing ? edits.discount1 : selected.discount1) || 0;
+    const d2 = Number(editing ? edits.discount2 : selected.discount2) || 0;
+    const multiplier = (1 - d1 / 100) * (1 - d2 / 100);
+    const memberSince = new Date(selected.created_at).toLocaleDateString("en-IN", {
+      day: "2-digit", month: "short", year: "numeric",
+    });
+
+    const Field = ({ label, field, type = "text", textarea = false }) => (
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{label}</div>
+        {editing ? (
+          textarea ? (
+            <textarea
+              value={f(field)}
+              onChange={(e) => setField(field, e.target.value)}
+              rows={2}
+              style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 14, padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, resize: "vertical" }}
+            />
+          ) : (
+            <input
+              type={type}
+              value={f(field)}
+              onChange={(e) => setField(field, e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }}
+            />
+          )
+        ) : (
+          <div style={{ fontSize: 14, fontWeight: 500, color: f(field) ? "#000" : "var(--muted)" }}>
+            {f(field) || "—"}
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="admin-page">
+        {/* Top bar */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <button
+            onClick={goBack}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red-dark)", fontWeight: 600, fontSize: 14, padding: 0 }}
+          >
+            ← Back to Dealers
+          </button>
+          {!editing ? (
+            <button className="btn small" onClick={startEdit}>Edit</button>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn small" disabled={saving} onClick={handleSave}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+              <button className="btn small outline" onClick={cancelEdit}>Cancel</button>
+            </div>
+          )}
+        </div>
+
+        {/* Detail card */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 24, boxShadow: "0 2px 8px rgba(0,0,0,.06)", maxWidth: 600 }}>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid var(--border)" }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: "50%", background: "var(--red-light)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 20, fontWeight: 700, color: "var(--red-dark)",
+            }}>
+              {(selected.name && selected.name !== "New Dealer" ? selected.name : selected.email)?.[0]?.toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>
+                {selected.name && selected.name !== "New Dealer" ? selected.name : selected.email}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Member since {memberSince}</div>
+            </div>
+            <span className={`badge ${selected.is_blocked ? "pending" : "delivered"}`} style={{ marginLeft: "auto" }}>
+              {selected.is_blocked ? "Blocked" : "Active"}
+            </span>
+          </div>
+
+          {/* Fields */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <Field label="Dealer Code" field="dealer_code" />
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>Email</div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>{selected.email}</div>
+              </div>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}><Field label="Name" field="name" /></div>
+            <div style={{ gridColumn: "1 / -1" }}><Field label="Address" field="address" textarea /></div>
+            <div style={{ gridColumn: "1 / -1" }}><Field label="GSTIN" field="gstin" /></div>
+            <Field label="Discount 1 (%)" field="discount1" type="number" />
+            <Field label="Discount 2 (%)" field="discount2" type="number" />
+          </div>
+
+          {/* Net formula */}
+          <div style={{ background: "#f8f4f8", borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 13, color: "var(--red-dark)", fontWeight: 600 }}>
+            Net Rate = DLP × {(multiplier * 100).toFixed(2)}%
+          </div>
+
+          {/* Block/Unblock */}
+          <button
+            className="btn small outline"
+            style={{ color: selected.is_blocked ? "#27ae60" : "#c0392b", borderColor: selected.is_blocked ? "#27ae60" : "#c0392b" }}
+            disabled={saving}
+            onClick={handleToggleBlock}
+          >
+            {saving ? "…" : selected.is_blocked ? "Unblock Dealer" : "Block Dealer"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── MASTER LIST ────────────────────────────────────────────────────────────
   return (
     <div className="admin-page">
       <h1 className="admin-title">Dealers</h1>
@@ -80,120 +214,31 @@ export default function AdminDealers() {
                 <th>Dealer Code</th>
                 <th>Email / Name</th>
                 <th>Status</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
-              {dealers.map((d, idx) => {
-                const isOpen = expandedId === d.id;
-                const d1 = Number(isOpen ? edits.discount1 : d.discount1) || 0;
-                const d2 = Number(isOpen ? edits.discount2 : d.discount2) || 0;
-                const multiplier = (1 - d1 / 100) * (1 - d2 / 100);
-
-                return [
-                  <tr key={d.id} style={isOpen ? { background: "#f8f4f8" } : {}}>
-                    <td style={{ color: "var(--muted)", fontSize: 12, textAlign: "center" }}>{idx + 1}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>{d.dealer_code || "—"}</td>
-                    <td>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>
-                        {d.name && d.name !== "New Dealer" ? d.name : "—"}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.email}</div>
-                    </td>
-                    <td>
-                      <span className={`badge ${d.is_blocked ? "pending" : "delivered"}`}>
-                        {d.is_blocked ? "Blocked" : "Active"}
-                      </span>
-                    </td>
-                    <td className="admin-row-actions">
-                      {isOpen
-                        ? <button className="admin-link" onClick={closeEdit}>✕ Close</button>
-                        : <button className="admin-link" onClick={() => openEdit(d)}>Edit</button>
-                      }
-                    </td>
-                  </tr>,
-
-                  isOpen && (
-                    <tr key={`${d.id}-edit`}>
-                      <td colSpan={5} style={{ padding: 0 }}>
-                        <div style={{
-                          background: "#f8f4f8",
-                          borderTop: "2px solid var(--red-light)",
-                          padding: "16px 20px",
-                          display: "flex", flexDirection: "column", gap: 12,
-                        }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                            <div>
-                              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 3 }}>Name</label>
-                              <input value={edits.name} onChange={(e) => setField("name", e.target.value)}
-                                placeholder="Dealer name"
-                                style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                            </div>
-                            <div>
-                              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 3 }}>GSTIN</label>
-                              <input value={edits.gstin} onChange={(e) => setField("gstin", e.target.value)}
-                                placeholder="07XXXXX…"
-                                style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                            </div>
-                            <div style={{ gridColumn: "1 / -1" }}>
-                              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 3 }}>Address</label>
-                              <textarea
-                                value={edits.address}
-                                onChange={(e) => setField("address", e.target.value)}
-                                placeholder="Full address" rows={2}
-                                style={{
-                                  width: "100%", boxSizing: "border-box", resize: "vertical",
-                                  fontFamily: "inherit", fontSize: 13, padding: "8px 10px",
-                                  border: "1.5px solid var(--border)", borderRadius: 8,
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 3 }}>Discount 1 (%)</label>
-                              <input type="number" min="0" max="100" step="0.5"
-                                value={edits.discount1} onChange={(e) => setField("discount1", e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                            </div>
-                            <div>
-                              <label style={{ fontSize: 11, color: "var(--muted)", display: "block", marginBottom: 3 }}>Discount 2 (%)</label>
-                              <input type="number" min="0" max="100" step="0.5"
-                                value={edits.discount2} onChange={(e) => setField("discount2", e.target.value)}
-                                style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                            </div>
-                          </div>
-
-                          <div style={{ fontSize: 12, color: "var(--red-dark)", fontWeight: 600 }}>
-                            Net Rate = DLP × {(multiplier * 100).toFixed(2)}%
-                          </div>
-
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                            <button
-                              className="btn small"
-                              disabled={savingId === d.id + "_save"}
-                              onClick={() => handleSave(d.id)}
-                            >
-                              {savingId === d.id + "_save" ? "Saving…" : "Save"}
-                            </button>
-                            <button className="btn small outline" onClick={closeEdit}>Cancel</button>
-                            <button
-                              className="btn small outline"
-                              style={{
-                                marginLeft: "auto",
-                                color: d.is_blocked ? "#27ae60" : "#c0392b",
-                                borderColor: d.is_blocked ? "#27ae60" : "#c0392b",
-                              }}
-                              disabled={savingId === d.id + "_block"}
-                              onClick={() => handleToggleBlock(d)}
-                            >
-                              {savingId === d.id + "_block" ? "…" : d.is_blocked ? "Unblock Dealer" : "Block Dealer"}
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  ),
-                ];
-              })}
+              {dealers.map((d, idx) => (
+                <tr
+                  key={d.id}
+                  onClick={() => openDealer(d)}
+                  style={{ cursor: "pointer" }}
+                  className="admin-dealer-row"
+                >
+                  <td style={{ color: "var(--muted)", fontSize: 12, textAlign: "center" }}>{idx + 1}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{d.dealer_code || "—"}</td>
+                  <td>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>
+                      {d.name && d.name !== "New Dealer" ? d.name : "—"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.email}</div>
+                  </td>
+                  <td>
+                    <span className={`badge ${d.is_blocked ? "pending" : "delivered"}`}>
+                      {d.is_blocked ? "Blocked" : "Active"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

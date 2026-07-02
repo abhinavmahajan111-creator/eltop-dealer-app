@@ -476,6 +476,7 @@
   /* Order expandable rows */
   .admin-order-row:hover{background:#fdf8fd;}
   .admin-order-row.expanded{background:#f8f4f8;}
+  .admin-dealer-row:hover{background:#fdf8fd;}
   .admin-order-detail-row td{border-top:none !important;}
   .admin-order-detail{
     background:#f8f4f8;border-top:2px solid var(--red-light);
