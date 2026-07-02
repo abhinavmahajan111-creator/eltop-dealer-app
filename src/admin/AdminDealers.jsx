@@ -129,9 +129,15 @@ export default function AdminDealers() {
       staff1_name:       selected.staff1_name       || "",
       staff2_name:       selected.staff2_name       || "",
       website:           selected.website           || "",
-      territory:         Array.isArray(selected.territory) ? [...selected.territory] : [],
-      discount1:         selected.discount1         ?? 0,
-      discount2:         selected.discount2         ?? 0,
+      territory:                  Array.isArray(selected.territory) ? [...selected.territory] : [],
+      discount1:                  selected.discount1                  ?? 0,
+      discount2:                  selected.discount2                  ?? 0,
+      google_business_name:       selected.google_business_name       || "",
+      google_maps_url:            selected.google_maps_url            || "",
+      google_rating:              selected.google_rating              ?? "",
+      google_reviews_count:       selected.google_reviews_count       ?? "",
+      google_listing_status:      selected.google_listing_status      || "Not Listed",
+      google_listing_claimed:     selected.google_listing_claimed     ?? false,
     });
     setEditing(true);
   };
@@ -159,9 +165,15 @@ export default function AdminDealers() {
       staff1_name:       edits.staff1_name,
       staff2_name:       edits.staff2_name,
       website:           edits.website,
-      territory:         edits.territory,
-      discount1:         Number(edits.discount1) || 0,
-      discount2:         Number(edits.discount2) || 0,
+      territory:                  edits.territory,
+      discount1:                  Number(edits.discount1) || 0,
+      discount2:                  Number(edits.discount2) || 0,
+      google_business_name:       edits.google_business_name || null,
+      google_maps_url:            edits.google_maps_url      || null,
+      google_rating:              edits.google_rating !== "" ? Number(edits.google_rating) : null,
+      google_reviews_count:       edits.google_reviews_count !== "" ? Number(edits.google_reviews_count) : null,
+      google_listing_status:      edits.google_listing_status || "Not Listed",
+      google_listing_claimed:     !!edits.google_listing_claimed,
     };
     const { error } = await supabase.from("profiles").update(payload).eq("id", selected.id);
     if (!error) {
@@ -491,6 +503,148 @@ export default function AdminDealers() {
               <MediaTile label="Interior Video (30s)" url={selected.shop_video}    uploading={uploading.shop_video}        onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" />
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov, max 30 seconds.</div>
+          </div>
+
+          {/* ══ SECTION 5 — GOOGLE BUSINESS ══ */}
+          <div style={{ borderTop: "2px solid var(--red-light)", paddingTop: 6, marginTop: 20 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 800, textTransform: "uppercase",
+              letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 4, marginTop: 12,
+            }}>
+              🗺️ Google Business Listing
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 28px", marginTop: 8 }}>
+
+              {editing ? (
+                <>
+                  {/* Google Business Name */}
+                  <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Business Name</div>
+                    <input value={ev("google_business_name")} onChange={e => set("google_business_name", e.target.value)}
+                      placeholder="Name as it appears on Google Maps"
+                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                  </div>
+
+                  {/* Google Maps URL */}
+                  <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>
+                      Google Maps URL
+                      {ev("google_maps_url") && (
+                        <a href={ev("google_maps_url")} target="_blank" rel="noreferrer"
+                          style={{ marginLeft: 10, color: "var(--red-dark)", fontWeight: 700, textTransform: "none" }}>
+                          Open in Maps 🔗
+                        </a>
+                      )}
+                    </div>
+                    <input value={ev("google_maps_url")} onChange={e => set("google_maps_url", e.target.value)}
+                      placeholder="Paste full Google Maps listing URL here…"
+                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>
+                      💡 Tip: Search dealer name on Google Maps and paste the share link here
+                    </div>
+                  </div>
+
+                  {/* Rating */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Rating (1–5)</div>
+                    <input type="number" min="1" max="5" step="0.1" value={ev("google_rating")} onChange={e => set("google_rating", e.target.value)}
+                      placeholder="e.g. 4.3"
+                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                  </div>
+
+                  {/* Reviews Count */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Total Reviews</div>
+                    <input type="number" min="0" value={ev("google_reviews_count")} onChange={e => set("google_reviews_count", e.target.value)}
+                      placeholder="e.g. 42"
+                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                  </div>
+
+                  {/* Listing Status */}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Status</div>
+                    <select value={ev("google_listing_status")} onChange={e => set("google_listing_status", e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, marginBottom: 0 }}>
+                      <option>Active</option>
+                      <option>Unclaimed</option>
+                      <option>Suspended</option>
+                      <option>Not Listed</option>
+                    </select>
+                  </div>
+
+                  {/* Listing Claimed */}
+                  <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, paddingTop: 22 }}>
+                    <input type="checkbox" id="gl_claimed" checked={!!edits.google_listing_claimed}
+                      onChange={e => set("google_listing_claimed", e.target.checked)}
+                      style={{ width: 16, height: 16, accentColor: "var(--red-dark)", cursor: "pointer" }} />
+                    <label htmlFor="gl_claimed" style={{ fontSize: 13, fontWeight: 600, cursor: "pointer", userSelect: "none" }}>
+                      Listing Claimed
+                    </label>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Read mode */}
+                  <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Business Name</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: selected.google_business_name ? "#111" : "var(--muted)" }}>
+                      {selected.google_business_name || "—"}
+                    </div>
+                  </div>
+
+                  <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Maps URL</div>
+                    {selected.google_maps_url
+                      ? <a href={selected.google_maps_url} target="_blank" rel="noreferrer"
+                          style={{ fontSize: 13, color: "var(--red-dark)", fontWeight: 600, wordBreak: "break-all" }}>
+                          Open Listing in Maps 🔗
+                        </a>
+                      : <div style={{ fontSize: 14, color: "var(--muted)" }}>—</div>
+                    }
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Rating</div>
+                    {selected.google_rating != null
+                      ? <div style={{ fontSize: 15, fontWeight: 700, color: "#e67e22" }}>
+                          {"★".repeat(Math.round(Number(selected.google_rating)))}{"☆".repeat(5 - Math.round(Number(selected.google_rating)))}
+                          {" "}<span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>{Number(selected.google_rating).toFixed(1)}</span>
+                        </div>
+                      : <div style={{ fontSize: 14, color: "var(--muted)" }}>—</div>
+                    }
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Total Reviews</div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: selected.google_reviews_count != null ? "#111" : "var(--muted)" }}>
+                      {selected.google_reviews_count != null ? `${selected.google_reviews_count} reviews` : "—"}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Status</div>
+                    <span style={{
+                      display: "inline-block", padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                      background: selected.google_listing_status === "Active" ? "#e8f8f0"
+                        : selected.google_listing_status === "Suspended" ? "#fdecea"
+                        : "#f5f5f5",
+                      color: selected.google_listing_status === "Active" ? "#27ae60"
+                        : selected.google_listing_status === "Suspended" ? "#c0392b"
+                        : "#777",
+                    }}>
+                      {selected.google_listing_status || "Not Listed"}
+                    </span>
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Claimed</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: selected.google_listing_claimed ? "#27ae60" : "#c0392b" }}>
+                      {selected.google_listing_claimed ? "✓ Yes, claimed" : "✗ Not claimed"}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* ── Block/Unblock ── */}
