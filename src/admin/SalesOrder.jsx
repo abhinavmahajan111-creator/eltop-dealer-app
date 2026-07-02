@@ -131,7 +131,7 @@ export default function SalesOrder() {
               <img
                 src="/assets/eltop-logo.png.jpg"
                 alt="Eltop"
-                style={{ maxWidth: 110, maxHeight: 110, objectFit: "contain", display: "block", margin: "0 auto" }}
+                style={{ height: "80px", width: "auto", objectFit: "contain", display: "block", margin: "0 auto" }}
               />
             </td>
 
