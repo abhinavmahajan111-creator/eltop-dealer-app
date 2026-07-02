@@ -25,6 +25,7 @@ export default function AdminOrders() {
   // ── Filter / sort state ───────────────────────────────────────────────────
   const [filterOrderId, setFilterOrderId] = useState("");
   const [filterDealer, setFilterDealer] = useState("__all__");
+  const [filterStaff, setFilterStaff] = useState("__all__");
   const [filterStatus, setFilterStatus] = useState("__all__");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
@@ -36,7 +37,7 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, profiles(name, email, dealer_code, address)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, profiles(name, email, dealer_code, address, staff_assigned)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (!error && data) setOrders(data);
@@ -56,6 +57,16 @@ export default function AdminOrders() {
     return Array.from(seen.entries()).map(([id, label]) => ({ id, label }));
   }, [orders]);
 
+  // Unique staff options derived from loaded orders
+  const staffOptions = useMemo(() => {
+    const seen = new Set();
+    orders.forEach((o) => {
+      const staff = o.profiles?.staff_assigned;
+      if (staff) seen.add(staff);
+    });
+    return Array.from(seen).sort();
+  }, [orders]);
+
   // ── Combined filter + sort ────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let rows = [...orders];
@@ -65,6 +76,9 @@ export default function AdminOrders() {
 
     if (filterDealer !== "__all__")
       rows = rows.filter((o) => o.dealer_id === filterDealer);
+
+    if (filterStaff !== "__all__")
+      rows = rows.filter((o) => o.profiles?.staff_assigned === filterStaff);
 
     if (filterStatus !== "__all__")
       rows = rows.filter((o) => o.status === filterStatus);
@@ -89,7 +103,7 @@ export default function AdminOrders() {
     }
 
     return rows;
-  }, [orders, filterOrderId, filterDealer, filterStatus, filterDateFrom, filterDateTo, sortTotal, sortDate]);
+  }, [orders, filterOrderId, filterDealer, filterStaff, filterStatus, filterDateFrom, filterDateTo, sortTotal, sortDate]);
 
   const toggleSort = (col) => {
     if (col === "total") {
@@ -172,6 +186,22 @@ export default function AdminOrders() {
                   </select>
                 </th>
 
+                {/* Staff dropdown */}
+                <th>
+                  Staff
+                  <select
+                    style={filterInput}
+                    value={filterStaff}
+                    onChange={(e) => setFilterStaff(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <option value="__all__">All Staff</option>
+                    {staffOptions.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </th>
+
                 {/* Total — sortable */}
                 <th style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
                     onClick={() => toggleSort("total")}>
@@ -209,7 +239,7 @@ export default function AdminOrders() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>No orders match the current filters.</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>No orders match the current filters.</td></tr>
               )}
               {filtered.map((o, idx) => {
                 const isOpen = expandedId === o.id;
@@ -237,6 +267,9 @@ export default function AdminOrders() {
                       {profile?.email && (
                         <div style={{ fontSize: 11, color: "var(--muted)" }}>{profile.email}</div>
                       )}
+                    </td>
+                    <td style={{ fontSize: 12, color: profile?.staff_assigned ? "#333" : "var(--muted)" }}>
+                      {profile?.staff_assigned || "—"}
                     </td>
                     <td>Rs. {Number(o.total).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
@@ -270,7 +303,7 @@ export default function AdminOrders() {
 
                   isOpen && (
                     <tr key={`${o.id}-detail`} className="admin-order-detail-row">
-                      <td colSpan={7} style={{ padding: 0 }}>
+                      <td colSpan={8} style={{ padding: 0 }}>
                         <div className="admin-order-detail">
                           <div className="admin-order-detail-section">
                             <div className="admin-order-detail-heading">Dealer Info</div>
@@ -344,8 +377,8 @@ export default function AdminOrders() {
               return (
                 <tfoot>
                   <tr style={{ background: "#f8f4f8", borderTop: "2px solid var(--red-light)" }}>
-                    {/* cols: #, arrow, Order ID, Dealer → span 4 */}
-                    <td colSpan={4} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--red-dark)" }}>
+                    {/* cols: #, arrow, Order ID, Dealer, Staff → span 5 */}
+                    <td colSpan={5} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--red-dark)" }}>
                       {hasFilters ? "Filtered" : "All"} Orders: {filtered.length}
                       {hasFilters && orders.length !== filtered.length && (
                         <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginLeft: 8 }}>
