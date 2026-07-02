@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import JSZip from "jszip";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const BUCKET = "dealer-media";
@@ -249,159 +248,243 @@ export default function AdminDealers() {
       const yyyy = today.getFullYear();
       const dateSuffix = `${dd}${mm}${yyyy}`;
 
-      // ── Sheet 1: Dealers ──────────────────────────────────────────────────
-      const { data: profilesData } = await supabase
-        .from("profiles").select("*").order("created_at", { ascending: false });
-      const profiles = profilesData || [];
-
-      const dealerRows = profiles.map(d => ({
-        "ID":                   d.id,
-        "Dealer Code":          d.dealer_code || "",
-        "Shop Name":            d.shop_name || "",
-        "Alias":                d.alias_name || "",
-        "Owner Name":           d.owner_name || "",
-        "Email":                d.email || "",
-        "Phone 1":              d.phone || "",
-        "Phone 2":              d.phone2 || "",
-        "GSTIN":                d.gstin || "",
-        "Registration Type":    d.registration_type || "",
-        "Website":              d.website || "",
-        "Staff Assigned":       d.staff_assigned || "",
-        "Discount 1 (%)":       d.discount1 ?? "",
-        "Discount 2 (%)":       d.discount2 ?? "",
-        "Credit Limit (Rs.)":   d.credit_limit ?? "",
-        "Billing Address":      d.address || "",
-        "Shop Address":         d.shop_address || "",
-        "Godown Address":       d.godown_address || "",
-        "Territories":          Array.isArray(d.territory) ? d.territory.join(", ") : "",
-        "Latitude":             d.latitude ?? "",
-        "Longitude":            d.longitude ?? "",
-        "Google Business Name": d.google_business_name || "",
-        "Google Maps URL":      d.google_maps_url || "",
-        "Google Rating":        d.google_rating ?? "",
-        "Google Reviews":       d.google_reviews_count ?? "",
-        "Listing Status":       d.google_listing_status || "",
-        "Listing Claimed":      d.google_listing_claimed ? "Yes" : "No",
-        "Status":               d.is_blocked ? "Blocked" : "Active",
-        "Created At":           d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "",
-      }));
-
-      // ── Sheet 2: Orders ───────────────────────────────────────────────────
-      setExportStatus("Fetching orders…");
-      const { data: ordersData } = await supabase
-        .from("orders")
-        .select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)")
-        .order("created_at", { ascending: false });
-
-      // ── Sheet 3: Order Items ──────────────────────────────────────────────
-      setExportStatus("Fetching order items…");
-      const { data: itemsData } = await supabase
-        .from("order_items")
-        .select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)");
+      // ── Fetch all data in parallel ────────────────────────────────────────
+      const [profilesRes, ordersRes, itemsRes] = await Promise.all([
+        supabase.from("profiles").select("*").order("created_at", { ascending: false }),
+        supabase.from("orders").select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)").order("created_at", { ascending: false }),
+        supabase.from("order_items").select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)"),
+      ]);
+      const profiles  = profilesRes.data  || [];
+      const orders    = ordersRes.data    || [];
+      const orderItems = itemsRes.data    || [];
 
       const itemCountMap = {};
-      (itemsData || []).forEach(it => {
-        itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty;
-      });
+      orderItems.forEach(it => { itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty; });
 
-      const orderRows = (ordersData || []).map(o => ({
-        "Order ID":      o.id,
-        "Dealer Code":   o.profiles?.dealer_code || "",
-        "Dealer Name":   o.profiles?.shop_name || o.profiles?.name || "",
-        "Dealer Email":  o.profiles?.email || "",
-        "Order Date":    o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
-        "Status":        o.status || "",
-        "Total (Rs.)":   Number(o.total) || 0,
-        "Items (qty)":   itemCountMap[o.id] || 0,
-      }));
-
-      const itemRows = (itemsData || []).map(it => ({
-        "Order ID":       it.order_id,
-        "Product Name":   it.name || "",
-        "SKU":            it.products?.sku || "",
-        "HSN Code":       it.hsn_code || "",
-        "Qty":            it.qty || 0,
-        "MRP (Rs.)":      it.mrp != null ? Number(it.mrp) : "",
-        "DLP (Rs.)":      it.dlp != null ? Number(it.dlp) : "",
-        "Disc 1 (%)":     it.discount1 != null ? Number(it.discount1) : "",
-        "Disc 2 (%)":     it.discount2 != null ? Number(it.discount2) : "",
-        "Net Rate (Rs.)": Number(it.net_rate ?? it.price) || 0,
-        "Amount (Rs.)":   (Number(it.net_rate ?? it.price) * it.qty) || 0,
-      }));
-
-      // ── Build & download Excel ─────────────────────────────────────────────
-      setExportStatus("Building Excel file…");
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dealerRows), "Dealers");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows),  "Orders");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows),   "Order Items");
-      XLSX.writeFile(wb, `Eltop_Database_Export_${dateSuffix}.xlsx`);
-
-      // ── Build media ZIP ───────────────────────────────────────────────────
-      const MEDIA_KEYS = [
-        { key: "owner_photo",       label: "owner-photo",       ext: "jpg"  },
-        { key: "staff1_photo",      label: "staff1-photo",      ext: "jpg"  },
-        { key: "staff2_photo",      label: "staff2-photo",      ext: "jpg"  },
-        { key: "shop_inside_photo", label: "shop-inside",       ext: "jpg"  },
-        { key: "shop_board_photo",  label: "shop-board",        ext: "jpg"  },
-        { key: "shop_video",        label: "interior-video",    ext: "mp4"  },
+      // ── Photo columns config ───────────────────────────────────────────────
+      const PHOTO_COLS = [
+        { key: "owner_photo",       header: "Owner Photo"   },
+        { key: "staff1_photo",      header: "Staff 1 Photo" },
+        { key: "staff2_photo",      header: "Staff 2 Photo" },
+        { key: "shop_inside_photo", header: "Shop Inside"   },
+        { key: "shop_board_photo",  header: "Shop Board"    },
       ];
 
-      // Only dealers that have at least one media file
-      const dealersWithMedia = profiles.filter(d =>
-        MEDIA_KEYS.some(m => !!d[m.key])
-      );
+      // ── Fetch all images as ArrayBuffers upfront ───────────────────────────
+      setExportStatus("Downloading photos…");
+      const urlCache = new Map(); // url → ArrayBuffer
+      const allUrls = new Set();
+      profiles.forEach(d => PHOTO_COLS.forEach(({ key }) => { if (d[key]) allUrls.add(d[key]); }));
 
-      if (dealersWithMedia.length === 0) {
-        setExportStatus("");
-        setExporting(false);
-        return;
+      await Promise.all(Array.from(allUrls).map(async (url) => {
+        try {
+          const r = await fetch(url);
+          if (r.ok) urlCache.set(url, await r.arrayBuffer());
+        } catch { /* skip */ }
+      }));
+
+      // ── Build workbook with ExcelJS ───────────────────────────────────────
+      setExportStatus("Building Excel…");
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "Eltop Admin";
+      wb.created = new Date();
+
+      // ── SHEET 1: Dealers ─────────────────────────────────────────────────
+      const ws1 = wb.addWorksheet("Dealers");
+
+      const textCols = [
+        { header: "ID",                   key: "id",                    width: 36 },
+        { header: "Dealer Code",          key: "dealer_code",           width: 14 },
+        { header: "Shop Name",            key: "shop_name",             width: 22 },
+        { header: "Alias",                key: "alias_name",            width: 16 },
+        { header: "Owner Name",           key: "owner_name",            width: 18 },
+        { header: "Email",                key: "email",                 width: 24 },
+        { header: "Phone 1",              key: "phone",                 width: 14 },
+        { header: "Phone 2",              key: "phone2",                width: 14 },
+        { header: "GSTIN",               key: "gstin",                 width: 18 },
+        { header: "Registration Type",    key: "registration_type",     width: 18 },
+        { header: "Website",             key: "website",               width: 22 },
+        { header: "Staff Assigned",       key: "staff_assigned",        width: 16 },
+        { header: "Discount 1 (%)",       key: "discount1",             width: 13 },
+        { header: "Discount 2 (%)",       key: "discount2",             width: 13 },
+        { header: "Credit Limit (Rs.)",   key: "credit_limit",          width: 16 },
+        { header: "Billing Address",      key: "address",               width: 28 },
+        { header: "Shop Address",         key: "shop_address",          width: 28 },
+        { header: "Godown Address",       key: "godown_address",        width: 28 },
+        { header: "Territories",         key: "territories",           width: 22 },
+        { header: "Latitude",            key: "latitude",              width: 12 },
+        { header: "Longitude",           key: "longitude",             width: 12 },
+        { header: "Google Business",      key: "google_business_name",  width: 22 },
+        { header: "Google Maps URL",      key: "google_maps_url",       width: 30 },
+        { header: "Google Rating",        key: "google_rating",         width: 13 },
+        { header: "Google Reviews",       key: "google_reviews_count",  width: 14 },
+        { header: "Listing Status",       key: "google_listing_status", width: 14 },
+        { header: "Listing Claimed",      key: "google_listing_claimed",width: 14 },
+        { header: "Status",              key: "status",                width: 10 },
+        { header: "Created At",          key: "created_at",            width: 20 },
+        ...PHOTO_COLS.map(c => ({ header: c.header, key: c.key, width: 15 })),
+      ];
+      ws1.columns = textCols;
+
+      // Style header row
+      ws1.getRow(1).eachCell(cell => {
+        cell.fill   = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B3A73" } };
+        cell.font   = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      });
+      ws1.getRow(1).height = 28;
+
+      const IMG_ROW_H = 70; // points (~95px)
+
+      for (let ri = 0; ri < profiles.length; ri++) {
+        const d   = profiles[ri];
+        const row = ws1.addRow({
+          id:                    d.id,
+          dealer_code:           d.dealer_code || "",
+          shop_name:             d.shop_name   || "",
+          alias_name:            d.alias_name  || "",
+          owner_name:            d.owner_name  || "",
+          email:                 d.email       || "",
+          phone:                 d.phone       || "",
+          phone2:                d.phone2      || "",
+          gstin:                 d.gstin       || "",
+          registration_type:     d.registration_type || "",
+          website:               d.website     || "",
+          staff_assigned:        d.staff_assigned || "",
+          discount1:             d.discount1   ?? "",
+          discount2:             d.discount2   ?? "",
+          credit_limit:          d.credit_limit ?? "",
+          address:               d.address     || "",
+          shop_address:          d.shop_address || "",
+          godown_address:        d.godown_address || "",
+          territories:           Array.isArray(d.territory) ? d.territory.join(", ") : "",
+          latitude:              d.latitude    ?? "",
+          longitude:             d.longitude   ?? "",
+          google_business_name:  d.google_business_name  || "",
+          google_maps_url:       d.google_maps_url       || "",
+          google_rating:         d.google_rating         ?? "",
+          google_reviews_count:  d.google_reviews_count  ?? "",
+          google_listing_status: d.google_listing_status || "",
+          google_listing_claimed: d.google_listing_claimed ? "Yes" : "No",
+          status:                d.is_blocked ? "Blocked" : "Active",
+          created_at:            d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "",
+        });
+
+        const excelRow = ri + 2; // 1-based, row 1 is header
+        let hasImage = false;
+
+        // Embed each photo column
+        for (let ci = 0; ci < PHOTO_COLS.length; ci++) {
+          const { key } = PHOTO_COLS[ci];
+          const url = d[key];
+          if (!url || !urlCache.has(url)) continue;
+
+          hasImage = true;
+          const buf  = urlCache.get(url);
+          const urlLower = url.split("?")[0].toLowerCase();
+          const ext  = urlLower.endsWith(".png") ? "png" : urlLower.endsWith(".webp") ? "png" : "jpeg";
+
+          const imgId = wb.addImage({ buffer: buf, extension: ext });
+          const colIdx = textCols.findIndex(c => c.key === key); // 0-based
+
+          ws1.addImage(imgId, {
+            tl: { col: colIdx,       row: excelRow - 1 },  // top-left (0-based)
+            br: { col: colIdx + 1,   row: excelRow     },  // bottom-right
+            editAs: "oneCell",
+          });
+        }
+
+        if (hasImage) row.height = IMG_ROW_H;
+        row.alignment = { vertical: "middle", wrapText: true };
       }
 
-      setExportStatus(`Downloading media for ${dealersWithMedia.length} dealers…`);
-      const zip = new JSZip();
+      // Freeze header
+      ws1.views = [{ state: "frozen", ySplit: 1 }];
 
-      let done = 0;
-      await Promise.all(
-        dealersWithMedia.map(async (d) => {
-          const folderName = (d.dealer_code || d.id.substring(0, 8)).replace(/[^a-zA-Z0-9_-]/g, "_");
-          const folder = zip.folder(folderName);
+      // ── SHEET 2: Orders ───────────────────────────────────────────────────
+      const ws2 = wb.addWorksheet("Orders");
+      ws2.columns = [
+        { header: "Order ID",     key: "id",          width: 36 },
+        { header: "Dealer Code",  key: "dealer_code", width: 14 },
+        { header: "Dealer Name",  key: "dealer_name", width: 22 },
+        { header: "Dealer Email", key: "email",       width: 24 },
+        { header: "Order Date",   key: "date",        width: 20 },
+        { header: "Status",       key: "status",      width: 12 },
+        { header: "Total (Rs.)",  key: "total",       width: 14 },
+        { header: "Items (qty)",  key: "items_qty",   width: 12 },
+      ];
+      ws2.getRow(1).eachCell(cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B3A73" } };
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      });
+      ws2.getRow(1).height = 24;
+      orders.forEach(o => {
+        ws2.addRow({
+          id:          o.id,
+          dealer_code: o.profiles?.dealer_code || "",
+          dealer_name: o.profiles?.shop_name || o.profiles?.name || "",
+          email:       o.profiles?.email || "",
+          date:        o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
+          status:      o.status || "",
+          total:       Number(o.total) || 0,
+          items_qty:   itemCountMap[o.id] || 0,
+        });
+      });
+      ws2.views = [{ state: "frozen", ySplit: 1 }];
 
-          await Promise.all(
-            MEDIA_KEYS.map(async ({ key, label, ext }) => {
-              const url = d[key];
-              if (!url) return;
-              try {
-                // Detect real extension from URL
-                const urlExt = url.split("?")[0].split(".").pop().toLowerCase();
-                const finalExt = ["jpg","jpeg","png","webp","mp4","mov","avi"].includes(urlExt) ? urlExt : ext;
-                const filename = `${folderName}_${label}.${finalExt}`;
+      // ── SHEET 3: Order Items ──────────────────────────────────────────────
+      const ws3 = wb.addWorksheet("Order Items");
+      ws3.columns = [
+        { header: "Order ID",       key: "order_id",  width: 36 },
+        { header: "Product Name",   key: "name",      width: 26 },
+        { header: "SKU",            key: "sku",       width: 14 },
+        { header: "HSN Code",       key: "hsn",       width: 12 },
+        { header: "Qty",            key: "qty",       width: 8  },
+        { header: "MRP (Rs.)",      key: "mrp",       width: 12 },
+        { header: "DLP (Rs.)",      key: "dlp",       width: 12 },
+        { header: "Disc 1 (%)",     key: "d1",        width: 11 },
+        { header: "Disc 2 (%)",     key: "d2",        width: 11 },
+        { header: "Net Rate (Rs.)", key: "net_rate",  width: 14 },
+        { header: "Amount (Rs.)",   key: "amount",    width: 14 },
+      ];
+      ws3.getRow(1).eachCell(cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF6B3A73" } };
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      });
+      ws3.getRow(1).height = 24;
+      orderItems.forEach(it => {
+        const net = Number(it.net_rate ?? it.price) || 0;
+        ws3.addRow({
+          order_id: it.order_id,
+          name:     it.name || "",
+          sku:      it.products?.sku || "",
+          hsn:      it.hsn_code || "",
+          qty:      it.qty || 0,
+          mrp:      it.mrp != null ? Number(it.mrp) : "",
+          dlp:      it.dlp != null ? Number(it.dlp) : "",
+          d1:       it.discount1 != null ? Number(it.discount1) : "",
+          d2:       it.discount2 != null ? Number(it.discount2) : "",
+          net_rate: net,
+          amount:   net * (it.qty || 0),
+        });
+      });
+      ws3.views = [{ state: "frozen", ySplit: 1 }];
 
-                const resp = await fetch(url);
-                if (!resp.ok) return;
-                const blob = await resp.arrayBuffer();
-                folder.file(filename, blob);
-              } catch {
-                // skip failed individual file silently
-              }
-            })
-          );
-
-          done += 1;
-          setExportStatus(`Downloading media… ${done}/${dealersWithMedia.length} dealers`);
-        })
-      );
-
-      setExportStatus("Compressing ZIP…");
-      const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
-      const zipUrl = URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = zipUrl;
-      a.download = `Eltop_Media_Export_${dateSuffix}.zip`;
+      // ── Download ──────────────────────────────────────────────────────────
+      setExportStatus("Writing file…");
+      const buf  = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `Eltop_Database_Export_${dateSuffix}.xlsx`;
       a.click();
-      URL.revokeObjectURL(zipUrl);
+      URL.revokeObjectURL(url);
 
     } catch (e) {
+      console.error(e);
       alert("Export failed: " + e.message);
     }
     setExportStatus("");
