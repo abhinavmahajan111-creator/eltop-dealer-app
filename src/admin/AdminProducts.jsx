@@ -14,6 +14,7 @@ export default function AdminProducts() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const fileInputRef = useRef(null);
 
   const loadProducts = () => {
@@ -142,16 +143,18 @@ export default function AdminProducts() {
     loadProducts();
   };
 
-  // Group products by category for section headings
+  // Group products by category, filtered by search query
   const grouped = useMemo(() => {
+    const q = search.trim().toLowerCase();
     const map = new Map();
     products.forEach((p) => {
+      if (q && ![p.name, p.category, p.hsn_code].some((f) => f?.toLowerCase().includes(q))) return;
       const cat = p.category?.trim() || "Uncategorised";
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat).push(p);
     });
     return Array.from(map.entries());
-  }, [products]);
+  }, [products, search]);
 
   return (
     <div className="admin-page">
@@ -271,11 +274,37 @@ export default function AdminProducts() {
         </div>
       )}
 
+      {/* ── Search bar ── */}
+      {!form.id && products.length > 0 && (
+        <div style={{ position: "relative", maxWidth: 400, marginBottom: 16 }}>
+          <input
+            type="text"
+            placeholder="Search products by name, category, HSN…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: "100%", paddingRight: 32, boxSizing: "border-box" }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              style={{
+                position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 0,
+              }}
+              title="Clear"
+            >✕</button>
+          )}
+        </div>
+      )}
+
       {/* ── Product table grouped by category ── */}
       {loading ? (
         <div className="admin-loading">Loading…</div>
       ) : products.length === 0 ? (
         <div className="admin-empty">No products yet.</div>
+      ) : grouped.length === 0 ? (
+        <div className="admin-empty">No products match "{search}".</div>
       ) : (
         <div className="admin-table-wrap">
           <table className="admin-table">
