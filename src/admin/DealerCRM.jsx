@@ -68,6 +68,8 @@ export default function DealerCRM() {
   const [messages, setMessages] = useState([]);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [editingMsgIdx, setEditingMsgIdx] = useState(null);
+  const [editingText, setEditingText] = useState("");
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -217,12 +219,9 @@ RECENT ACTIVITIES:
 ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: ${a.notes || "—"}`).join("\n") || "  None logged"}
 `.trim();
 
-  const sendAI = async (userMsg) => {
-    const msg = userMsg || aiInput.trim();
-    if (!msg) return;
-    const newMessages = [...messages, { role: "user", content: msg }];
-    setMessages(newMessages);
-    setAiInput("");
+  const systemPrompt = `You are an expert sales CRM assistant for Eltop by Embassy Electricals, an electrical products dealer management system. You help the sales team understand and manage their dealer relationships. Always be specific, actionable, and concise. Here is the full context for the dealer you are analyzing:\n\n${dealerContext}`;
+
+  const callAI = async (history) => {
     setAiLoading(true);
     try {
       const res = await fetch("/api/chat", {
@@ -231,8 +230,8 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
           max_tokens: 1000,
-          system: `You are an expert sales CRM assistant for Eltop by Embassy Electricals, an electrical products dealer management system. You help the sales team understand and manage their dealer relationships. Always be specific, actionable, and concise. Here is the full context for the dealer you are analyzing:\n\n${dealerContext}`,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          system: systemPrompt,
+          messages: history.map(m => ({ role: m.role, content: m.content })),
         }),
       });
       const json = await res.json();
@@ -242,6 +241,26 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
       setMessages(prev => [...prev, { role: "assistant", content: "Error connecting to AI assistant." }]);
     }
     setAiLoading(false);
+  };
+
+  const sendAI = async (userMsg) => {
+    const msg = userMsg || aiInput.trim();
+    if (!msg) return;
+    const newMessages = [...messages, { role: "user", content: msg }];
+    setMessages(newMessages);
+    setAiInput("");
+    await callAI(newMessages);
+  };
+
+  const submitEdit = async (idx) => {
+    const trimmed = editingText.trim();
+    if (!trimmed) return;
+    // Keep messages up to (not including) the edited index, replace with new user msg
+    const newMessages = [...messages.slice(0, idx), { role: "user", content: trimmed }];
+    setMessages(newMessages);
+    setEditingMsgIdx(null);
+    setEditingText("");
+    await callAI(newMessages);
   };
 
   const SUGGESTED = [
@@ -591,15 +610,54 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                 </div>
               )}
               {messages.map((m, i) => (
-                <div key={i} style={{
-                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                  maxWidth: "80%", padding: "10px 14px", borderRadius: 14,
-                  background: m.role === "user" ? "var(--red-dark)" : "#fff",
-                  color: m.role === "user" ? "#fff" : "#222",
-                  boxShadow: "0 2px 6px rgba(0,0,0,.08)",
-                  fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap",
-                }}>
-                  {m.content}
+                <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "82%", display: "flex", flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
+                  {m.role === "user" && editingMsgIdx === i ? (
+                    /* ── Edit mode ── */
+                    <div style={{ width: "100%" }}>
+                      <textarea
+                        autoFocus
+                        value={editingText}
+                        onChange={e => setEditingText(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitEdit(i); } }}
+                        rows={3}
+                        style={{
+                          width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 13,
+                          padding: "10px 14px", borderRadius: 12, border: "2px solid var(--red-dark)",
+                          resize: "vertical", background: "#fff",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 8, marginTop: 6, justifyContent: "flex-end" }}>
+                        <button className="btn small" disabled={aiLoading || !editingText.trim()} onClick={() => submitEdit(i)}>Send</button>
+                        <button className="btn small outline" onClick={() => { setEditingMsgIdx(null); setEditingText(""); }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ── Display mode ── */
+                    <div
+                      className={m.role === "user" ? "ai-msg-user" : ""}
+                      style={{
+                        position: "relative", padding: "10px 14px", borderRadius: 14,
+                        background: m.role === "user" ? "var(--red-dark)" : "#fff",
+                        color: m.role === "user" ? "#fff" : "#222",
+                        boxShadow: "0 2px 6px rgba(0,0,0,.08)",
+                        fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {m.content}
+                      {m.role === "user" && (
+                        <button
+                          className="ai-edit-btn"
+                          onClick={() => { setEditingMsgIdx(i); setEditingText(m.content); }}
+                          title="Edit message"
+                          style={{
+                            position: "absolute", top: 6, left: -30,
+                            background: "none", border: "none", cursor: "pointer",
+                            fontSize: 14, opacity: 0, transition: "opacity 0.15s", padding: 4,
+                          }}
+                        >✏️</button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               {aiLoading && (
