@@ -104,6 +104,9 @@ export default function AdminDealers() {
   const [uploading, setUploading] = useState({});
   const [newTerritory, setNewTerritory] = useState("");
   const [creditUsed, setCreditUsed] = useState(null);
+  const [editingCreditLimit, setEditingCreditLimit] = useState(false);
+  const [creditLimitDraft, setCreditLimitDraft] = useState("");
+  const [savingCreditLimit, setSavingCreditLimit] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -117,6 +120,8 @@ export default function AdminDealers() {
     setEdits({});
     setNewTerritory("");
     setCreditUsed(null);
+    setEditingCreditLimit(false);
+    setCreditLimitDraft("");
     // Fetch sum of pending + confirmed orders for credit utilization
     if (isSupabaseConfigured) {
       supabase
@@ -386,10 +391,54 @@ export default function AdminDealers() {
 
                 {/* Credit Limit + Utilization */}
                 <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
-                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Credit Limit</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: selected.credit_limit ? "#111" : "var(--muted)" }}>
-                    {selected.credit_limit ? `Rs. ${Number(selected.credit_limit).toLocaleString("en-IN")}` : "Not set"}
-                  </div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Credit Limit</div>
+                  {editingCreditLimit ? (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                      <input
+                        type="number"
+                        value={creditLimitDraft}
+                        onChange={e => setCreditLimitDraft(e.target.value)}
+                        placeholder="Enter credit limit"
+                        autoFocus
+                        style={{ width: 160, marginBottom: 0 }}
+                      />
+                      <button
+                        className="btn small"
+                        disabled={savingCreditLimit}
+                        onClick={async () => {
+                          setSavingCreditLimit(true);
+                          const val = creditLimitDraft !== "" ? Number(creditLimitDraft) : null;
+                          await supabase.from("profiles").update({ credit_limit: val }).eq("id", selected.id);
+                          const updated = { ...selected, credit_limit: val };
+                          setSelected(updated);
+                          setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+                          setSavingCreditLimit(false);
+                          setEditingCreditLimit(false);
+                        }}
+                      >
+                        {savingCreditLimit ? "…" : "Save"}
+                      </button>
+                      <button className="btn small outline" onClick={() => setEditingCreditLimit(false)}>Cancel</button>
+                    </div>
+                  ) : (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                      onMouseEnter={e => e.currentTarget.querySelector(".cl-edit-btn").style.opacity = "1"}
+                      onMouseLeave={e => e.currentTarget.querySelector(".cl-edit-btn").style.opacity = "0"}
+                    >
+                      <div style={{ fontSize: 14, fontWeight: 700, color: selected.credit_limit ? "#111" : "var(--muted)" }}>
+                        {selected.credit_limit ? `Rs. ${Number(selected.credit_limit).toLocaleString("en-IN")}` : "Not set"}
+                      </div>
+                      <button
+                        className="cl-edit-btn"
+                        onClick={() => { setCreditLimitDraft(selected.credit_limit ?? ""); setEditingCreditLimit(true); }}
+                        style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, opacity: 0, transition: "opacity .15s", padding: "0 2px", lineHeight: 1 }}
+                        title="Edit credit limit"
+                      >
+                        ✏️
+                      </button>
+                    </div>
+                  )}
                   {selected.credit_limit && creditUsed !== null && (() => {
                     const limit = Number(selected.credit_limit);
                     const used  = creditUsed;
