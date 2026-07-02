@@ -188,7 +188,7 @@ export default function AdminOrders() {
 
                 {/* Staff dropdown */}
                 <th>
-                  Staff
+                  Staff Assigned
                   <select
                     style={filterInput}
                     value={filterStaff}
@@ -212,10 +212,12 @@ export default function AdminOrders() {
                 <th style={{ cursor: "pointer", userSelect: "none" }}
                     onClick={() => toggleSort("date")}>
                   Placed <SortIcon dir={sortDate} />
-                  <div style={{ display: "flex", gap: 4, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
-                    <input type="date" style={{ ...filterInput, marginTop: 0, flex: 1 }}
+                  <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 2 }}>From</div>
+                    <input type="date" style={{ ...filterInput, marginTop: 0 }}
                       value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} />
-                    <input type="date" style={{ ...filterInput, marginTop: 0, flex: 1 }}
+                    <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4, marginBottom: 2 }}>To</div>
+                    <input type="date" style={{ ...filterInput, marginTop: 0 }}
                       value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} />
                   </div>
                 </th>
@@ -260,7 +262,7 @@ export default function AdminOrders() {
                       {isOpen ? "▼" : "▶"}
                     </td>
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {o.id.slice(0, 8)}…
+                      {o.id.substring(0, 8).toUpperCase()}
                     </td>
                     <td>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{dealerLabel(profile)}</div>
@@ -273,10 +275,12 @@ export default function AdminOrders() {
                     </td>
                     <td>Rs. {Number(o.total).toLocaleString()}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
-                      {new Date(o.created_at).toLocaleString("en-IN", {
-                        day: "2-digit", month: "2-digit", year: "numeric",
-                        hour: "2-digit", minute: "2-digit", hour12: true,
-                      })}
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                        {new Date(o.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                        {new Date(o.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                      </div>
                     </td>
                     <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap" }}>
                       <select
