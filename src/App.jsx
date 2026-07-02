@@ -17,6 +17,7 @@ import AdminOrders from "./admin/AdminOrders";
 import AdminProducts from "./admin/AdminProducts";
 import AdminDealers from "./admin/AdminDealers";
 import SalesOrder from "./admin/SalesOrder";
+import DealerCRM from "./admin/DealerCRM";
 
 export default function App() {
   return (
@@ -41,8 +42,9 @@ export default function App() {
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/dealers" element={<AdminDealers />} />
         </Route>
-        {/* Full-page print view — no sidebar */}
+        {/* Full-page views — no sidebar */}
         <Route path="/admin/orders/:id/print" element={<SalesOrder />} />
+        <Route path="/admin/crm/:dealerId" element={<DealerCRM />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

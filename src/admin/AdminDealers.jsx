@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 export default function AdminDealers() {
+  const navigate = useNavigate();
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null); // dealer object
@@ -127,7 +129,16 @@ export default function AdminDealers() {
             ← Back to Dealers
           </button>
           {!editing ? (
-            <button className="btn small" onClick={startEdit}>Edit</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn small"
+                style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
+                onClick={() => navigate(`/admin/crm/${selected.id}`)}
+              >
+                View Full CRM →
+              </button>
+              <button className="btn small outline" onClick={startEdit}>Edit</button>
+            </div>
           ) : (
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn small" disabled={saving} onClick={handleSave}>
