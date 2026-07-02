@@ -103,7 +103,7 @@ export default function SalesOrder() {
 
   const totalQty   = items.reduce((s, i) => s + i.qty, 0);
   const dateStr    = new Date(order.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
-  const voucherNo  = order.id.toUpperCase();
+  const voucherNo  = order.id.substring(0, 8).toUpperCase();
   const dealerName = profile?.name && profile.name !== "New Dealer" ? profile.name : profile?.email || "—";
 
   // Per-line GST calculations (Net Rate is GST-inclusive at 18%)
@@ -174,7 +174,7 @@ export default function SalesOrder() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <tbody>
                   {[
-                    ["Voucher No.",          voucherNo.slice(0, 13) + "…"],
+                    ["Voucher No.",          voucherNo],
                     ["Dated",                dateStr],
                     ["Mode of Payment",      "Credit"],
                     ["Buyer's Ref / Order No.", "—"],
