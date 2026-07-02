@@ -53,40 +53,159 @@ function EditField({ label, field, value, onChange, type = "text", textarea = fa
   );
 }
 
-function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing }) {
+// ─── Lightbox ────────────────────────────────────────────────────────────────
+function Lightbox({ items, index, onClose, onNav }) {
+  const item = items[index];
+  if (!item) return null;
+  const isVideo = item.accept?.includes("video");
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowRight" && index < items.length - 1) onNav(index + 1);
+      if (e.key === "ArrowLeft"  && index > 0)                onNav(index - 1);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [index, items.length, onClose, onNav]);
+
+  const download = () => {
+    const a = document.createElement("a");
+    a.href = item.url;
+    a.download = item.filename;
+    a.target = "_blank";
+    a.click();
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999,
+        background: "rgba(0,0,0,.85)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      {/* Top bar */}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}
+      >
+        <div style={{ color: "#fff", fontSize: 14, fontWeight: 600 }}>{item.label}</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={download}
+            style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            ⬇️ Download
+          </button>
+          <button onClick={onClose}
+            style={{ background: "rgba(255,255,255,.15)", border: "none", borderRadius: 6, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 18, lineHeight: 1 }}>
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Prev arrow */}
+      {index > 0 && (
+        <button onClick={e => { e.stopPropagation(); onNav(index - 1); }}
+          style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,.15)", border: "none", borderRadius: "50%", color: "#fff", width: 44, height: 44, fontSize: 22, cursor: "pointer" }}>
+          ‹
+        </button>
+      )}
+
+      {/* Media */}
+      <div onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "80vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {isVideo
+          ? <video src={item.url} controls autoPlay style={{ maxWidth: "90vw", maxHeight: "80vh", borderRadius: 8 }} />
+          : <img src={item.url} alt={item.label} style={{ maxWidth: "90vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 8 }} />
+        }
+      </div>
+
+      {/* Next arrow */}
+      {index < items.length - 1 && (
+        <button onClick={e => { e.stopPropagation(); onNav(index + 1); }}
+          style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,.15)", border: "none", borderRadius: "50%", color: "#fff", width: 44, height: 44, fontSize: 22, cursor: "pointer" }}>
+          ›
+        </button>
+      )}
+
+      {/* Dot nav */}
+      {items.length > 1 && (
+        <div onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: 20, display: "flex", gap: 8 }}>
+          {items.map((_, i) => (
+            <div key={i} onClick={() => onNav(i)}
+              style={{ width: 8, height: 8, borderRadius: "50%", cursor: "pointer", background: i === index ? "#fff" : "rgba(255,255,255,.4)" }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Media tile ───────────────────────────────────────────────────────────────
+function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing, onView }) {
   const ref = useRef();
+  const [hovered, setHovered] = useState(false);
   const isVideo = accept.includes("video");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
       <div
-        onClick={() => editing && ref.current?.click()}
         style={{
           width: 96, height: 96, borderRadius: 10,
-          border: `2px ${editing ? "dashed" : "solid"} ${editing ? "var(--red-light)" : "#eee"}`,
-          background: "#f8f4f8", cursor: editing ? "pointer" : "default",
-          overflow: "hidden", display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: url ? undefined : 24, color: "var(--muted)",
-          position: "relative",
+          border: `2px ${editing && !url ? "dashed" : "solid"} ${editing && !url ? "var(--red-light)" : "#eee"}`,
+          background: "#f8f4f8", overflow: "hidden",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: url ? undefined : 24, color: "var(--muted)",
+          position: "relative", cursor: url ? "pointer" : editing ? "pointer" : "default",
         }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onClick={() => { if (url) onView?.(); else if (editing) ref.current?.click(); }}
       >
+        {/* Thumbnail */}
         {uploading
           ? <span style={{ fontSize: 12 }}>⏳</span>
           : url
             ? isVideo
               ? <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            : editing ? "+" : <span style={{ fontSize: 11, color: "#ccc" }}>—</span>
+            : editing ? <span style={{ fontSize: 24 }}>+</span> : <span style={{ fontSize: 11, color: "#ccc" }}>—</span>
         }
-        {url && editing && (
-          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.25)", display: "flex", alignItems: "center", justifyContent: "center", opacity: 0, transition: ".15s" }}
-            onMouseEnter={e => e.currentTarget.style.opacity = 1}
-            onMouseLeave={e => e.currentTarget.style.opacity = 0}>
-            <span style={{ color: "#fff", fontSize: 18 }}>✏️</span>
+
+        {/* Hover overlay — view/download icons when has URL */}
+        {url && hovered && (
+          <div style={{
+            position: "absolute", inset: 0, background: "rgba(0,0,0,.55)",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          }}>
+            <button
+              onClick={e => { e.stopPropagation(); onView?.(); }}
+              title="View"
+              style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+              🔍
+            </button>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                const a = document.createElement("a");
+                a.href = url; a.download = label; a.target = "_blank"; a.click();
+              }}
+              title="Download"
+              style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+              ⬇️
+            </button>
           </div>
         )}
+
+        {/* Edit overlay when editing mode and URL exists */}
+        {url && editing && !hovered && (
+          <div style={{ position: "absolute", bottom: 4, right: 4, background: "rgba(0,0,0,.45)", borderRadius: 4, padding: "2px 4px" }}>
+            <span style={{ color: "#fff", fontSize: 10 }}>✏️</span>
+          </div>
+        )}
+        {editing && <input ref={ref} type="file" accept={accept} style={{ display: "none" }} onChange={e => { e.stopPropagation(); e.target.files[0] && onPick(e.target.files[0]); }} />}
       </div>
       <div style={{ fontSize: 10, color: "var(--muted)", textAlign: "center", maxWidth: 96, lineHeight: 1.3 }}>{label}</div>
-      {editing && <input ref={ref} type="file" accept={accept} style={{ display: "none" }} onChange={e => e.target.files[0] && onPick(e.target.files[0])} />}
     </div>
   );
 }
@@ -104,6 +223,7 @@ export default function AdminDealers() {
   const [uploading, setUploading] = useState({});
   const [newTerritory, setNewTerritory] = useState("");
   const [creditUsed, setCreditUsed] = useState(null);
+  const [lightbox, setLightbox] = useState(null); // { items: [...], index: 0 }
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft] = useState("");
   const [savingCreditLimit, setSavingCreditLimit] = useState(false);
@@ -120,6 +240,7 @@ export default function AdminDealers() {
     setEdits({});
     setNewTerritory("");
     setCreditUsed(null);
+    setLightbox(null);
     setEditingCreditLimit(false);
     setCreditLimitDraft("");
     // Fetch sum of pending + confirmed orders for credit utilization
@@ -289,8 +410,34 @@ export default function AdminDealers() {
     const E = (field) => ev(field);
     const S = (field) => selected[field] || "";
 
+    // Build ordered list of media items for lightbox navigation
+    const code = selected.dealer_code || "dealer";
+    const mediaItems = [
+      { key: "owner_photo",       label: "Owner Photo",          filename: `${code}_owner-photo.jpg`,       accept: "image/*" },
+      { key: "staff1_photo",      label: `${selected.staff1_name || "Staff 1"} Photo`, filename: `${code}_staff1-photo.jpg`, accept: "image/*" },
+      { key: "staff2_photo",      label: `${selected.staff2_name || "Staff 2"} Photo`, filename: `${code}_staff2-photo.jpg`, accept: "image/*" },
+      { key: "shop_inside_photo", label: "Shop Inside",          filename: `${code}_shop-inside.jpg`,       accept: "image/*" },
+      { key: "shop_board_photo",  label: "Shop Board",           filename: `${code}_shop-board.jpg`,        accept: "image/*" },
+      { key: "shop_video",        label: "Interior Video",       filename: `${code}_interior-video.mp4`,    accept: "video/*" },
+    ]
+      .filter(m => !!selected[m.key])
+      .map(m => ({ ...m, url: selected[m.key] }));
+
+    const openLightbox = (key) => {
+      const idx = mediaItems.findIndex(m => m.key === key);
+      if (idx !== -1) setLightbox({ items: mediaItems, index: idx });
+    };
+
     return (
       <div className="admin-page">
+        {lightbox && (
+          <Lightbox
+            items={lightbox.items}
+            index={lightbox.index}
+            onClose={() => setLightbox(null)}
+            onNav={(i) => setLightbox(lb => ({ ...lb, index: i }))}
+          />
+        )}
 
         {/* ── Top bar ── */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 8 }}>
@@ -573,6 +720,7 @@ export default function AdminDealers() {
                     uploading={uploading.staff1_photo}
                     onPick={f => handleMediaUpload("staff1_photo", f)}
                     editing={true}
+                    onView={() => openLightbox("staff1_photo")}
                   />
                   {editing
                     ? <input value={E("staff1_name")} onChange={e => set("staff1_name", e.target.value)}
@@ -588,6 +736,7 @@ export default function AdminDealers() {
                     uploading={uploading.staff2_photo}
                     onPick={f => handleMediaUpload("staff2_photo", f)}
                     editing={true}
+                    onView={() => openLightbox("staff2_photo")}
                   />
                   {editing
                     ? <input value={E("staff2_name")} onChange={e => set("staff2_name", e.target.value)}
@@ -601,10 +750,10 @@ export default function AdminDealers() {
             {/* Photo grid */}
             <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop & Owner</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-              <MediaTile label="Owner Photo"       url={selected.owner_photo}       uploading={uploading.owner_photo}       onPick={f => handleMediaUpload("owner_photo", f)}       editing={true} />
-              <MediaTile label="Shop Inside"       url={selected.shop_inside_photo} uploading={uploading.shop_inside_photo} onPick={f => handleMediaUpload("shop_inside_photo", f)} editing={true} />
-              <MediaTile label="Shop Board"        url={selected.shop_board_photo}  uploading={uploading.shop_board_photo}  onPick={f => handleMediaUpload("shop_board_photo", f)}  editing={true} />
-              <MediaTile label="Interior Video (30s)" url={selected.shop_video}    uploading={uploading.shop_video}        onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" />
+              <MediaTile label="Owner Photo"          url={selected.owner_photo}       uploading={uploading.owner_photo}       onPick={f => handleMediaUpload("owner_photo", f)}       editing={true} onView={() => openLightbox("owner_photo")} />
+              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo} uploading={uploading.shop_inside_photo} onPick={f => handleMediaUpload("shop_inside_photo", f)} editing={true} onView={() => openLightbox("shop_inside_photo")} />
+              <MediaTile label="Shop Board"           url={selected.shop_board_photo}  uploading={uploading.shop_board_photo}  onPick={f => handleMediaUpload("shop_board_photo", f)}  editing={true} onView={() => openLightbox("shop_board_photo")} />
+              <MediaTile label="Interior Video (30s)" url={selected.shop_video}        uploading={uploading.shop_video}        onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
             </div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov, max 30 seconds.</div>
           </div>
