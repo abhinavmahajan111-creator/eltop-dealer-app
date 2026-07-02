@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
@@ -226,6 +227,7 @@ export default function AdminDealers() {
   const [creditUsed, setCreditUsed] = useState(null);
   const [lightbox, setLightbox] = useState(null); // { items: [...], index: 0 }
   const [exporting, setExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft] = useState("");
   const [savingCreditLimit, setSavingCreditLimit] = useState(false);
@@ -239,11 +241,20 @@ export default function AdminDealers() {
   const handleExport = async () => {
     if (!isSupabaseConfigured) return;
     setExporting(true);
+    setExportStatus("Fetching dealer data…");
     try {
-      // ── Sheet 1: Dealers ──────────────────────────────────────────────────
-      const { data: profilesData } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+      const today = new Date();
+      const dd   = String(today.getDate()).padStart(2, "0");
+      const mm   = String(today.getMonth() + 1).padStart(2, "0");
+      const yyyy = today.getFullYear();
+      const dateSuffix = `${dd}${mm}${yyyy}`;
 
-      const dealerRows = (profilesData || []).map(d => ({
+      // ── Sheet 1: Dealers ──────────────────────────────────────────────────
+      const { data: profilesData } = await supabase
+        .from("profiles").select("*").order("created_at", { ascending: false });
+      const profiles = profilesData || [];
+
+      const dealerRows = profiles.map(d => ({
         "ID":                   d.id,
         "Dealer Code":          d.dealer_code || "",
         "Shop Name":            d.shop_name || "",
@@ -276,17 +287,18 @@ export default function AdminDealers() {
       }));
 
       // ── Sheet 2: Orders ───────────────────────────────────────────────────
+      setExportStatus("Fetching orders…");
       const { data: ordersData } = await supabase
         .from("orders")
         .select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)")
         .order("created_at", { ascending: false });
 
       // ── Sheet 3: Order Items ──────────────────────────────────────────────
+      setExportStatus("Fetching order items…");
       const { data: itemsData } = await supabase
         .from("order_items")
         .select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)");
 
-      // Count items per order for Sheet 2
       const itemCountMap = {};
       (itemsData || []).forEach(it => {
         itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty;
@@ -317,20 +329,82 @@ export default function AdminDealers() {
         "Amount (Rs.)":   (Number(it.net_rate ?? it.price) * it.qty) || 0,
       }));
 
-      // ── Build workbook ─────────────────────────────────────────────────────
+      // ── Build & download Excel ─────────────────────────────────────────────
+      setExportStatus("Building Excel file…");
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dealerRows),  "Dealers");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows),   "Orders");
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows),    "Order Items");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dealerRows), "Dealers");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows),  "Orders");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows),   "Order Items");
+      XLSX.writeFile(wb, `Eltop_Database_Export_${dateSuffix}.xlsx`);
 
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, "0");
-      const mm = String(today.getMonth() + 1).padStart(2, "0");
-      const yyyy = today.getFullYear();
-      XLSX.writeFile(wb, `Eltop_Database_Export_${dd}${mm}${yyyy}.xlsx`);
+      // ── Build media ZIP ───────────────────────────────────────────────────
+      const MEDIA_KEYS = [
+        { key: "owner_photo",       label: "owner-photo",       ext: "jpg"  },
+        { key: "staff1_photo",      label: "staff1-photo",      ext: "jpg"  },
+        { key: "staff2_photo",      label: "staff2-photo",      ext: "jpg"  },
+        { key: "shop_inside_photo", label: "shop-inside",       ext: "jpg"  },
+        { key: "shop_board_photo",  label: "shop-board",        ext: "jpg"  },
+        { key: "shop_video",        label: "interior-video",    ext: "mp4"  },
+      ];
+
+      // Only dealers that have at least one media file
+      const dealersWithMedia = profiles.filter(d =>
+        MEDIA_KEYS.some(m => !!d[m.key])
+      );
+
+      if (dealersWithMedia.length === 0) {
+        setExportStatus("");
+        setExporting(false);
+        return;
+      }
+
+      setExportStatus(`Downloading media for ${dealersWithMedia.length} dealers…`);
+      const zip = new JSZip();
+
+      let done = 0;
+      await Promise.all(
+        dealersWithMedia.map(async (d) => {
+          const folderName = (d.dealer_code || d.id.substring(0, 8)).replace(/[^a-zA-Z0-9_-]/g, "_");
+          const folder = zip.folder(folderName);
+
+          await Promise.all(
+            MEDIA_KEYS.map(async ({ key, label, ext }) => {
+              const url = d[key];
+              if (!url) return;
+              try {
+                // Detect real extension from URL
+                const urlExt = url.split("?")[0].split(".").pop().toLowerCase();
+                const finalExt = ["jpg","jpeg","png","webp","mp4","mov","avi"].includes(urlExt) ? urlExt : ext;
+                const filename = `${folderName}_${label}.${finalExt}`;
+
+                const resp = await fetch(url);
+                if (!resp.ok) return;
+                const blob = await resp.arrayBuffer();
+                folder.file(filename, blob);
+              } catch {
+                // skip failed individual file silently
+              }
+            })
+          );
+
+          done += 1;
+          setExportStatus(`Downloading media… ${done}/${dealersWithMedia.length} dealers`);
+        })
+      );
+
+      setExportStatus("Compressing ZIP…");
+      const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+      const zipUrl = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = zipUrl;
+      a.download = `Eltop_Media_Export_${dateSuffix}.zip`;
+      a.click();
+      URL.revokeObjectURL(zipUrl);
+
     } catch (e) {
       alert("Export failed: " + e.message);
     }
+    setExportStatus("");
     setExporting(false);
   };
 
@@ -1023,14 +1097,19 @@ export default function AdminDealers() {
     <div className="admin-page">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 className="admin-title" style={{ margin: 0 }}>Dealers</h1>
-        <button
-          className="btn small outline"
-          onClick={handleExport}
-          disabled={exporting || loading || dealers.length === 0}
-          style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700 }}
-        >
-          {exporting ? "⏳ Exporting…" : "⬇️ Export All Data"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {exportStatus && (
+            <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>{exportStatus}</span>
+          )}
+          <button
+            className="btn small outline"
+            onClick={handleExport}
+            disabled={exporting || loading || dealers.length === 0}
+            style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700, whiteSpace: "nowrap" }}
+          >
+            {exporting ? "⏳ Exporting…" : "⬇️ Export All Data"}
+          </button>
+        </div>
       </div>
       {loading ? (
         <div className="admin-loading">Loading…</div>
