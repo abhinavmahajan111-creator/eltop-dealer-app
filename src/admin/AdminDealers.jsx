@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 const BUCKET = "dealer-media";
@@ -224,6 +225,7 @@ export default function AdminDealers() {
   const [newTerritory, setNewTerritory] = useState("");
   const [creditUsed, setCreditUsed] = useState(null);
   const [lightbox, setLightbox] = useState(null); // { items: [...], index: 0 }
+  const [exporting, setExporting] = useState(false);
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft] = useState("");
   const [savingCreditLimit, setSavingCreditLimit] = useState(false);
@@ -233,6 +235,104 @@ export default function AdminDealers() {
     supabase.from("profiles").select("*").order("created_at", { ascending: false })
       .then(({ data }) => { if (data) setDealers(data); setLoading(false); });
   }, []);
+
+  const handleExport = async () => {
+    if (!isSupabaseConfigured) return;
+    setExporting(true);
+    try {
+      // ── Sheet 1: Dealers ──────────────────────────────────────────────────
+      const { data: profilesData } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+
+      const dealerRows = (profilesData || []).map(d => ({
+        "ID":                   d.id,
+        "Dealer Code":          d.dealer_code || "",
+        "Shop Name":            d.shop_name || "",
+        "Alias":                d.alias_name || "",
+        "Owner Name":           d.owner_name || "",
+        "Email":                d.email || "",
+        "Phone 1":              d.phone || "",
+        "Phone 2":              d.phone2 || "",
+        "GSTIN":                d.gstin || "",
+        "Registration Type":    d.registration_type || "",
+        "Website":              d.website || "",
+        "Staff Assigned":       d.staff_assigned || "",
+        "Discount 1 (%)":       d.discount1 ?? "",
+        "Discount 2 (%)":       d.discount2 ?? "",
+        "Credit Limit (Rs.)":   d.credit_limit ?? "",
+        "Billing Address":      d.address || "",
+        "Shop Address":         d.shop_address || "",
+        "Godown Address":       d.godown_address || "",
+        "Territories":          Array.isArray(d.territory) ? d.territory.join(", ") : "",
+        "Latitude":             d.latitude ?? "",
+        "Longitude":            d.longitude ?? "",
+        "Google Business Name": d.google_business_name || "",
+        "Google Maps URL":      d.google_maps_url || "",
+        "Google Rating":        d.google_rating ?? "",
+        "Google Reviews":       d.google_reviews_count ?? "",
+        "Listing Status":       d.google_listing_status || "",
+        "Listing Claimed":      d.google_listing_claimed ? "Yes" : "No",
+        "Status":               d.is_blocked ? "Blocked" : "Active",
+        "Created At":           d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "",
+      }));
+
+      // ── Sheet 2: Orders ───────────────────────────────────────────────────
+      const { data: ordersData } = await supabase
+        .from("orders")
+        .select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)")
+        .order("created_at", { ascending: false });
+
+      // ── Sheet 3: Order Items ──────────────────────────────────────────────
+      const { data: itemsData } = await supabase
+        .from("order_items")
+        .select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)");
+
+      // Count items per order for Sheet 2
+      const itemCountMap = {};
+      (itemsData || []).forEach(it => {
+        itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty;
+      });
+
+      const orderRows = (ordersData || []).map(o => ({
+        "Order ID":      o.id,
+        "Dealer Code":   o.profiles?.dealer_code || "",
+        "Dealer Name":   o.profiles?.shop_name || o.profiles?.name || "",
+        "Dealer Email":  o.profiles?.email || "",
+        "Order Date":    o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
+        "Status":        o.status || "",
+        "Total (Rs.)":   Number(o.total) || 0,
+        "Items (qty)":   itemCountMap[o.id] || 0,
+      }));
+
+      const itemRows = (itemsData || []).map(it => ({
+        "Order ID":       it.order_id,
+        "Product Name":   it.name || "",
+        "SKU":            it.products?.sku || "",
+        "HSN Code":       it.hsn_code || "",
+        "Qty":            it.qty || 0,
+        "MRP (Rs.)":      it.mrp != null ? Number(it.mrp) : "",
+        "DLP (Rs.)":      it.dlp != null ? Number(it.dlp) : "",
+        "Disc 1 (%)":     it.discount1 != null ? Number(it.discount1) : "",
+        "Disc 2 (%)":     it.discount2 != null ? Number(it.discount2) : "",
+        "Net Rate (Rs.)": Number(it.net_rate ?? it.price) || 0,
+        "Amount (Rs.)":   (Number(it.net_rate ?? it.price) * it.qty) || 0,
+      }));
+
+      // ── Build workbook ─────────────────────────────────────────────────────
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dealerRows),  "Dealers");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows),   "Orders");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows),    "Order Items");
+
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, "0");
+      const mm = String(today.getMonth() + 1).padStart(2, "0");
+      const yyyy = today.getFullYear();
+      XLSX.writeFile(wb, `Eltop_Database_Export_${dd}${mm}${yyyy}.xlsx`);
+    } catch (e) {
+      alert("Export failed: " + e.message);
+    }
+    setExporting(false);
+  };
 
   const openDealer = (d) => {
     setSelected(d);
@@ -921,7 +1021,17 @@ export default function AdminDealers() {
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
   return (
     <div className="admin-page">
-      <h1 className="admin-title">Dealers</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <h1 className="admin-title" style={{ margin: 0 }}>Dealers</h1>
+        <button
+          className="btn small outline"
+          onClick={handleExport}
+          disabled={exporting || loading || dealers.length === 0}
+          style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700 }}
+        >
+          {exporting ? "⏳ Exporting…" : "⬇️ Export All Data"}
+        </button>
+      </div>
       {loading ? (
         <div className="admin-loading">Loading…</div>
       ) : dealers.length === 0 ? (
