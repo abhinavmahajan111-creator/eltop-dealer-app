@@ -103,6 +103,7 @@ export default function AdminDealers() {
   const [saving, setSaving]     = useState(false);
   const [uploading, setUploading] = useState({});
   const [newTerritory, setNewTerritory] = useState("");
+  const [creditUsed, setCreditUsed] = useState(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -110,7 +111,24 @@ export default function AdminDealers() {
       .then(({ data }) => { if (data) setDealers(data); setLoading(false); });
   }, []);
 
-  const openDealer = (d) => { setSelected(d); setEditing(false); setEdits({}); setNewTerritory(""); };
+  const openDealer = (d) => {
+    setSelected(d);
+    setEditing(false);
+    setEdits({});
+    setNewTerritory("");
+    setCreditUsed(null);
+    // Fetch sum of pending + confirmed orders for credit utilization
+    if (isSupabaseConfigured) {
+      supabase
+        .from("orders")
+        .select("total")
+        .eq("dealer_id", d.id)
+        .in("status", ["pending", "confirmed"])
+        .then(({ data }) => {
+          if (data) setCreditUsed(data.reduce((sum, o) => sum + Number(o.total || 0), 0));
+        });
+    }
+  };
   const goBack     = ()  => { setSelected(null); setEditing(false); setEdits({}); setNewTerritory(""); };
 
   const startEdit = () => {
@@ -132,6 +150,7 @@ export default function AdminDealers() {
       territory:                  Array.isArray(selected.territory) ? [...selected.territory] : [],
       discount1:                  selected.discount1                  ?? 0,
       discount2:                  selected.discount2                  ?? 0,
+      credit_limit:               selected.credit_limit               ?? "",
       google_business_name:       selected.google_business_name       || "",
       google_maps_url:            selected.google_maps_url            || "",
       google_rating:              selected.google_rating              ?? "",
@@ -168,6 +187,7 @@ export default function AdminDealers() {
       territory:                  edits.territory,
       discount1:                  Number(edits.discount1) || 0,
       discount2:                  Number(edits.discount2) || 0,
+      credit_limit:               edits.credit_limit !== "" ? Number(edits.credit_limit) : null,
       google_business_name:       edits.google_business_name || null,
       google_maps_url:            edits.google_maps_url      || null,
       google_rating:              edits.google_rating !== "" ? Number(edits.google_rating) : null,
@@ -343,6 +363,7 @@ export default function AdminDealers() {
                 <EditField label="Staff Assigned" field="staff_assigned" value={E("staff_assigned")} onChange={set} />
                 <EditField label="Discount 1 (%)" field="discount1" value={E("discount1")} onChange={set} type="number" />
                 <EditField label="Discount 2 (%)" field="discount2" value={E("discount2")} onChange={set} type="number" />
+                <EditField label="Credit Limit (Rs.)" field="credit_limit" value={E("credit_limit")} onChange={set} type="number" span />
               </>
             ) : (
               <>
@@ -362,6 +383,40 @@ export default function AdminDealers() {
                     Net Rate = DLP × {((1 - d1 / 100) * (1 - d2 / 100) * 100).toFixed(2)}%
                   </div>
                 ) : null}
+
+                {/* Credit Limit + Utilization */}
+                <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Credit Limit</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: selected.credit_limit ? "#111" : "var(--muted)" }}>
+                    {selected.credit_limit ? `Rs. ${Number(selected.credit_limit).toLocaleString("en-IN")}` : "Not set"}
+                  </div>
+                  {selected.credit_limit && creditUsed !== null && (() => {
+                    const limit = Number(selected.credit_limit);
+                    const used  = creditUsed;
+                    const pct   = Math.min((used / limit) * 100, 100);
+                    const over  = used > limit;
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4, color: over ? "#c0392b" : "#555" }}>
+                          <span>Used: <strong>Rs. {used.toLocaleString("en-IN")}</strong> of Rs. {limit.toLocaleString("en-IN")}</span>
+                          <span style={{ fontWeight: 700, color: over ? "#c0392b" : pct > 75 ? "#e67e22" : "#27ae60" }}>{pct.toFixed(0)}%</span>
+                        </div>
+                        <div style={{ height: 8, borderRadius: 4, background: "#e8e8e8", overflow: "hidden" }}>
+                          <div style={{
+                            height: "100%", borderRadius: 4,
+                            width: `${pct}%`,
+                            background: over ? "#c0392b" : pct > 75 ? "#e67e22" : "#27ae60",
+                            transition: "width .4s ease",
+                          }} />
+                        </div>
+                        {over && <div style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, marginTop: 4 }}>⚠️ Over credit limit by Rs. {(used - limit).toLocaleString("en-IN")}</div>}
+                      </div>
+                    );
+                  })()}
+                  {selected.credit_limit && creditUsed === null && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Loading utilization…</div>
+                  )}
+                </div>
               </>
             )}
 
