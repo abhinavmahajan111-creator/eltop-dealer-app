@@ -126,16 +126,34 @@ export default function SalesOrder() {
       <table style={{ ...s.box, marginBottom: 0 }}>
         <tbody>
           <tr>
-            <td style={{ ...s.td, width: "50%", borderRight: "1px solid #000" }}>
-              <div style={{ fontSize: 15, fontWeight: "bold" }}>{COMPANY.name}</div>
+            {/* Left: logos stacked */}
+            <td style={{ ...s.td, width: 130, verticalAlign: "middle", textAlign: "center", padding: "8px 10px", borderRight: "1px solid #000" }}>
+              <img
+                src="/assets/eltop-logo.png"
+                alt="Eltop"
+                style={{ maxWidth: 110, maxHeight: 54, objectFit: "contain", display: "block", margin: "0 auto" }}
+              />
+              <div style={{ borderTop: "1px solid #ddd", margin: "6px 0" }} />
+              <img
+                src="/assets/embassy-logo.png"
+                alt="Embassy Electricals"
+                style={{ maxWidth: 110, maxHeight: 48, objectFit: "contain", display: "block", margin: "0 auto" }}
+              />
+            </td>
+
+            {/* Centre: company details */}
+            <td style={{ ...s.td, verticalAlign: "middle", padding: "8px 14px", borderRight: "1px solid #000" }}>
+              <div style={{ fontSize: 16, fontWeight: "bold", marginBottom: 3 }}>{COMPANY.name}</div>
               <div style={s.small}>{COMPANY.address}</div>
-              <div style={s.small}>GSTIN/UIN: {COMPANY.gstin}</div>
-              <div style={s.small}>State: {COMPANY.state}</div>
-              <div style={s.small}>{COMPANY.email} | {COMPANY.website}</div>
+              <div style={{ ...s.small, marginTop: 3 }}>GSTIN/UIN: <strong>{COMPANY.gstin}</strong> &nbsp;|&nbsp; State: {COMPANY.state}</div>
+              <div style={s.small}>Email: {COMPANY.email} &nbsp;|&nbsp; Web: {COMPANY.website}</div>
               <div style={s.small}>Udyam Reg. No.: {COMPANY.udyam}</div>
             </td>
-            <td style={{ ...s.td, textAlign: "center", borderLeft: "none" }}>
-              <div style={{ fontSize: 18, fontWeight: "bold", letterSpacing: 2 }}>SALES ORDER</div>
+
+            {/* Right: document title */}
+            <td style={{ ...s.td, width: 130, textAlign: "center", verticalAlign: "middle", padding: "8px 10px" }}>
+              <div style={{ fontSize: 16, fontWeight: "bold", letterSpacing: 1 }}>SALES</div>
+              <div style={{ fontSize: 16, fontWeight: "bold", letterSpacing: 1 }}>ORDER</div>
             </td>
           </tr>
         </tbody>
