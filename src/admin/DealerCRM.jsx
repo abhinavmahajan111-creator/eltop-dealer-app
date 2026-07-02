@@ -52,6 +52,7 @@ export default function DealerCRM() {
   const [loading, setLoading] = useState(true);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderItemsCache, setOrderItemsCache] = useState({});
+  const [allOrderItems, setAllOrderItems] = useState([]); // for AI context
 
   // Activity form
   const [actForm, setActForm] = useState({ type: "call", notes: "", date: new Date().toISOString().slice(0, 10) });
@@ -76,11 +77,23 @@ export default function DealerCRM() {
       supabase.from("orders").select("id, status, total, created_at, delivery_address").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
       supabase.from("dealer_activities").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
       supabase.from("dealer_ledger").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
-    ]).then(([d, o, a, l]) => {
+    ]).then(async ([d, o, a, l]) => {
       if (d.data) setDealer(d.data);
-      setOrders(o.data || []);
+      const fetchedOrders = o.data || [];
+      setOrders(fetchedOrders);
       setActivities(a.data || []);
       setLedger(l.data || []);
+
+      // Fetch all order items for AI context
+      if (fetchedOrders.length > 0) {
+        const orderIds = fetchedOrders.map(ord => ord.id);
+        const { data: items } = await supabase
+          .from("order_items")
+          .select("order_id, name, qty, price")
+          .in("order_id", orderIds);
+        setAllOrderItems(items || []);
+      }
+
       setLoading(false);
     });
   }, [dealerId]);
@@ -153,15 +166,55 @@ export default function DealerCRM() {
     setOrderItemsCache(prev => ({ ...prev, [orderId]: data || [] }));
   };
 
-  // ── AI Chat ──
+  // ── AI Chat context ──
+  // Build product frequency map across all orders
+  const productFreq = {};
+  allOrderItems.forEach(it => {
+    if (!productFreq[it.name]) productFreq[it.name] = 0;
+    productFreq[it.name] += it.qty;
+  });
+  const topProducts = Object.entries(productFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, qty]) => `${name} (${qty} units)`)
+    .join(", ") || "None";
+
+  // Build items map by order_id for quick lookup
+  const itemsByOrder = {};
+  allOrderItems.forEach(it => {
+    if (!itemsByOrder[it.order_id]) itemsByOrder[it.order_id] = [];
+    itemsByOrder[it.order_id].push(it);
+  });
+
+  // Last 5 orders with items
+  const last5 = orders.slice(0, 5).map((o, i) => {
+    const items = (itemsByOrder[o.id] || [])
+      .map(it => `${it.name} ×${it.qty} @ ₹${fmt(it.price)}`)
+      .join(", ") || "Items not loaded";
+    return `  Order ${i + 1} (${fmtDateOnly(o.created_at)}, ₹${fmt(o.total)}, ${o.status}): ${items}`;
+  }).join("\n");
+
   const dealerContext = `
-Dealer: ${dealer.name || dealer.email} | Code: ${dealer.dealer_code || "N/A"} | Email: ${dealer.email}
-GSTIN: ${dealer.gstin || "N/A"} | Address: ${dealer.address || "N/A"}
+DEALER PROFILE:
+Name: ${dealer.name || dealer.email} | Code: ${dealer.dealer_code || "N/A"} | Email: ${dealer.email}
+Phone: ${dealer.phone || "N/A"} | GSTIN: ${dealer.gstin || "N/A"}
+Address: ${dealer.address || "N/A"}
 Discounts: ${d1}% + ${d2}% → Net Rate = DLP × ${netPct}%
-Total Orders: ${orders.length} | Total Revenue: ₹${fmt(totalRevenue)} | Avg Order: ₹${fmt(avgOrder)}
+Payment Terms: ${dealer.payment_terms || "Credit"} — ${dealer.credit_days || 30} days | Credit Limit: ₹${fmt(dealer.credit_limit)}
+
+ACCOUNT SUMMARY:
+Total Orders: ${orders.length} | Total Revenue: ₹${fmt(totalRevenue)} | Avg Order Value: ₹${fmt(avgOrder)}
 Last Order: ${lastOrder} | Order Frequency: ${freq}/month | Account Health: ${health.label}
-Outstanding Balance: ₹${fmt(outstanding)} | Credit Limit: ₹${fmt(dealer.credit_limit)} | Payment Terms: ${dealer.payment_terms || "Credit"} ${dealer.credit_days || 30} days
-Recent Activities: ${activities.slice(0, 3).map(a => `${a.type} on ${fmtDateOnly(a.created_at)}: ${a.notes}`).join("; ") || "None"}
+Outstanding Balance: ₹${fmt(outstanding)}
+
+MOST ORDERED PRODUCTS (by units):
+${topProducts}
+
+LAST 5 ORDERS WITH ITEMS:
+${last5 || "No orders yet"}
+
+RECENT ACTIVITIES:
+${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: ${a.notes || "—"}`).join("\n") || "  None logged"}
 `.trim();
 
   const sendAI = async (userMsg) => {
@@ -527,7 +580,7 @@ Recent Activities: ${activities.slice(0, 3).map(a => `${a.type} on ${fmtDateOnly
           <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 220px)", minHeight: 400 }}>
             {/* Context pill */}
             <div style={{ background: "#f8f4f8", borderRadius: 8, padding: "8px 14px", fontSize: 11, color: "var(--red-dark)", marginBottom: 12 }}>
-              🤖 AI has full context: {dealer.name || dealer.email} · {orders.length} orders · ₹{fmt(totalRevenue)} revenue · {health.label}
+              🤖 AI has full context: {dealer.name || dealer.email} · {orders.length} orders · ₹{fmt(totalRevenue)} revenue · {Object.keys(productFreq).length} products · {health.label}
             </div>
 
             {/* Chat messages */}
