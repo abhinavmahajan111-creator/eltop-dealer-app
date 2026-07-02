@@ -141,6 +141,7 @@ export default function AdminOrders() {
           <table className="admin-table">
             <thead>
               <tr style={{ verticalAlign: "top" }}>
+                <th style={{ width: 32, textAlign: "center", color: "var(--muted)", fontSize: 12 }}>#</th>
                 <th style={{ width: 24 }}></th>
 
                 {/* Order ID filter */}
@@ -208,9 +209,9 @@ export default function AdminOrders() {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>No orders match the current filters.</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>No orders match the current filters.</td></tr>
               )}
-              {filtered.map((o) => {
+              {filtered.map((o, idx) => {
                 const isOpen = expandedId === o.id;
                 const items = itemsCache[o.id] || [];
                 const profile = o.profiles;
@@ -222,6 +223,9 @@ export default function AdminOrders() {
                     onClick={() => handleRowClick(o.id)}
                     style={{ cursor: "pointer" }}
                   >
+                    <td style={{ width: 32, textAlign: "center", color: "var(--muted)", fontSize: 12, fontWeight: 600 }}>
+                      {idx + 1}
+                    </td>
                     <td style={{ width: 24, color: "var(--muted)", fontSize: 11 }}>
                       {isOpen ? "▼" : "▶"}
                     </td>
@@ -266,7 +270,7 @@ export default function AdminOrders() {
 
                   isOpen && (
                     <tr key={`${o.id}-detail`} className="admin-order-detail-row">
-                      <td colSpan={6} style={{ padding: 0 }}>
+                      <td colSpan={7} style={{ padding: 0 }}>
                         <div className="admin-order-detail">
                           <div className="admin-order-detail-section">
                             <div className="admin-order-detail-heading">Dealer Info</div>
@@ -340,7 +344,8 @@ export default function AdminOrders() {
               return (
                 <tfoot>
                   <tr style={{ background: "#f8f4f8", borderTop: "2px solid var(--red-light)" }}>
-                    <td colSpan={3} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--red-dark)" }}>
+                    {/* cols: #, arrow, Order ID, Dealer → span 4 */}
+                    <td colSpan={4} style={{ padding: "10px 14px", fontSize: 13, fontWeight: 700, color: "var(--red-dark)" }}>
                       {hasFilters ? "Filtered" : "All"} Orders: {filtered.length}
                       {hasFilters && orders.length !== filtered.length && (
                         <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500, marginLeft: 8 }}>
@@ -348,9 +353,12 @@ export default function AdminOrders() {
                         </span>
                       )}
                     </td>
-                    <td colSpan={3} style={{ padding: "10px 14px", fontSize: 14, fontWeight: 800, color: "var(--red-dark)", textAlign: "right", whiteSpace: "nowrap" }}>
+                    {/* col: Total */}
+                    <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 800, color: "var(--red-dark)", whiteSpace: "nowrap" }}>
                       Rs. {filteredTotal.toLocaleString("en-IN")}
                     </td>
+                    {/* cols: Placed, Status → empty */}
+                    <td colSpan={2} />
                   </tr>
                 </tfoot>
               );
