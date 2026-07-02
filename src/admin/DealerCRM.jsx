@@ -174,15 +174,10 @@ Recent Activities: ${activities.slice(0, 3).map(a => `${a.type} on ${fmtDateOnly
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY || "",
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 1024,
+          max_tokens: 1000,
           system: `You are an expert sales CRM assistant for Eltop by Embassy Electricals, an electrical products dealer management system. You help the sales team understand and manage their dealer relationships. Always be specific, actionable, and concise. Here is the full context for the dealer you are analyzing:\n\n${dealerContext}`,
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
         }),
@@ -191,7 +186,7 @@ Recent Activities: ${activities.slice(0, 3).map(a => `${a.type} on ${fmtDateOnly
       const reply = json.content?.[0]?.text || "Sorry, I couldn't get a response.";
       setMessages(prev => [...prev, { role: "assistant", content: reply }]);
     } catch {
-      setMessages(prev => [...prev, { role: "assistant", content: "Error connecting to AI. Check VITE_ANTHROPIC_KEY." }]);
+      setMessages(prev => [...prev, { role: "assistant", content: "Error connecting to AI assistant." }]);
     }
     setAiLoading(false);
   };
