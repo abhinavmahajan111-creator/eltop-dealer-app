@@ -310,15 +310,15 @@ export default function Store() {
                 <img
                   src="/assets/ELTOP%20LOGO.png"
                   alt="Eltop"
-                  style={{ height: '60px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                  style={{ height: '60px', width: 'auto', objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
                   onError={e => e.target.style.display = 'none'}
                 />
-                <span style={{ fontSize: '10px', color: '#CC0000', fontWeight: 'bold', lineHeight: 1 }}>®</span>
+                <span style={{ fontSize: '10px', color: '#FF0000', fontWeight: 'bold', lineHeight: 1 }}>®</span>
               </div>
               <img
                 src="/assets/EMBASSY%20LOGO.png"
                 alt="Embassy"
-                style={{ height: '50px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                style={{ height: '50px', width: 'auto', objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
                 onError={e => e.target.style.display = 'none'}
               />
             </div>
