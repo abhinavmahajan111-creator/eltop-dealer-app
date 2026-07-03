@@ -42,7 +42,7 @@ function CartDrawer({ cart, onClose, onLoginClick }) {
         zIndex: 1001, display: "flex", flexDirection: "column",
         boxShadow: "-4px 0 24px rgba(0,0,0,.2)",
       }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#7C3AED" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#7B2D8B" }}>
           <span style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>
             🛒 Cart {cart.count > 0 && <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.85 }}>({cart.count})</span>}
           </span>
@@ -83,13 +83,13 @@ function CartDrawer({ cart, onClose, onLoginClick }) {
             </div>
             <button
               onClick={() => alert("Thank you! We'll contact you soon.")}
-              style={{ width: "100%", padding: "12px 0", background: "#7C3AED", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}
+              style={{ width: "100%", padding: "12px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}
             >
               Place Order
             </button>
-            <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8, padding: "10px 12px", marginTop: 10, textAlign: "center" }}>
-              <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>🎉 Login to get 15% OFF this order!</div>
-              <span onClick={onLoginClick} style={{ fontSize: 12, color: "#16a34a", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Login / Sign Up →</span>
+            <div style={{ background: "#E8D5F0", border: "1px solid #C084D4", borderRadius: 8, padding: "10px 12px", marginTop: 10, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700 }}>🎉 Login to get 15% OFF this order!</div>
+              <span onClick={onLoginClick} style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Login / Sign Up →</span>
             </div>
           </div>
         )}
@@ -129,12 +129,12 @@ function ProductCard({ product: p, onAdd }) {
             : <span style={{ fontSize: 40, opacity: 0.35 }}>📦</span>}
         </div>
         {p.category && (
-          <span style={{ position: "absolute", top: 6, left: 6, background: "#7C3AED", color: "#fff", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          <span style={{ position: "absolute", top: 6, left: 6, background: "#7B2D8B", color: "#fff", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 20, textTransform: "uppercase", letterSpacing: "0.5px" }}>
             {p.category}
           </span>
         )}
         {saving > 0 && (
-          <span style={{ position: "absolute", top: 6, right: 6, background: "#DC2626", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 20 }}>
+          <span style={{ position: "absolute", top: 6, right: 6, background: "#E8001C", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 20 }}>
             -15%
           </span>
         )}
@@ -164,7 +164,7 @@ function ProductCard({ product: p, onAdd }) {
 
         <button
           onClick={() => onAdd(p)}
-          style={{ width: "100%", padding: "8px 0", background: hov ? "#6D28D9" : "#7C3AED", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
+          style={{ width: "100%", padding: "8px 0", background: hov ? "#6A1F7A" : "#7B2D8B", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
         >
           + Add to Cart
         </button>
@@ -219,7 +219,7 @@ export default function Store() {
         .store-root { min-height: 100vh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
 
         /* ── Header ── */
-        .store-header { position: sticky; top: 0; z-index: 200; background: #1e293b; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+        .store-header { position: sticky; top: 0; z-index: 200; background: #7B2D8B; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
         .store-header-inner { max-width: 1400px; margin: 0 auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
         .store-row1 { display: flex; align-items: center; gap: 10px; width: 100%; }
         .store-row2 { display: flex; width: 100%; }
@@ -248,7 +248,7 @@ export default function Store() {
 
         /* Header right buttons */
         .store-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .btn-login-primary { background: #fff; border: none; border-radius: 8px; color: #1e293b; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .btn-login-primary { background: #fff; border: none; border-radius: 8px; color: #7B2D8B; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-login { background: none; border: none; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: underline; padding: 4px; }
         .store-cart-btn { background: none; border: none; color: #fff; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
         @media (max-width: 639px) {
@@ -263,10 +263,10 @@ export default function Store() {
         .store-cat-btn { flex-shrink: 0; padding: 11px 14px; background: none; border: none; cursor: pointer; font-size: 13px; font-family: inherit; display: flex; align-items: center; gap: 5px; white-space: nowrap; transition: all .15s; border-bottom: 3px solid transparent; }
 
         /* Hero banner */
-        .store-hero { background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%); color: #fff; text-align: center; padding: 28px 20px; }
+        .store-hero { background: linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%); color: #fff; text-align: center; padding: 28px 20px; }
         .store-hero-title { font-weight: 900; font-size: 22px; margin-bottom: 6px; }
         .store-hero-sub { font-size: 15px; opacity: 0.9; margin-bottom: 16px; }
-        .store-hero-btn { display: inline-block; background: #fff; color: #7C3AED; font-weight: 800; font-size: 14px; padding: 10px 24px; border-radius: 24px; cursor: pointer; border: none; font-family: inherit; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+        .store-hero-btn { display: inline-block; background: #fff; color: #7B2D8B; font-weight: 800; font-size: 14px; padding: 10px 24px; border-radius: 24px; cursor: pointer; border: none; font-family: inherit; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
         @media (max-width: 639px) {
           .store-hero { padding: 18px 14px; }
           .store-hero-title { font-size: 16px; }
@@ -275,7 +275,8 @@ export default function Store() {
         }
 
         /* Product grid */
-        .store-content { max-width: 1400px; margin: 0 auto; padding: 16px 12px 100px; }
+        .store-content { max-width: 1400px; margin: 0 auto; padding: 16px 12px 100px; background: transparent; }
+        .store-root::after { content: ''; display: block; height: 0; }
         .store-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); }
         @media (min-width: 480px)  { .store-grid { gap: 12px; } }
         @media (min-width: 640px)  { .store-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
@@ -283,9 +284,9 @@ export default function Store() {
         @media (min-width: 1200px) { .store-grid { grid-template-columns: repeat(5, 1fr); } }
 
         /* Discount strip */
-        .discount-strip { background: #16a34a; color: #fff; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
+        .discount-strip { background: #7B2D8B; color: #fff; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
         .discount-strip-text { font-size: 13px; font-weight: 700; }
-        .discount-strip-btn { background: #fff; color: #16a34a; border: none; border-radius: 20px; padding: 6px 16px; font-weight: 800; font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+        .discount-strip-btn { background: #fff; color: #7B2D8B; border: none; border-radius: 20px; padding: 6px 16px; font-weight: 800; font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
         .discount-strip-close { background: none; border: none; color: rgba(255,255,255,.7); cursor: pointer; font-size: 18px; margin-left: 4px; padding: 0 4px; line-height: 1; }
 
         /* Floating bottom strip on mobile */
@@ -376,7 +377,7 @@ export default function Store() {
           <div className="store-cats-inner">
             {categories.map(cat => (
               <button key={cat} onClick={() => setCategory(cat)} className="store-cat-btn"
-                style={{ fontWeight: category === cat ? 800 : 500, color: category === cat ? "#7C3AED" : "#475569", borderBottomColor: category === cat ? "#7C3AED" : "transparent" }}>
+                style={{ fontWeight: category === cat ? 800 : 500, color: category === cat ? "#7B2D8B" : "#475569", borderBottomColor: category === cat ? "#7B2D8B" : "transparent" }}>
                 <span>{catIcon(cat)}</span>
                 <span>{cat}</span>
               </button>
@@ -429,6 +430,15 @@ export default function Store() {
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
           onLoginClick={() => { setCartOpen(false); navigate("/login"); }} />
       )}
+
+      {/* ── Footer ── */}
+      <div style={{ background: "#E8D5F0", borderTop: "2px solid #C084D4", padding: "20px 20px", textAlign: "center" }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto" }}>
+          <img src="/assets/eltop-logo.png.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
+          <div style={{ fontSize: 13, color: "#7B2D8B", fontWeight: 700 }}>Eltop by Embassy Electricals (India) Pvt. Ltd.</div>
+          <div style={{ fontSize: 11, color: "#9B4DB8", marginTop: 4 }}>Quality Electrical Products · Dealer Enquiries: <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => navigate("/login")}>Login as Dealer →</span></div>
+        </div>
+      </div>
     </div>
   );
 }
