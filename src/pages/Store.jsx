@@ -145,7 +145,7 @@ function ProductCard({ product: p, onAdd, onSelect }) {
 
   return (
     <div
-      onClick={() => onSelect(p)}
+      onClick={() => { onSelect(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -380,12 +380,13 @@ export default function Store() {
 
   function selectCategory(cat) {
     setCategory(cat);
-    setTimeout(() => productsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function backToCategories() {
     setCategory(null);
     setSearch("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   const showLanding = !category && !search;
@@ -587,8 +588,8 @@ export default function Store() {
       {selectedProduct && (
         <ProductDetailView
           product={selectedProduct}
-          onBack={() => setSelectedProduct(null)}
-          onAdd={p => { cart.add(p); setSelectedProduct(null); }}
+          onBack={() => { setSelectedProduct(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          onAdd={p => { cart.add(p); setSelectedProduct(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}
         />
       )}
 
