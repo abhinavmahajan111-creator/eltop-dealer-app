@@ -227,6 +227,7 @@ export default function AdminDealers() {
   const [lightbox, setLightbox] = useState(null); // { items: [...], index: 0 }
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
+  const [selectedDealerIds, setSelectedDealerIds] = useState(new Set());
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft] = useState("");
   const [savingCreditLimit, setSavingCreditLimit] = useState(false);
@@ -254,9 +255,18 @@ export default function AdminDealers() {
         supabase.from("orders").select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)").order("created_at", { ascending: false }),
         supabase.from("order_items").select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)"),
       ]);
-      const profiles  = profilesRes.data  || [];
-      const orders    = ordersRes.data    || [];
-      const orderItems = itemsRes.data    || [];
+      let profiles  = profilesRes.data  || [];
+      let orders    = ordersRes.data    || [];
+      let orderItems = itemsRes.data    || [];
+
+      // ── Filter to selection if active ─────────────────────────────────────
+      if (selectedDealerIds.size > 0) {
+        profiles   = profiles.filter(d => selectedDealerIds.has(d.id));
+        const selectedOrdererIds = new Set(profiles.map(d => d.id));
+        orders     = orders.filter(o => selectedOrdererIds.has(o.dealer_id));
+        const selectedOrderIds = new Set(orders.map(o => o.id));
+        orderItems = orderItems.filter(it => selectedOrderIds.has(it.order_id));
+      }
 
       const itemCountMap = {};
       orderItems.forEach(it => { itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty; });
@@ -1184,13 +1194,26 @@ export default function AdminDealers() {
           {exportStatus && (
             <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>{exportStatus}</span>
           )}
+          {selectedDealerIds.size > 0 && (
+            <button
+              onClick={() => setSelectedDealerIds(new Set())}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--muted)", textDecoration: "underline", padding: 0, whiteSpace: "nowrap" }}
+            >
+              Clear Selection
+            </button>
+          )}
           <button
             className="btn small outline"
             onClick={handleExport}
             disabled={exporting || loading || dealers.length === 0}
             style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700, whiteSpace: "nowrap" }}
           >
-            {exporting ? "⏳ Exporting…" : "⬇️ Export All Data"}
+            {exporting
+              ? "⏳ Exporting…"
+              : selectedDealerIds.size > 0
+                ? `⬇️ Export Selected (${selectedDealerIds.size})`
+                : "⬇️ Export All Data"
+            }
           </button>
         </div>
       </div>
@@ -1203,6 +1226,18 @@ export default function AdminDealers() {
           <table className="admin-table">
             <thead>
               <tr>
+                <th style={{ width: 32, textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={dealers.length > 0 && selectedDealerIds.size === dealers.length}
+                    ref={el => { if (el) el.indeterminate = selectedDealerIds.size > 0 && selectedDealerIds.size < dealers.length; }}
+                    onChange={e => {
+                      if (e.target.checked) setSelectedDealerIds(new Set(dealers.map(d => d.id)));
+                      else setSelectedDealerIds(new Set());
+                    }}
+                    style={{ cursor: "pointer", accentColor: "var(--red-dark)", width: 14, height: 14 }}
+                  />
+                </th>
                 <th style={{ width: 36 }}>#</th>
                 <th>Dealer Code</th>
                 <th>Shop / Owner</th>
@@ -1214,8 +1249,29 @@ export default function AdminDealers() {
             <tbody>
               {dealers.map((d, idx) => {
                 const territories = Array.isArray(d.territory) ? d.territory : [];
+                const isChecked = selectedDealerIds.has(d.id);
                 return (
-                  <tr key={d.id} onClick={() => openDealer(d)} style={{ cursor: "pointer" }} className="admin-dealer-row">
+                  <tr
+                    key={d.id}
+                    onClick={() => openDealer(d)}
+                    style={{ cursor: "pointer", background: isChecked ? "#f5eef8" : undefined }}
+                    className="admin-dealer-row"
+                  >
+                    <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={e => {
+                          setSelectedDealerIds(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(d.id);
+                            else next.delete(d.id);
+                            return next;
+                          });
+                        }}
+                        style={{ cursor: "pointer", accentColor: "var(--red-dark)", width: 14, height: 14 }}
+                      />
+                    </td>
                     <td style={{ color: "var(--muted)", fontSize: 12, textAlign: "center" }}>{idx + 1}</td>
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>{d.dealer_code || "—"}</td>
                     <td>
