@@ -25,6 +25,19 @@ function useCart() {
 
 const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
 
+// Handle image_urls (array or JSON string) or image_url (string)
+function getImages(p) {
+  let urls = p.image_urls ?? p.image_url ?? null;
+  if (!urls) return [];
+  if (typeof urls === "string") {
+    // Could be a JSON array string or a plain URL
+    try { urls = JSON.parse(urls); } catch { urls = [urls]; }
+  }
+  if (Array.isArray(urls)) return urls.filter(Boolean);
+  return [urls].filter(Boolean);
+}
+function getFirstImage(p) { return getImages(p)[0] || null; }
+
 const CAT_ICONS = {
   "Fans": "🌀", "Wiring Devices": "🔌", "Cables": "🔋", "Lighting": "💡",
   "Switches": "🔘", "MCB": "⚡", "Distribution": "🗂️", "Motors": "⚙️", "Tools": "🔧",
@@ -59,8 +72,8 @@ function CartDrawer({ cart, onClose, onLoginClick }) {
           ) : cart.items.map(({ product: p, qty }) => (
             <div key={p.id} style={{ display: "flex", gap: 10, padding: "12px 0", borderBottom: "1px solid #f0f0f0" }}>
               <div style={{ width: 60, height: 60, borderRadius: 8, overflow: "hidden", border: "1px solid #eee", flexShrink: 0, background: "#f9f9f9", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {p.image_urls?.[0]
-                  ? <img src={p.image_urls[0]} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                {getFirstImage(p)
+                  ? <img src={getFirstImage(p)} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                   : <span style={{ fontSize: 26 }}>📦</span>}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -160,8 +173,8 @@ function ProductCard({ product: p, onAdd, onSelect }) {
     >
       <div style={{ background: "#f9f8ff", position: "relative", paddingTop: "75%", overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 8 }}>
-          {p.image_urls?.[0]
-            ? <img src={p.image_urls[0]} alt={p.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+          {getFirstImage(p)
+            ? <img src={getFirstImage(p)} alt={p.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
             : <span style={{ fontSize: 40, opacity: 0.35 }}>📦</span>}
         </div>
         {p.category && (
@@ -213,7 +226,7 @@ function ProductCard({ product: p, onAdd, onSelect }) {
 function ProductDetailView({ product: p, onBack, onAdd }) {
   const [activeImg, setActiveImg] = useState(0);
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
-  const images = p.image_urls?.length ? p.image_urls : [];
+  const images = getImages(p);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
@@ -334,7 +347,7 @@ export default function Store() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     supabase
       .from("products")
-      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, sku")
+      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error }) => {
@@ -356,7 +369,7 @@ export default function Store() {
       const prods = products.filter(p => p.category === cat);
       meta[cat] = {
         count: prods.length,
-        image: prods.find(p => p.image_urls?.[0])?.image_urls?.[0] || null,
+        image: getFirstImage(prods.find(p => getFirstImage(p)) || {}),
       };
     }
     return meta;
