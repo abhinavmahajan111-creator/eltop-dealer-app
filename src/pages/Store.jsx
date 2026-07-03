@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
@@ -28,6 +28,7 @@ const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
 const CAT_ICONS = {
   "Fans": "🌀", "Wiring Devices": "🔌", "Cables": "🔋", "Lighting": "💡",
   "Switches": "🔘", "MCB": "⚡", "Distribution": "🗂️", "Motors": "⚙️", "Tools": "🔧",
+  "Coolers": "❄️", "Geysers": "🔥", "Heaters": "♨️", "Kitchen": "🍳",
 };
 const catIcon = (name) => CAT_ICONS[name] || "📦";
 
@@ -104,6 +105,39 @@ const qtyBtnStyle = {
   lineHeight: 1, padding: 0, fontFamily: "inherit",
 };
 
+// ── Category Card ─────────────────────────────────────────────────────────────
+function CategoryCard({ cat, count, image, isAll, onClick }) {
+  const [hov, setHov] = useState(false);
+  const bg = isAll
+    ? "linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)"
+    : image
+      ? `url(${image})`
+      : "linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)";
+
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      className="cat-card"
+      style={{
+        backgroundImage: bg,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        transform: hov ? "scale(1.03)" : "scale(1)",
+        boxShadow: hov ? "0 0 0 3px #7B2D8B, 0 8px 24px rgba(123,45,139,.3)" : "0 2px 12px rgba(0,0,0,.15)",
+      }}
+    >
+      <div className="cat-card-overlay" style={{ background: hov ? "rgba(0,0,0,.45)" : "rgba(0,0,0,.35)" }} />
+      <div className="cat-card-content">
+        <span className="cat-card-icon">{catIcon(cat)}</span>
+        <div className="cat-card-name">{cat}</div>
+        <div className="cat-card-count">{count} Product{count !== 1 ? "s" : ""}</div>
+      </div>
+    </div>
+  );
+}
+
 // ── Product Card ──────────────────────────────────────────────────────────────
 function ProductCard({ product: p, onAdd }) {
   const [hov, setHov] = useState(false);
@@ -179,8 +213,9 @@ export default function Store() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState(null); // null = show category landing
   const [cartOpen, setCartOpen] = useState(false);
+  const productsRef = useRef(null);
   const cart = useCart();
 
   useEffect(() => {
@@ -199,17 +234,49 @@ export default function Store() {
 
   const categories = useMemo(() => {
     const cats = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
-    return ["All", ...cats];
+    return cats;
   }, [products]);
 
+  // Category metadata: count + first image
+  const catMeta = useMemo(() => {
+    const meta = {};
+    for (const cat of categories) {
+      const prods = products.filter(p => p.category === cat);
+      meta[cat] = {
+        count: prods.length,
+        image: prods.find(p => p.image_urls?.[0])?.image_urls?.[0] || null,
+      };
+    }
+    return meta;
+  }, [categories, products]);
+
   const filtered = useMemo(() => {
+    if (!category && !search) return [];
     const q = search.toLowerCase();
     return products.filter(p => {
-      const matchCat = category === "All" || p.category === category;
+      const matchCat = !category || category === "All" || p.category === category;
       const matchQ   = !q || p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q) || p.hsn_code?.includes(q);
       return matchCat && matchQ;
     });
   }, [products, search, category]);
+
+  // When search is typed from landing, switch to "All" view
+  function handleSearch(val) {
+    setSearch(val);
+    if (val && !category) setCategory("All");
+  }
+
+  function selectCategory(cat) {
+    setCategory(cat);
+    setTimeout(() => productsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
+  function backToCategories() {
+    setCategory(null);
+    setSearch("");
+  }
+
+  const showLanding = !category && !search;
 
   return (
     <div className="store-root">
@@ -225,24 +292,12 @@ export default function Store() {
         .store-search-wrap { display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.2); flex: 1; min-width: 0; }
         .store-search-wrap input { flex: 1; padding: 9px 14px; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; width: 100%; }
         .store-search-icon { background: #F59E0B; padding: 0 16px; display: flex; align-items: center; justify-content: center; font-size: 17px; cursor: pointer; flex-shrink: 0; }
-
-        /* Desktop: single row, search visible in row1 */
         .store-row1-search { display: none; }
         @media (min-width: 640px) {
           .store-header-inner { flex-direction: row; align-items: center; padding: 10px 20px; gap: 16px; justify-content: space-between; }
           .store-row1 { flex: none; }
           .store-row2 { display: none; }
           .store-row1-search { display: flex; flex: 0 1 400px; max-width: 400px; min-width: 0; }
-        }
-
-        /* Logos */
-        .store-logos { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .store-logo-eltop  { height: 45px; width: auto; object-fit: contain; cursor: pointer; }
-        .store-logo-embassy { height: 35px; width: auto; object-fit: contain; cursor: pointer; }
-        .logo-divider { width: 1px; height: 32px; background: rgba(255,255,255,.25); flex-shrink: 0; }
-        @media (max-width: 639px) {
-          .store-logo-eltop  { height: 36px; }
-          .store-logo-embassy { height: 28px; }
         }
 
         /* Header right buttons */
@@ -254,12 +309,6 @@ export default function Store() {
           .btn-login-primary { font-size: 11px; padding: 7px 10px; }
           .btn-dealer-login  { display: none; }
         }
-
-        /* Category strip */
-        .store-cats { background: #fff; border-bottom: 1px solid #e8e8f0; position: sticky; top: 65px; z-index: 100; box-shadow: 0 2px 6px rgba(0,0,0,.05); }
-        .store-cats-inner { max-width: 1400px; margin: 0 auto; padding: 0 16px; overflow-x: auto; display: flex; scrollbar-width: none; -ms-overflow-style: none; }
-        .store-cats-inner::-webkit-scrollbar { display: none; }
-        .store-cat-btn { flex-shrink: 0; padding: 11px 14px; background: none; border: none; cursor: pointer; font-size: 13px; font-family: inherit; display: flex; align-items: center; gap: 5px; white-space: nowrap; transition: all .15s; border-bottom: 3px solid transparent; }
 
         /* Hero banner */
         .store-hero { background: linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%); color: #fff; text-align: center; padding: 28px 20px; }
@@ -273,36 +322,55 @@ export default function Store() {
           .store-hero-btn   { font-size: 13px; padding: 9px 20px; }
         }
 
-        /* Product grid */
-        .store-content { max-width: 1400px; margin: 0 auto; padding: 16px 12px 100px; background: transparent; }
-        .store-root::after { content: ''; display: block; height: 0; }
+        /* Category card grid */
+        .cat-grid-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 16px 40px; }
+        .cat-grid-title { font-size: 20px; font-weight: 800; color: #1e293b; margin-bottom: 16px; }
+        .cat-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, 1fr); }
+        @media (min-width: 640px)  { .cat-grid { grid-template-columns: repeat(3, 1fr); gap: 20px; } }
+        @media (min-width: 1024px) { .cat-grid { grid-template-columns: repeat(4, 1fr); } }
+
+        .cat-card {
+          position: relative; height: 200px; border-radius: 14px; overflow: hidden;
+          cursor: pointer; transition: transform .2s, box-shadow .2s;
+        }
+        .cat-card-overlay {
+          position: absolute; inset: 0;
+          background: linear-gradient(to bottom, rgba(0,0,0,0) 30%, rgba(0,0,0,.7) 100%);
+          transition: background .2s;
+        }
+        .cat-card-content {
+          position: absolute; bottom: 0; left: 0; right: 0;
+          padding: 14px 16px; color: #fff;
+        }
+        .cat-card-icon { font-size: 22px; display: block; margin-bottom: 4px; }
+        .cat-card-name { font-size: 16px; font-weight: 800; line-height: 1.2; text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+        .cat-card-count { font-size: 12px; opacity: 0.85; margin-top: 2px; font-weight: 500; }
+        @media (max-width: 639px) {
+          .cat-card { height: 160px; }
+          .cat-card-name { font-size: 14px; }
+        }
+
+        /* Product section */
+        .store-content { max-width: 1400px; margin: 0 auto; padding: 16px 12px 80px; }
         .store-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, 1fr); }
         @media (min-width: 480px)  { .store-grid { gap: 12px; } }
         @media (min-width: 640px)  { .store-grid { grid-template-columns: repeat(3, 1fr); gap: 14px; } }
         @media (min-width: 900px)  { .store-grid { grid-template-columns: repeat(4, 1fr); } }
         @media (min-width: 1200px) { .store-grid { grid-template-columns: repeat(5, 1fr); } }
 
-        /* Discount strip */
-        .discount-strip { background: #7B2D8B; color: #fff; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; flex-wrap: wrap; }
-        .discount-strip-text { font-size: 13px; font-weight: 700; }
-        .discount-strip-btn { background: #fff; color: #7B2D8B; border: none; border-radius: 20px; padding: 6px 16px; font-weight: 800; font-size: 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
-        .discount-strip-close { background: none; border: none; color: rgba(255,255,255,.7); cursor: pointer; font-size: 18px; margin-left: 4px; padding: 0 4px; line-height: 1; }
-
-        /* Floating bottom strip on mobile */
-        .discount-float { position: fixed; bottom: 0; left: 0; right: 0; z-index: 300; display: flex; }
-        @media (min-width: 640px) { .discount-float { display: none; } }
-        .discount-top { display: none; }
-        @media (min-width: 640px) { .discount-top { display: flex; } }
-
         /* Skeleton */
         .store-skeleton { border-radius: 10px; background: #e2e8f0; animation: pulse 1.4s ease infinite; }
+        .cat-skeleton { border-radius: 14px; background: #e2e8f0; animation: pulse 1.4s ease infinite; height: 200px; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+        /* Back button */
+        .back-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1.5px solid #7B2D8B; color: #7B2D8B; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; margin-bottom: 16px; transition: background .15s; }
+        .back-btn:hover { background: #7B2D8B; color: #fff; }
       `}</style>
 
       {/* ── Header ── */}
       <header className="store-header">
         <div className="store-header-inner">
-          {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
             {/* Dual logos */}
             <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', minWidth: '280px', flexShrink: 0 }}>
@@ -323,11 +391,11 @@ export default function Store() {
               />
             </div>
 
-            {/* Search — desktop only, inside row1 */}
+            {/* Search — desktop only */}
             <div className="store-row1-search">
               <div className="store-search-wrap">
-                <input type="search" placeholder="Search for electrical products, brands and more…"
-                  value={search} onChange={e => setSearch(e.target.value)} />
+                <input type="search" placeholder="Search for electrical products…"
+                  value={search} onChange={e => handleSearch(e.target.value)} />
                 <div className="store-search-icon">🔍</div>
               </div>
             </div>
@@ -356,7 +424,7 @@ export default function Store() {
           <div className="store-row2">
             <div className="store-search-wrap">
               <input type="search" placeholder="Search products…"
-                value={search} onChange={e => setSearch(e.target.value)} />
+                value={search} onChange={e => handleSearch(e.target.value)} />
               <div className="store-search-icon">🔍</div>
             </div>
           </div>
@@ -370,48 +438,84 @@ export default function Store() {
         <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
       </div>
 
-      {/* ── Category strip ── */}
-      {!loading && categories.length > 1 && (
-        <div className="store-cats">
-          <div className="store-cats-inner">
-            {categories.map(cat => (
-              <button key={cat} onClick={() => setCategory(cat)} className="store-cat-btn"
-                style={{ fontWeight: category === cat ? 800 : 500, color: category === cat ? "#7B2D8B" : "#475569", borderBottomColor: category === cat ? "#7B2D8B" : "transparent" }}>
-                <span>{catIcon(cat)}</span>
-                <span>{cat}</span>
-              </button>
-            ))}
-          </div>
+      {/* ── Category landing grid ── */}
+      {showLanding && (
+        <div className="cat-grid-wrap">
+          <div className="cat-grid-title">Shop by Category</div>
+          {loading ? (
+            <div className="cat-grid">
+              {[...Array(8)].map((_, i) => <div key={i} className="cat-skeleton" />)}
+            </div>
+          ) : (
+            <div className="cat-grid">
+              {categories.map(cat => (
+                <CategoryCard
+                  key={cat}
+                  cat={cat}
+                  count={catMeta[cat]?.count || 0}
+                  image={catMeta[cat]?.image}
+                  isAll={false}
+                  onClick={() => selectCategory(cat)}
+                />
+              ))}
+              {/* All Products card — last */}
+              <CategoryCard
+                cat="All Products"
+                count={products.length}
+                image={null}
+                isAll={true}
+                onClick={() => selectCategory("All")}
+              />
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Products ── */}
-      <div className="store-content">
-        {!loading && (
-          <div style={{ marginBottom: 12, fontSize: 13, color: "#64748b" }}>
-            {search || category !== "All"
-              ? <><strong style={{ color: "#1e293b" }}>{filtered.length}</strong> results{category !== "All" ? ` in ${category}` : ""}{search ? ` for "${search}"` : ""}</>
-              : <><strong style={{ color: "#1e293b" }}>{products.length}</strong> products available</>
-            }
-          </div>
-        )}
+      {/* ── Product grid (shown when category selected or searching) ── */}
+      {!showLanding && (
+        <div className="store-content" ref={productsRef}>
+          <button className="back-btn" onClick={backToCategories}>
+            ← Back to Categories
+          </button>
 
-        {loading ? (
-          <div className="store-grid">
-            {[...Array(10)].map((_, i) => <div key={i} className="store-skeleton" style={{ height: 300 }} />)}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "80px 20px", color: "#94a3b8" }}>
-            <div style={{ fontSize: 52, marginBottom: 14 }}>🔍</div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: "#475569", marginBottom: 6 }}>No products found</div>
-            <div style={{ fontSize: 13 }}>Try a different search or category</div>
-          </div>
-        ) : (
-          <div className="store-grid">
-            {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} />)}
-          </div>
-        )}
-      </div>
+          {/* Section heading */}
+          {category && category !== "All" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={{ fontSize: 24 }}>{catIcon(category)}</span>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#1e293b" }}>{category}</div>
+                <div style={{ fontSize: 13, color: "#64748b" }}>{(catMeta[category]?.count || 0)} products</div>
+              </div>
+            </div>
+          )}
+
+          {/* Result count */}
+          {!loading && (
+            <div style={{ marginBottom: 12, fontSize: 13, color: "#64748b" }}>
+              {search
+                ? <><strong style={{ color: "#1e293b" }}>{filtered.length}</strong> results for "{search}"{category && category !== "All" ? ` in ${category}` : ""}</>
+                : <><strong style={{ color: "#1e293b" }}>{filtered.length}</strong> products{category && category !== "All" ? ` in ${category}` : ""}</>
+              }
+            </div>
+          )}
+
+          {loading ? (
+            <div className="store-grid">
+              {[...Array(10)].map((_, i) => <div key={i} className="store-skeleton" style={{ height: 300 }} />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "80px 20px", color: "#94a3b8" }}>
+              <div style={{ fontSize: 52, marginBottom: 14 }}>🔍</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: "#475569", marginBottom: 6 }}>No products found</div>
+              <div style={{ fontSize: 13 }}>Try a different search or category</div>
+            </div>
+          ) : (
+            <div className="store-grid">
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} />)}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Cart drawer ── */}
       {cartOpen && (
