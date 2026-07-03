@@ -158,7 +158,7 @@ function ProductCard({ product: p, onAdd, onSelect }) {
 
   return (
     <div
-      onClick={() => { onSelect(p); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+      onClick={() => { onSelect(p); }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -341,7 +341,15 @@ export default function Store() {
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const productsRef = useRef(null);
+  const containerRef = useRef(null);
   const cart = useCart();
+
+  const scrollToTop = () => {
+    if (containerRef.current) containerRef.current.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    window.scrollTo(0, 0);
+  };
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -393,19 +401,19 @@ export default function Store() {
 
   function selectCategory(cat) {
     setCategory(cat);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
   }
 
   function backToCategories() {
     setCategory(null);
     setSearch("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTop();
   }
 
   const showLanding = !category && !search;
 
   return (
-    <div className="store-root">
+    <div className="store-root" ref={containerRef}>
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
         .store-root { min-height: 100vh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
@@ -601,8 +609,8 @@ export default function Store() {
       {selectedProduct && (
         <ProductDetailView
           product={selectedProduct}
-          onBack={() => { setSelectedProduct(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-          onAdd={p => { cart.add(p); setSelectedProduct(null); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          onBack={() => { setSelectedProduct(null); scrollToTop(); }}
+          onAdd={p => { cart.add(p); setSelectedProduct(null); scrollToTop(); }}
         />
       )}
 
@@ -645,7 +653,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={setSelectedProduct} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={p => { setSelectedProduct(p); scrollToTop(); }} />)}
             </div>
           )}
         </div>
