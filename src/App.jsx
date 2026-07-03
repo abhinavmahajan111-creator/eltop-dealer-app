@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import PhoneFrame from "./components/PhoneFrame";
 import AdminRoute from "./components/AdminRoute";
+import Store from "./pages/Store";
 import Splash from "./screens/Splash";
 import Login from "./screens/Login";
 import Dashboard from "./screens/Dashboard";
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="/admin/crm/:dealerId" element={<DealerCRM />} />
       </Route>
 
+      <Route path="/store" element={<Store />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
