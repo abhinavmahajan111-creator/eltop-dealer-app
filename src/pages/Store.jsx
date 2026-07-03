@@ -286,13 +286,13 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
             onClick={() => images[activeImg] && setLightbox(true)}
             style={{
               flex: 1, background: "#f9f8ff", borderRadius: 14, overflow: "hidden",
-              aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
+              display: "flex", alignItems: "center", justifyContent: "center",
               border: "1px solid #edf0f7", cursor: images[activeImg] ? "zoom-in" : "default",
-              position: "relative",
+              position: "relative", minHeight: 350, padding: "16px 24px 16px 16px",
             }}
           >
             {images[activeImg]
-              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} />
+              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "100%", maxHeight: 380, objectFit: "contain", cursor: "zoom-in" }} />
               : <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
             {images[activeImg] && (
               <span style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#94a3b8", background: "rgba(255,255,255,.8)", borderRadius: 6, padding: "2px 8px" }}>
