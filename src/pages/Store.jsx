@@ -220,7 +220,7 @@ export default function Store() {
         /* ── Header ── */
         .store-header { position: sticky; top: 0; z-index: 200; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
         .store-header-inner { max-width: 1400px; margin: 0 auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
-        .store-row1 { display: flex; align-items: center; gap: 10px; width: 100%; }
+        .store-row1 { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: space-between; }
         .store-row2 { display: flex; width: 100%; }
         .store-search-wrap { display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.2); flex: 1; min-width: 0; }
         .store-search-wrap input { flex: 1; padding: 9px 14px; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; width: 100%; }
@@ -229,10 +229,10 @@ export default function Store() {
         /* Desktop: single row, search visible in row1 */
         .store-row1-search { display: none; }
         @media (min-width: 640px) {
-          .store-header-inner { flex-direction: row; align-items: center; padding: 10px 20px; gap: 12px; }
-          .store-row1 { flex: 1; min-width: 0; }
+          .store-header-inner { flex-direction: row; align-items: center; padding: 10px 20px; gap: 16px; justify-content: space-between; }
+          .store-row1 { flex: none; }
           .store-row2 { display: none; }
-          .store-row1-search { display: flex; flex: 1; min-width: 0; }
+          .store-row1-search { display: flex; flex: 0 1 400px; max-width: 400px; min-width: 0; }
         }
 
         /* Logos */
@@ -305,9 +305,9 @@ export default function Store() {
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
             {/* Dual logos */}
-            <div style={{ display: "flex", flexDirection: "row", flexWrap: "nowrap", alignItems: "center", gap: "12px", flexShrink: 0 }}>
-              <img src="/assets/logo-eltop.jpg" style={{ height: "45px", width: "auto", display: "inline-block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
-              <img src="/assets/logo-embassy.jpeg" style={{ height: "32px", width: "auto", display: "inline-block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
+            <div style={{ display: "flex", flexDirection: "row", flexWrap: "nowrap", alignItems: "center", gap: "12px", flexShrink: 0, minWidth: "160px", padding: "4px" }}>
+              <img src="/assets/logo-eltop.jpg" style={{ height: "50px", width: "auto", display: "inline-block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
+              <img src="/assets/logo-embassy.jpeg" style={{ height: "38px", width: "auto", display: "inline-block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
             </div>
 
             {/* Search — desktop only, inside row1 */}
