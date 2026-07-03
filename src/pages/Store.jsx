@@ -139,12 +139,13 @@ function CategoryCard({ cat, count, image, isAll, onClick }) {
 }
 
 // ── Product Card ──────────────────────────────────────────────────────────────
-function ProductCard({ product: p, onAdd }) {
+function ProductCard({ product: p, onAdd, onSelect }) {
   const [hov, setHov] = useState(false);
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
 
   return (
     <div
+      onClick={() => onSelect(p)}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -154,6 +155,7 @@ function ProductCard({ product: p, onAdd }) {
         transform: hov ? "translateY(-2px)" : "none",
         transition: "all .18s", overflow: "hidden",
         display: "flex", flexDirection: "column",
+        cursor: "pointer",
       }}
     >
       <div style={{ background: "#f9f8ff", position: "relative", paddingTop: "75%", overflow: "hidden" }}>
@@ -197,11 +199,120 @@ function ProductCard({ product: p, onAdd }) {
         </div>
 
         <button
-          onClick={() => onAdd(p)}
+          onClick={e => { e.stopPropagation(); onAdd(p); }}
           style={{ width: "100%", padding: "8px 0", background: hov ? "#6A1F7A" : "#7B2D8B", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
         >
           + Add to Cart
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Product Detail View ───────────────────────────────────────────────────────
+function ProductDetailView({ product: p, onBack, onAdd }) {
+  const [activeImg, setActiveImg] = useState(0);
+  const saving = Math.round((Number(p.mrp) || 0) * 0.15);
+  const images = p.image_urls?.length ? p.image_urls : [];
+
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
+      <button
+        onClick={onBack}
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "1.5px solid #7B2D8B", color: "#7B2D8B", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginBottom: 20 }}
+      >
+        ← Back to Products
+      </button>
+
+      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+        {/* Left: images */}
+        <div style={{ flex: "0 0 360px", minWidth: 0 }}>
+          <div style={{ background: "#f9f8ff", borderRadius: 14, overflow: "hidden", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #edf0f7", marginBottom: 12 }}>
+            {images[activeImg]
+              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} />
+              : <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
+          </div>
+          {images.length > 1 && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {images.map((url, i) => (
+                <div
+                  key={i}
+                  onClick={() => setActiveImg(i)}
+                  style={{ width: 64, height: 64, borderRadius: 8, overflow: "hidden", border: i === activeImg ? "2px solid #7B2D8B" : "1px solid #e2e8f0", cursor: "pointer", background: "#f9f8ff", display: "flex", alignItems: "center", justifyContent: "center" }}
+                >
+                  <img src={url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right: info */}
+        <div style={{ flex: 1, minWidth: 260 }}>
+          {p.category && (
+            <span style={{ display: "inline-block", background: "#7B2D8B", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              {p.category}
+            </span>
+          )}
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", lineHeight: 1.3, margin: "0 0 12px" }}>{p.name}</h1>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+            {p.sku      && <div style={{ fontSize: 13, color: "#64748b" }}>SKU: <strong style={{ color: "#334155" }}>{p.sku}</strong></div>}
+            {p.hsn_code && <div style={{ fontSize: 13, color: "#64748b" }}>HSN Code: <strong style={{ color: "#334155" }}>{p.hsn_code}</strong></div>}
+            {p.unit     && <div style={{ fontSize: 13, color: "#64748b" }}>Unit: <strong style={{ color: "#334155" }}>{p.unit}</strong></div>}
+          </div>
+
+          <div style={{ background: "#fff7f7", border: "1px solid #fecaca", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>MRP (incl. all taxes)</div>
+            <div style={{ fontSize: 32, fontWeight: 900, color: "#DC2626" }}>₹{fmt(p.mrp)}</div>
+            {saving > 0 && (
+              <div style={{ marginTop: 6, fontSize: 13, color: "#16a34a", fontWeight: 700 }}>
+                🔓 Login as dealer to save ₹{fmt(saving)} (15% OFF)
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => onAdd(p)}
+            style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
+          >
+            + Add to Cart
+          </button>
+          <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+            Sign up to place orders at dealer pricing
+          </div>
+
+          {/* Specs table */}
+          {(p.standard_packing || p.stock != null) && (
+            <div style={{ marginTop: 24, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+              <div style={{ background: "#f8f9fc", padding: "10px 16px", fontWeight: 700, fontSize: 13, color: "#475569", borderBottom: "1px solid #e2e8f0" }}>
+                Specifications
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <tbody>
+                  {p.standard_packing && (
+                    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "10px 16px", color: "#64748b", width: "40%" }}>Standard Packing</td>
+                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.standard_packing}</td>
+                    </tr>
+                  )}
+                  {p.unit && (
+                    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "10px 16px", color: "#64748b" }}>Unit</td>
+                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.unit}</td>
+                    </tr>
+                  )}
+                  {p.category && (
+                    <tr>
+                      <td style={{ padding: "10px 16px", color: "#64748b" }}>Category</td>
+                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.category}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -215,6 +326,7 @@ export default function Store() {
   const [search, setSearch]     = useState("");
   const [category, setCategory] = useState(null); // null = show category landing
   const [cartOpen, setCartOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const productsRef = useRef(null);
   const cart = useCart();
 
@@ -472,7 +584,15 @@ export default function Store() {
       )}
 
       {/* ── Product grid (shown when category selected or searching) ── */}
-      {!showLanding && (
+      {selectedProduct && (
+        <ProductDetailView
+          product={selectedProduct}
+          onBack={() => setSelectedProduct(null)}
+          onAdd={p => { cart.add(p); setSelectedProduct(null); }}
+        />
+      )}
+
+      {!showLanding && !selectedProduct && (
         <div className="store-content" ref={productsRef}>
           <button className="back-btn" onClick={backToCategories}>
             ← Back to Categories
@@ -511,7 +631,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={setSelectedProduct} />)}
             </div>
           )}
         </div>
