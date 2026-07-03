@@ -4,7 +4,7 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 // ── Cart helpers ──────────────────────────────────────────────────────────────
 function useCart() {
-  const [items, setItems] = useState([]); // [{ product, qty }]
+  const [items, setItems] = useState([]);
 
   const add = (product) =>
     setItems(prev => {
@@ -15,79 +15,80 @@ function useCart() {
 
   const change = (id, delta) =>
     setItems(prev =>
-      prev
-        .map(i => i.product.id === id ? { ...i, qty: i.qty + delta } : i)
-        .filter(i => i.qty > 0)
+      prev.map(i => i.product.id === id ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0)
     );
 
-  const total  = items.reduce((s, i) => s + (Number(i.product.mrp) || 0) * i.qty, 0);
-  const count  = items.reduce((s, i) => s + i.qty, 0);
+  const total = items.reduce((s, i) => s + (Number(i.product.mrp) || 0) * i.qty, 0);
+  const count = items.reduce((s, i) => s + i.qty, 0);
 
   return { items, add, change, total, count };
 }
 
-// ── Cart drawer ───────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onClose }) {
-  const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
 
+// ── Cart Drawer ───────────────────────────────────────────────────────────────
+function CartDrawer({ cart, onClose, onLoginClick }) {
   return (
     <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.4)", zIndex: 1000 }}
-      />
-      {/* Drawer */}
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1000 }} />
       <div style={{
-        position: "fixed", top: 0, right: 0, bottom: 0, width: 360, maxWidth: "100vw",
+        position: "fixed", top: 0, right: 0, bottom: 0, width: 380, maxWidth: "95vw",
         background: "#fff", zIndex: 1001, display: "flex", flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,.15)",
+        boxShadow: "-6px 0 32px rgba(0,0,0,.18)",
       }}>
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 20px", borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ fontWeight: 800, fontSize: 17 }}>🛒 Your Cart <span style={{ fontSize: 13, color: "#888", fontWeight: 500 }}>({cart.count} items)</span></div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#666", lineHeight: 1 }}>✕</button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid #eee", background: "#7C3AED" }}>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>
+            🛒 Cart {cart.count > 0 && <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.85 }}>({cart.count} items)</span>}
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", width: 32, height: 32, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>✕</button>
         </div>
 
-        {/* Items */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 20px" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           {cart.items.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#aaa", marginTop: 60, fontSize: 14 }}>Your cart is empty</div>
+            <div style={{ textAlign: "center", padding: "60px 20px", color: "#aaa" }}>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>🛒</div>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Your cart is empty</div>
+              <div style={{ fontSize: 13, marginTop: 6 }}>Add products to get started</div>
+            </div>
           ) : cart.items.map(({ product: p, qty }) => (
-            <div key={p.id} style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: "1px solid #f5f5f5" }}>
-              {p.image_urls?.[0]
-                ? <img src={p.image_urls[0]} alt={p.name} style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: "1px solid #eee" }} />
-                : <div style={{ width: 56, height: 56, background: "#f3f0fa", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>📦</div>
-              }
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                <div style={{ fontSize: 13, color: "#7C3AED", fontWeight: 700 }}>₹{fmt(p.mrp)}</div>
+            <div key={p.id} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: "1px solid #f5f5f5" }}>
+              <div style={{ width: 64, height: 64, borderRadius: 8, overflow: "hidden", border: "1px solid #eee", flexShrink: 0, background: "#f9f9f9", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {p.image_urls?.[0]
+                  ? <img src={p.image_urls[0]} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  : <span style={{ fontSize: 28 }}>📦</span>}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <button onClick={() => cart.change(p.id, -1)} style={qtyBtnStyle}>−</button>
-                <span style={{ minWidth: 20, textAlign: "center", fontWeight: 700 }}>{qty}</span>
-                <button onClick={() => cart.change(p.id, +1)} style={qtyBtnStyle}>+</button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "#1e293b", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{p.name}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#DC2626" }}>₹{fmt(p.mrp)}</div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                <button onClick={() => cart.change(p.id, +1)} style={qtyBtn}>+</button>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>{qty}</span>
+                <button onClick={() => cart.change(p.id, -1)} style={qtyBtn}>−</button>
               </div>
             </div>
           ))}
         </div>
 
-        {/* Footer */}
         {cart.items.length > 0 && (
-          <div style={{ padding: "16px 20px", borderTop: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
-              <span style={{ fontSize: 14, color: "#555" }}>Total MRP</span>
-              <span style={{ fontWeight: 800, fontSize: 18, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
+          <div style={{ padding: "16px 20px", borderTop: "2px solid #eee" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <span style={{ fontSize: 14, color: "#555", fontWeight: 600 }}>Total MRP</span>
+              <span style={{ fontSize: 22, fontWeight: 900, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
             </div>
             <button
-              onClick={() => alert("Thank you! We'll contact you soon.")}
-              style={{ ...actionBtnStyle, width: "100%", padding: "13px 0", fontSize: 15 }}
+              onClick={() => alert("Thank you! We'll contact you soon to confirm your order.")}
+              style={{ width: "100%", padding: "13px 0", background: "#7C3AED", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}
             >
               Place Order
             </button>
-            <p style={{ fontSize: 11, color: "#aaa", textAlign: "center", marginTop: 8 }}>
-              Dealer? <span style={{ color: "#7C3AED", cursor: "pointer", fontWeight: 600 }}>Login for trade pricing →</span>
-            </p>
+            <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
+              Dealer?{" "}
+              <span onClick={onLoginClick} style={{ color: "#7C3AED", fontWeight: 700, cursor: "pointer" }}>
+                Login for trade pricing →
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -95,78 +96,92 @@ function CartDrawer({ cart, onClose }) {
   );
 }
 
-// ── Product card ──────────────────────────────────────────────────────────────
+// ── Product Card ──────────────────────────────────────────────────────────────
 function ProductCard({ product: p, onAdd }) {
   const [hovered, setHovered] = useState(false);
   const img = p.image_urls?.[0];
-  const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: "#fff", borderRadius: 14,
-        border: "1px solid #e8e8f0",
-        boxShadow: hovered ? "0 8px 28px rgba(124,58,237,.12)" : "0 2px 8px rgba(0,0,0,.05)",
-        transform: hovered ? "translateY(-2px)" : "none",
+        background: "#fff", borderRadius: 12,
+        border: "1px solid #edf0f7",
+        boxShadow: hovered ? "0 8px 32px rgba(124,58,237,.13)" : "0 2px 8px rgba(0,0,0,.06)",
+        transform: hovered ? "translateY(-3px)" : "none",
         transition: "all .18s ease",
-        overflow: "hidden", display: "flex", flexDirection: "column",
+        overflow: "hidden", display: "flex", flexDirection: "column", cursor: "default",
       }}
     >
-      {/* Image */}
-      <div style={{ position: "relative", background: "#f8f7ff", aspectRatio: "1", overflow: "hidden" }}>
-        {img
-          ? <img src={img} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 12, boxSizing: "border-box" }} />
-          : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48 }}>📦</div>
-        }
+      {/* Image area */}
+      <div style={{ background: "#f9f8ff", position: "relative", paddingTop: "80%", overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 10 }}>
+          {img
+            ? <img src={img} alt={p.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+            : <span style={{ fontSize: 52, opacity: 0.4 }}>📦</span>}
+        </div>
         {p.category && (
           <span style={{
             position: "absolute", top: 8, left: 8,
             background: "#7C3AED", color: "#fff",
-            fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 20,
-            textTransform: "uppercase", letterSpacing: "0.4px",
+            fontSize: 9, fontWeight: 700, padding: "3px 7px", borderRadius: 20,
+            textTransform: "uppercase", letterSpacing: "0.5px",
           }}>{p.category}</span>
         )}
       </div>
 
       {/* Info */}
-      <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column" }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 8, lineHeight: 1.4, flex: 1 }}>{p.name}</div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 10 }}>
-          {p.hsn_code && <div style={{ fontSize: 11, color: "#94a3b8" }}>HSN: <span style={{ color: "#475569", fontWeight: 600 }}>{p.hsn_code}</span></div>}
-          {p.sku      && <div style={{ fontSize: 11, color: "#94a3b8" }}>SKU: <span style={{ color: "#475569", fontWeight: 600 }}>{p.sku}</span></div>}
-          {p.unit     && <div style={{ fontSize: 11, color: "#94a3b8" }}>Unit: <span style={{ color: "#475569", fontWeight: 600 }}>{p.unit}</span></div>}
+      <div style={{ padding: "12px 12px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{
+          fontWeight: 600, fontSize: 13, color: "#1e293b", lineHeight: 1.4,
+          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+          minHeight: "2.8em", flex: 1,
+        }}>
+          {p.name}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: "auto" }}>
-          <div>
-            <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 1 }}>MRP</div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "#7C3AED" }}>₹{fmt(p.mrp)}</div>
-          </div>
-          <button onClick={() => onAdd(p)} style={{ ...actionBtnStyle, padding: "8px 14px", fontSize: 12 }}>
-            🛒 Add
-          </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {p.sku      && <div style={{ fontSize: 10, color: "#94a3b8" }}>SKU <span style={{ color: "#64748b", fontWeight: 600 }}>{p.sku}</span></div>}
+          {p.hsn_code && <div style={{ fontSize: 10, color: "#94a3b8" }}>HSN <span style={{ color: "#64748b", fontWeight: 600 }}>{p.hsn_code}</span></div>}
         </div>
+
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 2 }}>
+          <span style={{ fontSize: 9, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px" }}>MRP</span>
+          <span style={{ fontSize: 18, fontWeight: 900, color: "#DC2626" }}>₹{fmt(p.mrp)}</span>
+        </div>
+
+        <button
+          onClick={() => onAdd(p)}
+          style={{
+            width: "100%", padding: "9px 0", background: hovered ? "#6D28D9" : "#7C3AED",
+            color: "#fff", border: "none", borderRadius: 8,
+            fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit",
+            transition: "background .15s", marginTop: 4,
+          }}
+        >
+          + Add to Cart
+        </button>
       </div>
     </div>
   );
 }
 
-// ── Shared styles ─────────────────────────────────────────────────────────────
-const actionBtnStyle = {
-  background: "#7C3AED", color: "#fff", border: "none", borderRadius: 8,
-  fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-};
-
-const qtyBtnStyle = {
+const qtyBtn = {
   width: 28, height: 28, border: "1.5px solid #e2e8f0", borderRadius: 6,
-  background: "#fff", cursor: "pointer", fontSize: 16, lineHeight: 1,
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+  background: "#f8f8f8", cursor: "pointer", fontSize: 15, fontWeight: 700,
+  lineHeight: 1, padding: 0, fontFamily: "inherit",
 };
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Category icons map ────────────────────────────────────────────────────────
+const CAT_ICONS = {
+  "Fans": "🌀", "Wiring Devices": "🔌", "Cables": "🔋",
+  "Lighting": "💡", "Switches": "🔘", "MCB": "⚡",
+  "Distribution": "🗂️", "Motors": "⚙️", "Tools": "🔧",
+};
+const catIcon = (name) => CAT_ICONS[name] || "📦";
+
+// ── Main Store ────────────────────────────────────────────────────────────────
 export default function Store() {
   const navigate = useNavigate();
   const [products, setProducts] = useState([]);
@@ -183,7 +198,11 @@ export default function Store() {
       .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, sku")
       .order("category", { nullsFirst: true })
       .order("name")
-      .then(({ data }) => { if (data) setProducts(data); setLoading(false); });
+      .then(({ data, error }) => {
+        console.log("products:", data, "error:", error);
+        if (data) setProducts(data);
+        setLoading(false);
+      });
   }, []);
 
   const categories = useMemo(() => {
@@ -201,140 +220,135 @@ export default function Store() {
   }, [products, search, category]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F8FAFC", fontFamily: "inherit" }}>
-      {/* ── Header ── */}
+    <div style={{ minHeight: "100vh", background: "#F1F3F6", fontFamily: "inherit" }}>
+
+      {/* ── Sticky header ── */}
       <header style={{
-        background: "#fff", borderBottom: "1px solid #e8e8f0",
-        position: "sticky", top: 0, zIndex: 100,
-        boxShadow: "0 1px 8px rgba(0,0,0,.06)",
+        position: "sticky", top: 0, zIndex: 200,
+        background: "#1e293b",
+        boxShadow: "0 2px 8px rgba(0,0,0,.25)",
       }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 20px", display: "flex", alignItems: "center", gap: 16, height: 64 }}>
+        <div style={{ maxWidth: 1400, margin: "0 auto", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+          {/* Logo */}
           <img
             src="/assets/eltop-logo.png.jpg"
-            alt="Eltop"
-            style={{ height: 50, width: "auto", objectFit: "contain", flexShrink: 0 }}
+            alt="Eltop by Embassy"
+            style={{ height: 45, width: "auto", objectFit: "contain", flexShrink: 0, cursor: "pointer" }}
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
             onError={e => { e.target.style.display = "none"; }}
           />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 900, fontSize: 16, color: "#1e293b", lineHeight: 1 }}>Eltop by Embassy</div>
-            <div style={{ fontSize: 11, color: "#94a3b8" }}>Electrical Products</div>
+
+          {/* Search bar */}
+          <div style={{ flex: 1, display: "flex", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,.2)" }}>
+            <input
+              type="search"
+              placeholder="Search for electrical products, brands and more…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                flex: 1, padding: "10px 16px", border: "none", outline: "none",
+                fontSize: 14, fontFamily: "inherit", background: "#fff",
+              }}
+            />
+            <div style={{ background: "#F59E0B", padding: "0 18px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, cursor: "pointer" }}>
+              🔍
+            </div>
           </div>
 
-          {/* Search */}
-          <input
-            type="search"
-            placeholder="Search products…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{
-              padding: "8px 14px", border: "1.5px solid #e2e8f0", borderRadius: 8,
-              fontSize: 13, fontFamily: "inherit", outline: "none",
-              width: 220, display: "none",
-            }}
-            className="store-search"
-          />
-
-          {/* Dealer login */}
+          {/* Right actions */}
           <button
             onClick={() => navigate("/login")}
-            style={{ background: "none", border: "1.5px solid #7C3AED", borderRadius: 8, color: "#7C3AED", fontWeight: 700, fontSize: 13, padding: "7px 14px", cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{ background: "none", border: "1.5px solid rgba(255,255,255,.4)", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, padding: "8px 14px", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}
           >
             🔐 Dealer Login
           </button>
 
-          {/* Cart */}
           <button
             onClick={() => setCartOpen(true)}
-            style={{ position: "relative", background: "#7C3AED", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13, padding: "7px 14px", cursor: "pointer", flexShrink: 0 }}
+            style={{ position: "relative", background: "none", border: "none", color: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0, padding: "4px 10px" }}
           >
-            🛒 Cart
+            <span style={{ fontSize: 24 }}>🛒</span>
+            <span style={{ fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>Cart</span>
             {cart.count > 0 && (
               <span style={{
-                position: "absolute", top: -6, right: -6,
-                background: "#DC2626", color: "#fff",
-                fontSize: 10, fontWeight: 800, width: 18, height: 18,
-                borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                position: "absolute", top: 0, right: 4,
+                background: "#F59E0B", color: "#1e293b",
+                fontSize: 10, fontWeight: 900, minWidth: 18, height: 18,
+                borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
               }}>{cart.count}</span>
             )}
           </button>
         </div>
-
-        {/* Mobile search */}
-        <div style={{ padding: "0 20px 12px", display: "none" }} className="store-mobile-search">
-          <input
-            type="search"
-            placeholder="Search products…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ width: "100%", boxSizing: "border-box", padding: "9px 14px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none" }}
-          />
-        </div>
       </header>
 
-      {/* ── Promo banner ── */}
+      {/* ── Dealer promo banner ── */}
       <div
         onClick={() => navigate("/login")}
         style={{
-          background: "linear-gradient(90deg, #F59E0B, #FBBF24)",
-          color: "#78350F", fontWeight: 700, fontSize: 13,
-          textAlign: "center", padding: "10px 20px", cursor: "pointer",
-          letterSpacing: "0.1px",
+          background: "linear-gradient(135deg, #7C3AED 0%, #DC2626 100%)",
+          color: "#fff", textAlign: "center", padding: "14px 20px", cursor: "pointer",
         }}
       >
-        🏷️ Are you a dealer? Login for special trade pricing →
+        <div style={{ fontWeight: 900, fontSize: 16, marginBottom: 3 }}>Eltop Electrical Products — Quality you can trust</div>
+        <div style={{ fontSize: 13, opacity: 0.9 }}>🏷️ Dealer? <strong>Login for special trade pricing</strong> — up to 40% off MRP →</div>
       </div>
 
-      {/* ── Main content ── */}
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px" }}>
-
-        {/* Category filter + search row */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 24, flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            type="search"
-            placeholder="Search products, SKU, HSN…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: 200, padding: "9px 14px", border: "1.5px solid #e2e8f0", borderRadius: 8, fontSize: 13, fontFamily: "inherit", outline: "none" }}
-          />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {/* ── Category strip ── */}
+      {!loading && categories.length > 1 && (
+        <div style={{ background: "#fff", borderBottom: "1px solid #e8e8f0", position: "sticky", top: 65, zIndex: 100, boxShadow: "0 2px 6px rgba(0,0,0,.06)" }}>
+          <div style={{ maxWidth: 1400, margin: "0 auto", padding: "0 20px", overflowX: "auto", display: "flex", gap: 4, scrollbarWidth: "none" }}>
             {categories.map(cat => (
               <button
                 key={cat}
                 onClick={() => setCategory(cat)}
                 style={{
-                  padding: "7px 14px", borderRadius: 20, border: "1.5px solid",
-                  borderColor: category === cat ? "#7C3AED" : "#e2e8f0",
-                  background: category === cat ? "#7C3AED" : "#fff",
-                  color: category === cat ? "#fff" : "#475569",
-                  fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit",
-                  transition: "all .15s",
+                  flexShrink: 0, padding: "12px 16px",
+                  background: "none", border: "none", cursor: "pointer",
+                  fontSize: 13, fontWeight: category === cat ? 800 : 500,
+                  color: category === cat ? "#7C3AED" : "#475569",
+                  borderBottom: `3px solid ${category === cat ? "#7C3AED" : "transparent"}`,
+                  transition: "all .15s", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
                 }}
               >
-                {cat}
+                <span>{catIcon(cat)}</span>
+                <span>{cat}</span>
               </button>
             ))}
           </div>
         </div>
+      )}
 
-        {/* Results count */}
+      {/* ── Main content ── */}
+      <div style={{ maxWidth: 1400, margin: "0 auto", padding: "20px 20px 60px" }}>
+
+        {/* Results meta */}
         {!loading && (
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 16 }}>
-            Showing {filtered.length} of {products.length} products
-            {category !== "All" && ` in ${category}`}
-            {search && ` matching "${search}"`}
+          <div style={{ marginBottom: 14, fontSize: 13, color: "#64748b" }}>
+            {search || category !== "All"
+              ? <><strong style={{ color: "#1e293b" }}>{filtered.length}</strong> results{category !== "All" ? ` in ${category}` : ""}{search ? ` for "${search}"` : ""}</>
+              : <><strong style={{ color: "#1e293b" }}>{products.length}</strong> products available</>
+            }
           </div>
         )}
 
-        {/* Grid */}
         {loading ? (
-          <div style={{ textAlign: "center", padding: 80, color: "#94a3b8", fontSize: 15 }}>Loading products…</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
+            {[...Array(8)].map((_, i) => (
+              <div key={i} style={{ background: "#fff", borderRadius: 12, height: 320, animation: "pulse 1.5s ease infinite" }} />
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 80, color: "#94a3b8", fontSize: 15 }}>No products found.</div>
+          <div style={{ textAlign: "center", padding: "80px 20px", color: "#94a3b8" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>🔍</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6, color: "#475569" }}>No products found</div>
+            <div style={{ fontSize: 14 }}>Try a different search or category</div>
+          </div>
         ) : (
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 18,
+            gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))",
+            gap: 14,
           }}>
             {filtered.map(p => (
               <ProductCard key={p.id} product={p} onAdd={cart.add} />
@@ -344,12 +358,15 @@ export default function Store() {
       </div>
 
       {/* ── Cart drawer ── */}
-      {cartOpen && <CartDrawer cart={cart} onClose={() => setCartOpen(false)} />}
+      {cartOpen && <CartDrawer cart={cart} onClose={() => setCartOpen(false)} onLoginClick={() => { setCartOpen(false); navigate("/login"); }} />}
 
-      {/* ── Responsive styles ── */}
       <style>{`
-        @media (min-width: 640px) { .store-search { display: block !important; } }
-        @media (max-width: 639px) { .store-mobile-search { display: block !important; } }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+        ::-webkit-scrollbar { height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
       `}</style>
     </div>
   );
