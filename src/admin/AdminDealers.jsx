@@ -542,6 +542,121 @@ export default function AdminDealers() {
     }
   };
 
+  const handleDealerExport = async () => {
+    if (!isSupabaseConfigured || !selected) return;
+    const d = selected;
+    const code = d.dealer_code || d.id.substring(0, 8);
+    const today = new Date();
+    const dd   = String(today.getDate()).padStart(2, "0");
+    const mm   = String(today.getMonth() + 1).padStart(2, "0");
+    const yyyy = today.getFullYear();
+    const filename = `Eltop_${code}_Export_${dd}${mm}${yyyy}.xlsx`;
+
+    try {
+      // Fetch this dealer's orders
+      const { data: orders } = await supabase
+        .from("orders")
+        .select("id, status, total, created_at, dealer_id")
+        .eq("dealer_id", d.id)
+        .order("created_at", { ascending: false });
+
+      const orderList = orders || [];
+      const orderIds  = orderList.map(o => o.id);
+
+      // Fetch order items for those orders
+      let itemList = [];
+      if (orderIds.length > 0) {
+        const { data: items } = await supabase
+          .from("order_items")
+          .select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)")
+          .in("order_id", orderIds);
+        itemList = items || [];
+      }
+
+      const wb = XLSX.utils.book_new();
+
+      // ── Sheet 1: Dealer Info ───────────────────────────────────────────────
+      const infoRows = [
+        { "Field": "ID",                   "Value": d.id },
+        { "Field": "Dealer Code",          "Value": d.dealer_code || "" },
+        { "Field": "Shop Name",            "Value": d.shop_name || "" },
+        { "Field": "Alias",                "Value": d.alias_name || "" },
+        { "Field": "Owner Name",           "Value": d.owner_name || "" },
+        { "Field": "Email",                "Value": d.email || "" },
+        { "Field": "Phone 1",              "Value": d.phone || "" },
+        { "Field": "Phone 2",              "Value": d.phone2 || "" },
+        { "Field": "GSTIN",                "Value": d.gstin || "" },
+        { "Field": "Registration Type",    "Value": d.registration_type || "" },
+        { "Field": "Website",              "Value": d.website || "" },
+        { "Field": "Staff Assigned",       "Value": d.staff_assigned || "" },
+        { "Field": "Discount 1 (%)",       "Value": d.discount1 ?? "" },
+        { "Field": "Discount 2 (%)",       "Value": d.discount2 ?? "" },
+        { "Field": "Credit Limit (Rs.)",   "Value": d.credit_limit ?? "" },
+        { "Field": "Billing Address",      "Value": d.address || "" },
+        { "Field": "Shop Address",         "Value": d.shop_address || "" },
+        { "Field": "Godown Address",       "Value": d.godown_address || "" },
+        { "Field": "Territories",          "Value": Array.isArray(d.territory) ? d.territory.join(", ") : "" },
+        { "Field": "Latitude",             "Value": d.latitude ?? "" },
+        { "Field": "Longitude",            "Value": d.longitude ?? "" },
+        { "Field": "Google Business Name", "Value": d.google_business_name || "" },
+        { "Field": "Google Maps URL",      "Value": d.google_maps_url || "" },
+        { "Field": "Google Rating",        "Value": d.google_rating ?? "" },
+        { "Field": "Google Reviews",       "Value": d.google_reviews_count ?? "" },
+        { "Field": "Listing Status",       "Value": d.google_listing_status || "" },
+        { "Field": "Listing Claimed",      "Value": d.google_listing_claimed ? "Yes" : "No" },
+        { "Field": "Status",               "Value": d.is_blocked ? "Blocked" : "Active" },
+        { "Field": "Member Since",         "Value": d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "" },
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(infoRows), "Dealer Info");
+
+      // ── Sheet 2: Orders ────────────────────────────────────────────────────
+      const orderRows = orderList.map(o => ({
+        "Order ID":    o.id,
+        "Order Date":  o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
+        "Status":      o.status || "",
+        "Total (Rs.)": Number(o.total) || 0,
+      }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows.length ? orderRows : [{ "Order ID": "", "Order Date": "", "Status": "", "Total (Rs.)": "" }]), "Orders");
+
+      // ── Sheet 3: Order Items ───────────────────────────────────────────────
+      const itemRows = itemList.map(it => {
+        const net = Number(it.net_rate ?? it.price) || 0;
+        return {
+          "Order ID":       it.order_id,
+          "Product Name":   it.name || "",
+          "SKU":            it.products?.sku || "",
+          "HSN Code":       it.hsn_code || "",
+          "Qty":            it.qty || 0,
+          "MRP (Rs.)":      it.mrp != null ? Number(it.mrp) : "",
+          "DLP (Rs.)":      it.dlp != null ? Number(it.dlp) : "",
+          "Disc 1 (%)":     it.discount1 != null ? Number(it.discount1) : "",
+          "Disc 2 (%)":     it.discount2 != null ? Number(it.discount2) : "",
+          "Net Rate (Rs.)": net,
+          "Amount (Rs.)":   net * (it.qty || 0),
+        };
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows.length ? itemRows : [{ "Order ID": "", "Product Name": "", "SKU": "", "HSN Code": "", "Qty": "", "MRP (Rs.)": "", "DLP (Rs.)": "", "Disc 1 (%)": "", "Disc 2 (%)": "", "Net Rate (Rs.)": "", "Amount (Rs.)": "" }]), "Order Items");
+
+      // ── Sheet 4: Media Links ───────────────────────────────────────────────
+      const MEDIA_KEYS = [
+        { key: "owner_photo",       label: "Owner Photo",    filename: `${code}_owner-photo.jpg`        },
+        { key: "staff1_photo",      label: "Staff 1 Photo",  filename: `${code}_staff1-photo.jpg`       },
+        { key: "staff2_photo",      label: "Staff 2 Photo",  filename: `${code}_staff2-photo.jpg`       },
+        { key: "shop_inside_photo", label: "Shop Inside",    filename: `${code}_shop-inside.jpg`        },
+        { key: "shop_board_photo",  label: "Shop Board",     filename: `${code}_shop-board.jpg`         },
+        { key: "shop_video",        label: "Interior Video", filename: `${code}_interior-video.mp4`     },
+      ];
+      const mediaRows = MEDIA_KEYS
+        .filter(m => !!d[m.key])
+        .map(m => ({ "Photo Type": m.label, "URL": d[m.key], "File Name": m.filename }));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mediaRows.length ? mediaRows : [{ "Photo Type": "", "URL": "", "File Name": "" }]), "Media Links");
+
+      XLSX.writeFile(wb, filename);
+    } catch (e) {
+      alert("Export failed: " + e.message);
+    }
+  };
+
   // ─── DETAIL VIEW ─────────────────────────────────────────────────────────────
   if (selected) {
     const memberSince = new Date(selected.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
@@ -593,6 +708,9 @@ export default function AdminDealers() {
               <button className="btn small" style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
                 onClick={() => navigate(`/admin/crm/${selected.id}`)}>
                 View Full CRM →
+              </button>
+              <button className="btn small outline" onClick={handleDealerExport} title="Export this dealer's data to Excel">
+                ⬇️ Export
               </button>
               <button className="btn small outline" onClick={startEdit}>Edit</button>
             </div>
