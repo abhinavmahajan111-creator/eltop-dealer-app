@@ -181,7 +181,6 @@ export default function Store() {
   const [search, setSearch]     = useState("");
   const [category, setCategory] = useState("All");
   const [cartOpen, setCartOpen] = useState(false);
-  const [discountDismissed, setDiscountDismissed] = useState(false);
   const cart = useCart();
 
   useEffect(() => {
@@ -219,7 +218,7 @@ export default function Store() {
         .store-root { min-height: 100vh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
 
         /* ── Header ── */
-        .store-header { position: sticky; top: 0; z-index: 200; background: #7B2D8B; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+        .store-header { position: sticky; top: 0; z-index: 200; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
         .store-header-inner { max-width: 1400px; margin: 0 auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
         .store-row1 { display: flex; align-items: center; gap: 10px; width: 100%; }
         .store-row2 { display: flex; width: 100%; }
@@ -248,9 +247,9 @@ export default function Store() {
 
         /* Header right buttons */
         .store-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-        .btn-login-primary { background: #fff; border: none; border-radius: 8px; color: #7B2D8B; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
-        .btn-dealer-login { background: none; border: none; color: rgba(255,255,255,.7); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: underline; padding: 4px; }
-        .store-cart-btn { background: none; border: none; color: #fff; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
+        .btn-login-primary { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .btn-dealer-login { background: none; border: 1.5px solid #7B2D8B; border-radius: 8px; color: #7B2D8B; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: none; padding: 7px 12px; }
+        .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
         @media (max-width: 639px) {
           .btn-login-primary { font-size: 11px; padding: 7px 10px; }
           .btn-dealer-login  { display: none; }
@@ -305,16 +304,6 @@ export default function Store() {
         <div className="store-header-inner">
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
-            {/* Dual logos */}
-            <div className="store-logos">
-              <img src="/assets/eltop-logo.png.jpg" alt="Eltop" className="store-logo-eltop"
-                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                onError={e => { e.target.style.display = "none"; }} />
-              <div className="logo-divider" />
-              <img src="/assets/logo embassy.jpeg" alt="Embassy Electricals" className="store-logo-embassy"
-                onError={e => { e.target.style.display = "none"; }} />
-            </div>
-
             {/* Search — desktop only, inside row1 */}
             <div className="store-row1-search">
               <div className="store-search-wrap">
@@ -334,7 +323,7 @@ export default function Store() {
               </button>
               <button className="store-cart-btn" onClick={() => setCartOpen(true)}>
                 <span style={{ fontSize: 22 }}>🛒</span>
-                <span style={{ fontSize: 10, color: "#F59E0B", fontWeight: 700 }}>Cart</span>
+                <span style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 700 }}>Cart</span>
                 {cart.count > 0 && (
                   <span style={{ position: "absolute", top: 0, right: 4, background: "#F59E0B", color: "#1e293b", fontSize: 10, fontWeight: 900, minWidth: 18, height: 18, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
                     {cart.count}
@@ -354,15 +343,6 @@ export default function Store() {
           </div>
         </div>
       </header>
-
-      {/* ── Discount strip — desktop top ── */}
-      {!discountDismissed && (
-        <div className="discount-top discount-strip">
-          <span className="discount-strip-text">🎉 Sign up &amp; get Flat 15% OFF on your first order!</span>
-          <button className="discount-strip-btn" onClick={() => navigate("/login")}>Login Now →</button>
-          <button className="discount-strip-close" onClick={() => setDiscountDismissed(true)}>✕</button>
-        </div>
-      )}
 
       {/* ── Hero banner ── */}
       <div className="store-hero">
@@ -413,17 +393,6 @@ export default function Store() {
           </div>
         )}
       </div>
-
-      {/* ── Floating discount strip — mobile bottom ── */}
-      {!discountDismissed && (
-        <div className="discount-float">
-          <div className="discount-strip" style={{ flex: 1 }}>
-            <span className="discount-strip-text">🎉 Login to unlock Flat 15% OFF on all products</span>
-            <button className="discount-strip-btn" onClick={() => navigate("/login")}>Login Now</button>
-            <button className="discount-strip-close" onClick={() => setDiscountDismissed(true)}>✕</button>
-          </div>
-        </div>
-      )}
 
       {/* ── Cart drawer ── */}
       {cartOpen && (
