@@ -305,40 +305,20 @@ export default function Store() {
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
             {/* Dual logos */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: '20px',
-              minWidth: '280px',
-              flexShrink: 0,
-              padding: '4px 0'
-            }}>
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', minWidth: '280px', flexShrink: 0 }}>
+              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'flex-start' }}>
+                <img
+                  src="/assets/ELTOP%20LOGO.png"
+                  alt="Eltop"
+                  style={{ height: '60px', width: 'auto', objectFit: 'contain', display: 'block' }}
+                  onError={e => e.target.style.display = 'none'}
+                />
+                <span style={{ fontSize: '10px', color: '#CC0000', fontWeight: 'bold', lineHeight: 1 }}>®</span>
+              </div>
               <img
-                src="/assets/logo-eltop-new.jpg"
-                alt="Eltop"
-                style={{
-                  height: '70px',
-                  width: 'auto',
-                  maxWidth: '150px',
-                  objectFit: 'contain',
-                  display: 'block',
-                  flexShrink: 0
-                }}
-                onError={e => e.target.style.display = 'none'}
-              />
-              <img
-                src="/assets/logo-embassy-new.jpeg"
+                src="/assets/EMBASSY%20LOGO.png"
                 alt="Embassy"
-                style={{
-                  height: '55px',
-                  width: 'auto',
-                  maxWidth: '120px',
-                  objectFit: 'contain',
-                  display: 'block',
-                  flexShrink: 0,
-                  filter: 'brightness(0) saturate(100%) invert(13%) sepia(99%) saturate(7471%) hue-rotate(1deg) brightness(94%) contrast(117%)'
-                }}
+                style={{ height: '50px', width: 'auto', objectFit: 'contain', display: 'block' }}
                 onError={e => e.target.style.display = 'none'}
               />
             </div>
@@ -442,7 +422,7 @@ export default function Store() {
       {/* ── Footer ── */}
       <div style={{ background: "#E8D5F0", borderTop: "2px solid #C084D4", padding: "20px 20px", textAlign: "center" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto" }}>
-          <img src="/assets/logo-eltop-new.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
+          <img src="/assets/ELTOP%20LOGO.png" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
           <div style={{ fontSize: 13, color: "#7B2D8B", fontWeight: 700 }}>Eltop by Embassy Electricals (India) Pvt. Ltd.</div>
           <div style={{ fontSize: 11, color: "#9B4DB8", marginTop: 4 }}>Quality Electrical Products · Dealer Enquiries: <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => navigate("/login")}>Login as Dealer →</span></div>
         </div>
