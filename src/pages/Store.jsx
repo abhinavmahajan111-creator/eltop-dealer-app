@@ -225,8 +225,25 @@ function ProductCard({ product: p, onAdd, onSelect }) {
 // ── Product Detail View ───────────────────────────────────────────────────────
 function ProductDetailView({ product: p, onBack, onAdd }) {
   const [activeImg, setActiveImg] = useState(0);
+  const [lightbox, setLightbox] = useState(false);
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
   const images = getImages(p);
+
+  // Close lightbox on Escape key
+  useEffect(() => {
+    if (!lightbox) return;
+    const handler = (e) => { if (e.key === "Escape") setLightbox(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [lightbox]);
+
+  const handleDownload = (url) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (p.name || "product") + ".jpg";
+    a.target = "_blank";
+    a.click();
+  };
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
@@ -238,26 +255,51 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
       </button>
 
       <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-        {/* Left: images */}
-        <div style={{ flex: "0 0 360px", minWidth: 0 }}>
-          <div style={{ background: "#f9f8ff", borderRadius: 14, overflow: "hidden", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid #edf0f7", marginBottom: 12 }}>
-            {images[activeImg]
-              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} />
-              : <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
-          </div>
+        {/* Left: image viewer */}
+        <div style={{ flex: "0 0 420px", minWidth: 0, display: "flex", gap: 10 }}>
+
+          {/* Thumbnail column — left of main image */}
           {images.length > 1 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 72, flexShrink: 0, overflowY: "auto", maxHeight: 440 }}>
               {images.map((url, i) => (
                 <div
                   key={i}
                   onClick={() => setActiveImg(i)}
-                  style={{ width: 64, height: 64, borderRadius: 8, overflow: "hidden", border: i === activeImg ? "2px solid #7B2D8B" : "1px solid #e2e8f0", cursor: "pointer", background: "#f9f8ff", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  style={{
+                    width: 70, height: 70, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+                    border: i === activeImg ? "2px solid #7B2D8B" : "2px solid transparent",
+                    cursor: "pointer", background: "#f9f8ff",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    opacity: i === activeImg ? 1 : 0.6,
+                    transition: "opacity .15s, border-color .15s",
+                    boxShadow: i === activeImg ? "0 0 0 1px #7B2D8B" : "0 1px 4px rgba(0,0,0,.1)",
+                  }}
                 >
                   <img src={url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
                 </div>
               ))}
             </div>
           )}
+
+          {/* Main image */}
+          <div
+            onClick={() => images[activeImg] && setLightbox(true)}
+            style={{
+              flex: 1, background: "#f9f8ff", borderRadius: 14, overflow: "hidden",
+              aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center",
+              border: "1px solid #edf0f7", cursor: images[activeImg] ? "zoom-in" : "default",
+              position: "relative",
+            }}
+          >
+            {images[activeImg]
+              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} />
+              : <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
+            {images[activeImg] && (
+              <span style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#94a3b8", background: "rgba(255,255,255,.8)", borderRadius: 6, padding: "2px 8px" }}>
+                🔍 Click to zoom
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Right: info */}
@@ -327,6 +369,53 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
           )}
         </div>
       </div>
+
+      {/* ── Lightbox ── */}
+      {lightbox && images[activeImg] && (
+        <div
+          onClick={() => setLightbox(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          {/* Controls top-right */}
+          <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => handleDownload(images[activeImg])}
+              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+            >
+              ⬇️ Download
+            </button>
+            <button
+              onClick={() => setLightbox(false)}
+              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, width: 40, height: 40, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Image */}
+          <img
+            src={images[activeImg]}
+            alt={p.name}
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,.6)" }}
+          />
+
+          {/* Thumbnail strip at bottom */}
+          {images.length > 1 && (
+            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
+              {images.map((url, i) => (
+                <div
+                  key={i}
+                  onClick={() => setActiveImg(i)}
+                  style={{ width: 52, height: 52, borderRadius: 6, overflow: "hidden", border: i === activeImg ? "2px solid #fff" : "2px solid rgba(255,255,255,.3)", cursor: "pointer", background: "#222", flexShrink: 0 }}
+                >
+                  <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
