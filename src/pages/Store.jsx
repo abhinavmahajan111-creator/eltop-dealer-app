@@ -306,8 +306,8 @@ export default function Store() {
           <div className="store-row1">
             {/* Dual logos */}
             <div style={{ display: "flex", flexDirection: "row", flexWrap: "nowrap", alignItems: "center", gap: "12px", flexShrink: 0 }}>
-              <img src="/assets/eltop-logo.png.jpg" style={{ height: "40px", width: "auto", objectFit: "contain", display: "inline-block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
-              <img src="/assets/logo embassy.jpeg" style={{ height: "32px", width: "auto", objectFit: "contain", display: "inline-block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
+              <img src="/assets/logo-eltop.jpg" style={{ height: "45px", width: "auto", display: "inline-block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
+              <img src="/assets/logo-embassy.jpeg" style={{ height: "32px", width: "auto", display: "inline-block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
             </div>
 
             {/* Search — desktop only, inside row1 */}
@@ -409,7 +409,7 @@ export default function Store() {
       {/* ── Footer ── */}
       <div style={{ background: "#E8D5F0", borderTop: "2px solid #C084D4", padding: "20px 20px", textAlign: "center" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto" }}>
-          <img src="/assets/eltop-logo.png.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
+          <img src="/assets/logo-eltop.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
           <div style={{ fontSize: 13, color: "#7B2D8B", fontWeight: 700 }}>Eltop by Embassy Electricals (India) Pvt. Ltd.</div>
           <div style={{ fontSize: 11, color: "#9B4DB8", marginTop: 4 }}>Quality Electrical Products · Dealer Enquiries: <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => navigate("/login")}>Login as Dealer →</span></div>
         </div>
