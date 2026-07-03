@@ -305,9 +305,9 @@ export default function Store() {
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
             {/* Dual logos */}
-            <div style={{ display: "flex", flexDirection: "row", flexWrap: "nowrap", alignItems: "center", gap: "12px", flexShrink: 0, minWidth: "160px", padding: "4px" }}>
-              <img src="/assets/logo-eltop.jpg" style={{ height: "50px", width: "auto", display: "inline-block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
-              <img src="/assets/logo-embassy.jpeg" style={{ height: "38px", width: "auto", display: "inline-block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
+            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", minWidth: "220px", flexShrink: 0 }}>
+              <img src="/assets/logo-eltop.jpg" style={{ height: "60px", width: "auto", objectFit: "contain", display: "block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
+              <img src="/assets/logo-embassy.jpeg" style={{ height: "48px", width: "auto", objectFit: "contain", display: "block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
             </div>
 
             {/* Search — desktop only, inside row1 */}
