@@ -305,9 +305,41 @@ export default function Store() {
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
             {/* Dual logos */}
-            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", minWidth: "220px", flexShrink: 0 }}>
-              <img src="/assets/logo-eltop.jpg" style={{ height: "60px", width: "auto", objectFit: "contain", display: "block" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
-              <img src="/assets/logo-embassy.jpeg" style={{ height: "48px", width: "auto", objectFit: "contain", display: "block" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
+            <div style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: '20px',
+              minWidth: '280px',
+              flexShrink: 0,
+              padding: '4px 0'
+            }}>
+              <img
+                src="/assets/logo-eltop.jpg"
+                alt="Eltop"
+                style={{
+                  height: '70px',
+                  width: 'auto',
+                  maxWidth: '150px',
+                  objectFit: 'contain',
+                  display: 'block',
+                  flexShrink: 0
+                }}
+                onError={e => e.target.style.display = 'none'}
+              />
+              <img
+                src="/assets/logo-embassy.jpeg"
+                alt="Embassy"
+                style={{
+                  height: '55px',
+                  width: 'auto',
+                  maxWidth: '120px',
+                  objectFit: 'contain',
+                  display: 'block',
+                  flexShrink: 0
+                }}
+                onError={e => e.target.style.display = 'none'}
+              />
             </div>
 
             {/* Search — desktop only, inside row1 */}
