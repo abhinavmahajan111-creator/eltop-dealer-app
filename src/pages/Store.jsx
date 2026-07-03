@@ -315,7 +315,7 @@ export default function Store() {
               padding: '4px 0'
             }}>
               <img
-                src="/assets/logo-eltop.jpg"
+                src="/assets/logo-eltop-new.jpg"
                 alt="Eltop"
                 style={{
                   height: '70px',
@@ -328,7 +328,7 @@ export default function Store() {
                 onError={e => e.target.style.display = 'none'}
               />
               <img
-                src="/assets/logo-embassy.jpeg"
+                src="/assets/logo-embassy-new.jpeg"
                 alt="Embassy"
                 style={{
                   height: '55px',
@@ -441,7 +441,7 @@ export default function Store() {
       {/* ── Footer ── */}
       <div style={{ background: "#E8D5F0", borderTop: "2px solid #C084D4", padding: "20px 20px", textAlign: "center" }}>
         <div style={{ maxWidth: 1400, margin: "0 auto" }}>
-          <img src="/assets/logo-eltop.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
+          <img src="/assets/logo-eltop-new.jpg" alt="Eltop" style={{ height: 36, objectFit: "contain", marginBottom: 8 }} onError={e => { e.target.style.display = "none"; }} />
           <div style={{ fontSize: 13, color: "#7B2D8B", fontWeight: 700 }}>Eltop by Embassy Electricals (India) Pvt. Ltd.</div>
           <div style={{ fontSize: 11, color: "#9B4DB8", marginTop: 4 }}>Quality Electrical Products · Dealer Enquiries: <span style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => navigate("/login")}>Login as Dealer →</span></div>
         </div>
