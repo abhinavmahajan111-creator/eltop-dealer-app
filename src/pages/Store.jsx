@@ -336,7 +336,8 @@ export default function Store() {
                   maxWidth: '120px',
                   objectFit: 'contain',
                   display: 'block',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  filter: 'brightness(0) saturate(100%) invert(13%) sepia(99%) saturate(7471%) hue-rotate(1deg) brightness(94%) contrast(117%)'
                 }}
                 onError={e => e.target.style.display = 'none'}
               />
