@@ -304,6 +304,12 @@ export default function Store() {
         <div className="store-header-inner">
           {/* Row 1: logos + (search on desktop) + actions */}
           <div className="store-row1">
+            {/* Dual logos */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+              <img src="/assets/eltop-logo.png.jpg" style={{ height: "45px", width: "auto" }} alt="Eltop" onError={e => e.target.style.display = "none"} />
+              <img src="/assets/logo embassy.jpeg" style={{ height: "32px", width: "auto" }} alt="Embassy" onError={e => e.target.style.display = "none"} />
+            </div>
+
             {/* Search — desktop only, inside row1 */}
             <div className="store-row1-search">
               <div className="store-search-wrap">
