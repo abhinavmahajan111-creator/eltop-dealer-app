@@ -4,7 +4,94 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 const EMPTY_FORM = {
   id: null, name: "", mrp: "", dlp: "", price: "", unit: "pc", stock: "",
   hsn_code: "", category: "", standard_packing: "", video_url: "", image_urls: [],
+  // Rich detail fields
+  about_item: [],
+  brand: "", colour: "", style: "", dimensions: "", room_type: "",
+  special_features: "", recommended_use: "", mounting_type: "",
+  power_source: "", material: "", wattage: "", voltage: "",
+  warranty: "", weight: "",
+  features_specs: {}, item_details: {},
 };
+
+// ── Collapsible section wrapper ───────────────────────────────────────────────
+function Section({ title, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, marginBottom: 12, overflow: "hidden" }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f8f9fc", cursor: "pointer", userSelect: "none", fontWeight: 700, fontSize: 13, color: "#334155" }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 11 }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && <div style={{ padding: "14px 14px 10px" }}>{children}</div>}
+    </div>
+  );
+}
+
+// ── Bullet list editor ────────────────────────────────────────────────────────
+function BulletEditor({ items, onChange }) {
+  const add = () => onChange([...items, ""]);
+  const remove = (i) => onChange(items.filter((_, idx) => idx !== i));
+  const update = (i, val) => onChange(items.map((x, idx) => idx === i ? val : x));
+  return (
+    <div>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <span style={{ color: "#94a3b8", fontSize: 14 }}>•</span>
+          <input
+            value={item}
+            onChange={e => update(i, e.target.value)}
+            placeholder={`Point ${i + 1}`}
+            style={{ flex: 1, marginBottom: 0, fontSize: 13 }}
+          />
+          <button type="button" onClick={() => remove(i)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 16, padding: "0 4px", lineHeight: 1 }}>✕</button>
+        </div>
+      ))}
+      <button type="button" onClick={add} style={{ fontSize: 12, color: "#7B2D8B", background: "none", border: "1px dashed #7B2D8B", borderRadius: 6, padding: "4px 12px", cursor: "pointer", marginTop: 2 }}>+ Add point</button>
+    </div>
+  );
+}
+
+// ── Key-value pairs editor ────────────────────────────────────────────────────
+function KVEditor({ data, onChange, suggestions = [] }) {
+  const entries = Object.entries(data || {});
+  const set = (k, v) => onChange({ ...data, [k]: v });
+  const remove = (k) => { const d = { ...data }; delete d[k]; onChange(d); };
+  const [newKey, setNewKey] = useState("");
+  const addKey = () => {
+    const k = newKey.trim();
+    if (!k || data[k] !== undefined) return;
+    onChange({ ...data, [k]: "" });
+    setNewKey("");
+  };
+  return (
+    <div>
+      {entries.map(([k, v]) => (
+        <div key={k} style={{ display: "grid", gridTemplateColumns: "160px 1fr auto", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{k}</span>
+          <input value={v} onChange={e => set(k, e.target.value)} style={{ marginBottom: 0, fontSize: 13 }} />
+          <button type="button" onClick={() => remove(k)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 15, padding: "0 4px" }}>✕</button>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
+        <input
+          list="kv-suggestions"
+          value={newKey}
+          onChange={e => setNewKey(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addKey())}
+          placeholder="Field name…"
+          style={{ flex: "0 0 160px", marginBottom: 0, fontSize: 13 }}
+        />
+        <datalist id="kv-suggestions">
+          {suggestions.filter(s => !data[s]).map(s => <option key={s} value={s} />)}
+        </datalist>
+        <button type="button" onClick={addKey} style={{ fontSize: 12, color: "#7B2D8B", background: "none", border: "1px dashed #7B2D8B", borderRadius: 6, padding: "4px 12px", cursor: "pointer" }}>+ Add</button>
+      </div>
+    </div>
+  );
+}
 
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
@@ -31,7 +118,7 @@ export default function AdminProducts() {
     setLoading(true);
     supabase
       .from("products")
-      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, standard_packing, image_urls, video_url")
+      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, standard_packing, image_urls, video_url, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error: err }) => {
@@ -61,6 +148,14 @@ export default function AdminProducts() {
       standard_packing: p.standard_packing ?? "",
       video_url: p.video_url || "",
       image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
+      about_item: Array.isArray(p.about_item) ? p.about_item : [],
+      brand: p.brand || "", colour: p.colour || "", style: p.style || "",
+      dimensions: p.dimensions || "", room_type: p.room_type || "",
+      special_features: p.special_features || "", recommended_use: p.recommended_use || "",
+      mounting_type: p.mounting_type || "", power_source: p.power_source || "",
+      material: p.material || "", wattage: p.wattage || "", voltage: p.voltage || "",
+      warranty: p.warranty || "", weight: p.weight || "",
+      features_specs: p.features_specs || {}, item_details: p.item_details || {},
     });
     setError("");
     setShowNewCategory(false); setNewCategoryName("");
@@ -84,6 +179,15 @@ export default function AdminProducts() {
       standard_packing: form.standard_packing !== "" ? Number(form.standard_packing) : null,
       video_url:        form.video_url || null,
       image_urls: form.image_urls,
+      about_item: form.about_item.filter(Boolean),
+      brand: form.brand || null, colour: form.colour || null, style: form.style || null,
+      dimensions: form.dimensions || null, room_type: form.room_type || null,
+      special_features: form.special_features || null, recommended_use: form.recommended_use || null,
+      mounting_type: form.mounting_type || null, power_source: form.power_source || null,
+      material: form.material || null, wattage: form.wattage || null, voltage: form.voltage || null,
+      warranty: form.warranty || null, weight: form.weight || null,
+      features_specs: Object.keys(form.features_specs || {}).length ? form.features_specs : null,
+      item_details: Object.keys(form.item_details || {}).length ? form.item_details : null,
     };
     const { data: saved, error: err } = form.id
       ? await supabase.from("products").update(payload).eq("id", form.id).select().single()
@@ -254,6 +358,53 @@ export default function AdminProducts() {
             type="number" placeholder="Stock" value={form.stock}
             onChange={(e) => setForm({ ...form, stock: e.target.value })}
           />
+          {/* ── Rich detail sections (shown when editing existing product) ── */}
+          {form.id && (<>
+            <Section title="📝 About This Item">
+              <BulletEditor
+                items={form.about_item}
+                onChange={v => setForm({ ...form, about_item: v })}
+              />
+            </Section>
+
+            <Section title="⚡ Features & Specs">
+              <KVEditor
+                data={form.features_specs}
+                onChange={v => setForm({ ...form, features_specs: v })}
+                suggestions={["Power Source", "Room Type", "Mounting Type", "Special Features", "Recommended Use", "Colour", "Style", "Dimensions", "Weight", "Wattage", "Voltage", "Material"]}
+              />
+            </Section>
+
+            <Section title="📦 Item Details">
+              {[
+                ["Brand", "brand", "Eltop by Embassy"],
+                ["Colour", "colour", ""],
+                ["Style", "style", ""],
+                ["Warranty", "warranty", "e.g. 1 Year"],
+                ["Weight", "weight", "e.g. 2.5 kg"],
+                ["Dimensions", "dimensions", "L x W x H cm"],
+                ["Material", "material", ""],
+                ["Wattage", "wattage", "e.g. 60W"],
+                ["Voltage", "voltage", "e.g. 220V"],
+                ["Power Source", "power_source", ""],
+                ["Mounting Type", "mounting_type", ""],
+                ["Room Type", "room_type", ""],
+                ["Special Features", "special_features", ""],
+                ["Recommended Use", "recommended_use", ""],
+              ].map(([label, key, ph]) => (
+                <div key={key} style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{label}</label>
+                  <input
+                    value={form[key]}
+                    onChange={e => setForm({ ...form, [key]: e.target.value })}
+                    placeholder={ph}
+                    style={{ marginBottom: 0, fontSize: 13 }}
+                  />
+                </div>
+              ))}
+            </Section>
+          </>)}
+
           <div className="admin-form-actions">
             <button className="btn small" type="submit" disabled={saving}>
               {saving ? "Saving…" : form.id ? "Update Product" : "Add Product"}

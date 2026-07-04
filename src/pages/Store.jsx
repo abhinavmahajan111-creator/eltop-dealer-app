@@ -339,38 +339,68 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
             Sign up to place orders at dealer pricing
           </div>
 
-          {/* Specs table */}
-          {(p.standard_packing || p.stock != null) && (
-            <div style={{ marginTop: 24, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-              <div style={{ background: "#f8f9fc", padding: "10px 16px", fontWeight: 700, fontSize: 13, color: "#475569", borderBottom: "1px solid #e2e8f0" }}>
-                Specifications
-              </div>
+          {/* Quick specs */}
+          {(p.standard_packing || p.unit || p.brand || p.warranty) && (
+            <div style={{ marginTop: 16, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <tbody>
-                  {p.standard_packing && (
-                    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "10px 16px", color: "#64748b", width: "40%" }}>Standard Packing</td>
-                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.standard_packing}</td>
+                  {[
+                    ["Brand", p.brand],
+                    ["Unit", p.unit],
+                    ["Standard Packing", p.standard_packing ? `${p.standard_packing} pcs` : null],
+                    ["Warranty", p.warranty],
+                    ["Colour", p.colour],
+                    ["Material", p.material],
+                    ["Weight", p.weight],
+                    ["Dimensions", p.dimensions],
+                    ["Power Source", p.power_source],
+                    ["Wattage", p.wattage],
+                    ["Voltage", p.voltage],
+                    ["Mounting Type", p.mounting_type],
+                    ["Room Type", p.room_type],
+                  ].filter(([, v]) => v).map(([label, val], i, arr) => (
+                    <tr key={label} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                      <td style={{ padding: "9px 14px", color: "#64748b", width: "42%", fontSize: 12 }}>{label}</td>
+                      <td style={{ padding: "9px 14px", color: "#1e293b", fontWeight: 600 }}>{val}</td>
                     </tr>
-                  )}
-                  {p.unit && (
-                    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "10px 16px", color: "#64748b" }}>Unit</td>
-                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.unit}</td>
-                    </tr>
-                  )}
-                  {p.category && (
-                    <tr>
-                      <td style={{ padding: "10px 16px", color: "#64748b" }}>Category</td>
-                      <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{p.category}</td>
-                    </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           )}
         </div>
       </div>
+
+      {/* ── About this item ── */}
+      {Array.isArray(p.about_item) && p.about_item.filter(Boolean).length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, color: "#1e293b", marginBottom: 12 }}>About this item</div>
+          <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+            {p.about_item.filter(Boolean).map((pt, i) => (
+              <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.6 }}>{pt}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* ── Features & Specs ── */}
+      {p.features_specs && Object.keys(p.features_specs).length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, color: "#1e293b", marginBottom: 12 }}>Features &amp; Specifications</div>
+          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <tbody>
+                {Object.entries(p.features_specs).filter(([, v]) => v).map(([k, v], i, arr) => (
+                  <tr key={k} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
+                    <td style={{ padding: "10px 16px", color: "#64748b", width: "38%", fontWeight: 500 }}>{k}</td>
+                    <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── Lightbox ── */}
       {lightbox && images[activeImg] && (
@@ -446,7 +476,7 @@ export default function Store() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     supabase
       .from("products")
-      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku")
+      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, standard_packing")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error }) => {
