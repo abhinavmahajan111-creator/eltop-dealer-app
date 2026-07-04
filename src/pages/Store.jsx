@@ -644,17 +644,28 @@ export default function Store() {
       });
   }, []);
 
-  // Open product directly if URL has ?product=ID
+  // Stage 1: read URL param on mount (before products load)
+  const [urlProductId, setUrlProductId] = useState(null);
   useEffect(() => {
-    if (products.length > 0) {
-      const params = new URLSearchParams(window.location.search);
-      const productId = params.get('product');
-      if (productId) {
-        const found = products.find(p => String(p.id) === String(productId));
-        if (found) { setSelectedProduct(found); window.scrollTo(0, 0); }
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('product');
+    console.log('Store mount — URL search:', window.location.search, '→ product id:', id);
+    if (id) setUrlProductId(id);
+  }, []);
+
+  // Stage 2: once products load AND we have a target id, open it
+  useEffect(() => {
+    console.log('Products loaded:', products.length, '| urlProductId:', urlProductId);
+    if (urlProductId && products.length > 0) {
+      const found = products.find(p => String(p.id) === String(urlProductId));
+      console.log('Found product:', found);
+      if (found) {
+        setSelectedProduct(found);
+        setUrlProductId(null);
+        scrollToTop();
       }
     }
-  }, [products]);
+  }, [urlProductId, products]);
 
   // Sync browser URL with selected product
   useEffect(() => {
