@@ -660,9 +660,11 @@ export default function Store() {
       const found = products.find(p => String(p.id) === String(urlProductId));
       console.log('Found product:', found);
       if (found) {
-        setSelectedProduct(found);
         setUrlProductId(null);
-        scrollToTop();
+        setTimeout(() => {
+          setSelectedProduct(found);
+          scrollToTop();
+        }, 100);
       }
     }
   }, [urlProductId, products]);
