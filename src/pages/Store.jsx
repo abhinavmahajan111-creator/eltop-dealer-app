@@ -384,13 +384,13 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
       )}
 
       {/* ── Features & Specs ── */}
-      {p.features_specs && Object.keys(p.features_specs).length > 0 && (
+      {p.features_specs && Object.keys(p.features_specs).filter(k => k !== "__hidden").length > 0 && (
         <div style={{ marginTop: 28 }}>
           <div style={{ fontWeight: 800, fontSize: 17, color: "#1e293b", marginBottom: 12 }}>Features &amp; Specifications</div>
           <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <tbody>
-                {Object.entries(p.features_specs).filter(([, v]) => v).map(([k, v], i, arr) => (
+                {Object.entries(p.features_specs).filter(([k, v]) => k !== "__hidden" && v && !( Array.isArray(p.features_specs.__hidden) && p.features_specs.__hidden.includes(k) )).map(([k, v], i, arr) => (
                   <tr key={k} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
                     <td style={{ padding: "10px 16px", color: "#64748b", width: "38%", fontWeight: 500 }}>{k}</td>
                     <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{v}</td>

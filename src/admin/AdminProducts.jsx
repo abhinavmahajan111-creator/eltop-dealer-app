@@ -74,6 +74,9 @@ const SPEC_FIELDS = [
 ];
 
 function SpecsEditor({ data, onChange }) {
+  // __hidden is stored inside features_specs as an array of hidden field keys
+  const hidden = new Set(Array.isArray(data?.__hidden) ? data.__hidden : []);
+
   const set = (k, v) => {
     if (v === "") {
       const d = { ...data }; delete d[k]; onChange(d);
@@ -81,28 +84,46 @@ function SpecsEditor({ data, onChange }) {
       onChange({ ...data, [k]: v });
     }
   };
+
+  const toggleVisibility = (k) => {
+    const next = new Set(hidden);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    onChange({ ...data, __hidden: [...next] });
+  };
+
   return (
     <div>
       {SPEC_FIELDS.map(({ key, suggestions }) => {
         const listId = `spec-${key.replace(/\s+/g, "-")}`;
+        const isHidden = hidden.has(key);
         return (
           <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <label style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#64748b", flexShrink: 0 }}>{key}</label>
+            <label style={{ width: 160, fontSize: 12, fontWeight: 600, color: "#64748b", flexShrink: 0 }}>{key}</label>
             <input
               list={listId}
               value={data?.[key] ?? ""}
               onChange={e => set(key, e.target.value)}
               placeholder="—"
-              style={{ flex: 1, marginBottom: 0, fontSize: 13 }}
+              style={{ flex: 1, marginBottom: 0, fontSize: 13, opacity: isHidden ? 0.45 : 1 }}
             />
             {suggestions.length > 0 && (
               <datalist id={listId}>
                 {suggestions.map(s => <option key={s} value={s} />)}
               </datalist>
             )}
-            {data?.[key] && (
-              <button type="button" onClick={() => set(key, "")} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>✕</button>
-            )}
+            <button
+              type="button"
+              onClick={() => toggleVisibility(key)}
+              style={{
+                padding: "5px 12px", borderRadius: 6, flexShrink: 0, whiteSpace: "nowrap",
+                border: isHidden ? "1px solid #ccc" : "1px solid #7B2D8B",
+                background: isHidden ? "#f5f5f5" : "#f0e8f8",
+                color: isHidden ? "#999" : "#7B2D8B",
+                cursor: "pointer", fontSize: 12,
+              }}
+            >
+              {isHidden ? "🙈 Hidden" : "👁 Visible"}
+            </button>
           </div>
         );
       })}
