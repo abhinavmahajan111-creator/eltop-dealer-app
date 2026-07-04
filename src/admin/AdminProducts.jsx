@@ -17,7 +17,14 @@ export default function AdminProducts() {
   const [search, setSearch] = useState("");
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryNewName, setCategoryNewName] = useState("");
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const fileInputRef = useRef(null);
+
+  const existingCategories = useMemo(
+    () => [...new Set(products.map(p => p.category).filter(Boolean))].sort(),
+    [products]
+  );
 
   const loadProducts = () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
@@ -35,7 +42,10 @@ export default function AdminProducts() {
 
   useEffect(() => { loadProducts(); }, []);
 
-  const resetForm = () => { setForm(EMPTY_FORM); setError(""); setFormOpen(false); };
+  const resetForm = () => {
+    setForm(EMPTY_FORM); setError(""); setFormOpen(false);
+    setShowNewCategory(false); setNewCategoryName("");
+  };
 
   const handleEdit = (p) => {
     setForm({
@@ -53,6 +63,7 @@ export default function AdminProducts() {
       image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
     });
     setError("");
+    setShowNewCategory(false); setNewCategoryName("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -188,10 +199,37 @@ export default function AdminProducts() {
             type="text" placeholder="Product name" value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
-          <input
-            type="text" placeholder="Category (e.g. Geysers, Fans)" value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
-          />
+          <select
+            value={showNewCategory ? "__new__" : (form.category || "")}
+            onChange={e => {
+              if (e.target.value === "__new__") {
+                setShowNewCategory(true);
+                setNewCategoryName("");
+                setForm({ ...form, category: "" });
+              } else {
+                setShowNewCategory(false);
+                setNewCategoryName("");
+                setForm({ ...form, category: e.target.value });
+              }
+            }}
+            style={{ marginBottom: showNewCategory ? 6 : undefined }}
+          >
+            <option value="">— Select category —</option>
+            {existingCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            <option value="__new__">+ Create New Category</option>
+          </select>
+          {showNewCategory && (
+            <input
+              type="text"
+              placeholder="Enter new category name"
+              value={newCategoryName}
+              autoFocus
+              onChange={e => {
+                setNewCategoryName(e.target.value);
+                setForm({ ...form, category: e.target.value });
+              }}
+            />
+          )}
           <input
             type="number" placeholder="MRP (₹)" value={form.mrp}
             onChange={(e) => setForm({ ...form, mrp: e.target.value })}
@@ -288,7 +326,7 @@ export default function AdminProducts() {
         </div>
       )}
 
-      {/* ── Search bar ── */}
+      {/* ── Search bar + table — hidden while editing a product ── */}
       {!form.id && products.length > 0 && (
         <div style={{ position: "relative", maxWidth: 400, marginBottom: 16 }}>
           <input
@@ -312,8 +350,8 @@ export default function AdminProducts() {
         </div>
       )}
 
-      {/* ── Product table grouped by category ── */}
-      {loading ? (
+      {/* ── Product table grouped by category — hidden while editing ── */}
+      {!form.id && (loading ? (
         <div className="admin-loading">Loading…</div>
       ) : products.length === 0 ? (
         <div className="admin-empty">No products yet.</div>
@@ -395,7 +433,7 @@ export default function AdminProducts() {
             </tbody>
           </table>
         </div>
-      )}
+      ))}
     </div>
   );
 }
