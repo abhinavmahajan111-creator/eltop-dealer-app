@@ -384,23 +384,75 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
       )}
 
       {/* ── Features & Specs ── */}
-      {p.features_specs && Object.keys(p.features_specs).filter(k => k !== "__hidden").length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontWeight: 800, fontSize: 17, color: "#1e293b", marginBottom: 12 }}>Features &amp; Specifications</div>
-          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <tbody>
-                {Object.entries(p.features_specs).filter(([k, v]) => k !== "__hidden" && v && !( Array.isArray(p.features_specs.__hidden) && p.features_specs.__hidden.includes(k) )).map(([k, v], i, arr) => (
-                  <tr key={k} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none", background: i % 2 === 0 ? "#fff" : "#fafbfc" }}>
-                    <td style={{ padding: "10px 16px", color: "#64748b", width: "38%", fontWeight: 500 }}>{k}</td>
-                    <td style={{ padding: "10px 16px", color: "#1e293b", fontWeight: 600 }}>{v}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {(() => {
+        const SPEC_FIELDS = [
+          { key: 'power_source', label: 'Power Source' },
+          { key: 'room_type', label: 'Room Type' },
+          { key: 'mounting_type', label: 'Mounting Type' },
+          { key: 'special_features', label: 'Special Features' },
+          { key: 'recommended_use', label: 'Recommended Use' },
+          { key: 'colour', label: 'Colour' },
+          { key: 'style', label: 'Style' },
+          { key: 'material', label: 'Material' },
+          { key: 'wattage', label: 'Wattage' },
+          { key: 'voltage', label: 'Voltage' },
+          { key: 'speed', label: 'Speed' },
+          { key: 'capacity', label: 'Capacity' },
+          { key: 'warranty', label: 'Warranty' },
+          { key: 'weight', label: 'Weight' },
+          { key: 'dimensions', label: 'Dimensions' },
+        ];
+        const ITEM_DETAIL_FIELDS = [
+          { key: 'brand', label: 'Brand' },
+          { key: 'colour', label: 'Colour' },
+          { key: 'style', label: 'Style' },
+          { key: 'warranty', label: 'Warranty' },
+          { key: 'weight', label: 'Weight' },
+          { key: 'dimensions', label: 'Dimensions' },
+          { key: 'material', label: 'Material' },
+          { key: 'wattage', label: 'Wattage' },
+          { key: 'voltage', label: 'Voltage' },
+          { key: 'power_source', label: 'Power Source' },
+          { key: 'mounting_type', label: 'Mounting Type' },
+          { key: 'room_type', label: 'Room Type' },
+          { key: 'special_features', label: 'Special Features' },
+        ];
+        const specsVis = p.features_specs?.visibility || {};
+        const specs = p.features_specs?.values || {};
+        const itemVis = p.item_details?.visibility || {};
+        const itemDetails = p.item_details?.values || {};
+        const tableStyle = { width: '100%', borderCollapse: 'collapse', border: '1px solid #eee' };
+        const headStyle = { fontSize: '16px', fontWeight: 'bold', padding: '10px 12px', background: '#7B2D8B', color: 'white', borderRadius: '8px 8px 0 0', margin: 0 };
+        const renderRow = (key, label, val, vis) => {
+          if (vis[key] === false) return null;
+          return (
+            <tr key={key} style={{ borderBottom: '1px solid #eee' }}>
+              <td style={{ padding: '10px 12px', fontWeight: '500', width: '40%', background: '#f9f9f9', fontSize: '14px' }}>{label}</td>
+              <td style={{ padding: '10px 12px', fontSize: '14px', color: val ? '#333' : '#bbb' }}>{val || '—'}</td>
+            </tr>
+          );
+        };
+        return (
+          <>
+            <div style={{ marginTop: 24 }}>
+              <h3 style={headStyle}>⚡ Features &amp; Specs</h3>
+              <table style={tableStyle}>
+                <tbody>
+                  {SPEC_FIELDS.map(({ key, label }) => renderRow(key, label, specs[key], specsVis))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ marginTop: 24 }}>
+              <h3 style={{ ...headStyle, borderRadius: '8px 8px 0 0' }}>📦 Item Details</h3>
+              <table style={tableStyle}>
+                <tbody>
+                  {ITEM_DETAIL_FIELDS.map(({ key, label }) => renderRow(key, label, itemDetails[key], itemVis))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        );
+      })()}
 
       {/* ── Lightbox ── */}
       {lightbox && images[activeImg] && (
@@ -476,7 +528,7 @@ export default function Store() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     supabase
       .from("products")
-      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, standard_packing")
+      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details, standard_packing")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error }) => {
