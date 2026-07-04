@@ -644,6 +644,27 @@ export default function Store() {
       });
   }, []);
 
+  // Open product directly if URL has ?product=ID
+  useEffect(() => {
+    if (products.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const productId = params.get('product');
+      if (productId) {
+        const found = products.find(p => String(p.id) === String(productId));
+        if (found) { setSelectedProduct(found); window.scrollTo(0, 0); }
+      }
+    }
+  }, [products]);
+
+  // Sync browser URL with selected product
+  useEffect(() => {
+    if (selectedProduct) {
+      window.history.pushState({}, '', `/store?product=${selectedProduct.id}`);
+    } else {
+      window.history.pushState({}, '', '/store');
+    }
+  }, [selectedProduct]);
+
   const categories = useMemo(() => {
     const cats = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
     return cats;
