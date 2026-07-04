@@ -226,6 +226,9 @@ function ProductCard({ product: p, onAdd, onSelect }) {
 function ProductDetailView({ product: p, onBack, onAdd }) {
   const [activeImg, setActiveImg] = useState(0);
   const [lightbox, setLightbox] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showSpecs, setShowSpecs] = useState(false);
+  const [showItemDetails, setShowItemDetails] = useState(false);
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
   const images = getImages(p);
 
@@ -371,19 +374,31 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
         </div>
       </div>
 
-      {/* ── About this item ── */}
-      {Array.isArray(p.about_item) && p.about_item.filter(Boolean).length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontWeight: 800, fontSize: 17, color: "#1e293b", marginBottom: 12 }}>About this item</div>
-          <ul style={{ margin: 0, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 8 }}>
-            {p.about_item.filter(Boolean).map((pt, i) => (
-              <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.6 }}>{pt}</li>
-            ))}
-          </ul>
+      {/* ── About This Item (collapsible) ── */}
+      <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+        <div
+          onClick={() => setShowAbout(!showAbout)}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' }}
+        >
+          <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📋 About This Item</h3>
+          <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showAbout ? '▲' : '▼'}</span>
         </div>
-      )}
+        {showAbout && (
+          <div style={{ padding: 16, background: '#fafafa' }}>
+            {Array.isArray(p.about_item) && p.about_item.filter(Boolean).length > 0 ? (
+              <ul style={{ paddingLeft: 20, margin: 0 }}>
+                {p.about_item.filter(Boolean).map((pt, i) => (
+                  <li key={i} style={{ marginBottom: 8, fontSize: 14, lineHeight: 1.6 }}>{pt}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: '#bbb', fontSize: 14, margin: 0 }}>No description added yet</p>
+            )}
+          </div>
+        )}
+      </div>
 
-      {/* ── Features & Specs ── */}
+      {/* ── Features & Specs (collapsible) ── */}
       {(() => {
         const SPEC_FIELDS = [
           { key: 'power_source', label: 'Power Source' },
@@ -421,34 +436,39 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
         const specs = p.features_specs?.values || {};
         const itemVis = p.item_details?.visibility || {};
         const itemDetails = p.item_details?.values || {};
-        const tableStyle = { width: '100%', borderCollapse: 'collapse', border: '1px solid #eee' };
-        const headStyle = { fontSize: '16px', fontWeight: 'bold', padding: '10px 12px', background: '#7B2D8B', color: 'white', borderRadius: '8px 8px 0 0', margin: 0 };
+        const hdrStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' };
         const renderRow = (key, label, val, vis) => {
           if (vis[key] === false) return null;
           return (
             <tr key={key} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={{ padding: '10px 12px', fontWeight: '500', width: '40%', background: '#f9f9f9', fontSize: '14px' }}>{label}</td>
-              <td style={{ padding: '10px 12px', fontSize: '14px', color: val ? '#333' : '#bbb' }}>{val || '—'}</td>
+              <td style={{ padding: '10px 12px', fontWeight: 500, width: '40%', background: '#f9f9f9', fontSize: 14 }}>{label}</td>
+              <td style={{ padding: '10px 12px', fontSize: 14, color: val ? '#333' : '#bbb' }}>{val || '—'}</td>
             </tr>
           );
         };
         return (
           <>
-            <div style={{ marginTop: 24 }}>
-              <h3 style={headStyle}>⚡ Features &amp; Specs</h3>
-              <table style={tableStyle}>
-                <tbody>
-                  {SPEC_FIELDS.map(({ key, label }) => renderRow(key, label, specs[key], specsVis))}
-                </tbody>
-              </table>
+            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+              <div onClick={() => setShowSpecs(!showSpecs)} style={hdrStyle}>
+                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>⚡ Features &amp; Specs</h3>
+                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showSpecs ? '▲' : '▼'}</span>
+              </div>
+              {showSpecs && (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>{SPEC_FIELDS.map(({ key, label }) => renderRow(key, label, specs[key], specsVis))}</tbody>
+                </table>
+              )}
             </div>
-            <div style={{ marginTop: 24 }}>
-              <h3 style={{ ...headStyle, borderRadius: '8px 8px 0 0' }}>📦 Item Details</h3>
-              <table style={tableStyle}>
-                <tbody>
-                  {ITEM_DETAIL_FIELDS.map(({ key, label }) => renderRow(key, label, itemDetails[key], itemVis))}
-                </tbody>
-              </table>
+            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+              <div onClick={() => setShowItemDetails(!showItemDetails)} style={hdrStyle}>
+                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📦 Item Details</h3>
+                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showItemDetails ? '▲' : '▼'}</span>
+              </div>
+              {showItemDetails && (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>{ITEM_DETAIL_FIELDS.map(({ key, label }) => renderRow(key, label, itemDetails[key], itemVis))}</tbody>
+                </table>
+              )}
             </div>
           </>
         );
