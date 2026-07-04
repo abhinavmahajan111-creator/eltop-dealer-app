@@ -669,8 +669,10 @@ export default function Store() {
     }
   }, [urlProductId, products]);
 
-  // Sync browser URL with selected product
+  // Sync browser URL with selected product (skip first render to preserve ?product= param)
+  const isInitialLoad = useRef(true);
   useEffect(() => {
+    if (isInitialLoad.current) { isInitialLoad.current = false; return; }
     if (selectedProduct) {
       window.history.pushState({}, '', `/store?product=${selectedProduct.id}`);
     } else {
