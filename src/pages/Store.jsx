@@ -229,6 +229,8 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
   const [showAbout, setShowAbout] = useState(false);
   const [showSpecs, setShowSpecs] = useState(false);
   const [showItemDetails, setShowItemDetails] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
   const images = getImages(p);
 
@@ -239,6 +241,18 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [lightbox]);
+
+  const handleShare = async () => {
+    const productUrl = `${window.location.origin}/store?product=${p.id}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: p.name, text: `Check out ${p.name} - MRP ₹${p.mrp}`, url: productUrl });
+      } catch (_) {}
+    } else {
+      setShareUrl(productUrl);
+      setShowShareModal(true);
+    }
+  };
 
   const handleDownload = (url) => {
     const a = document.createElement("a");
@@ -314,7 +328,16 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
               {p.category}
             </span>
           )}
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", lineHeight: 1.3, margin: "0 0 12px" }}>{p.name}</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", lineHeight: 1.3, margin: "0 0 8px" }}>{p.name}</h1>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0 16px 0' }}>
+            <button
+              onClick={handleShare}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 20, border: '1px solid #7B2D8B', background: 'white', color: '#7B2D8B', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'inherit' }}
+            >
+              🔗 Share This Product
+            </button>
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
             {p.sku      && <div style={{ fontSize: 13, color: "#64748b" }}>SKU: <strong style={{ color: "#334155" }}>{p.sku}</strong></div>}
@@ -473,6 +496,69 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
           </>
         );
       })()}
+
+      {/* ── Share Modal ── */}
+      {showShareModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={() => setShowShareModal(false)}
+        >
+          <div
+            style={{ background: 'white', borderRadius: 16, padding: 24, width: 320, maxWidth: '90vw' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>Share This Product</h3>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <input
+                value={shareUrl}
+                readOnly
+                style={{ flex: 1, padding: 8, border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}
+              />
+              <button
+                onClick={() => { navigator.clipboard.writeText(shareUrl); alert('Link copied!'); }}
+                style={{ padding: '8px 12px', background: '#7B2D8B', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Copy
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
+                target="_blank" rel="noreferrer"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#25D366', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+              >
+                📱 WhatsApp
+              </a>
+              <a
+                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`}
+                target="_blank" rel="noreferrer"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1877F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+              >
+                👍 Facebook
+              </a>
+              <a
+                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(p.name)}&url=${encodeURIComponent(shareUrl)}`}
+                target="_blank" rel="noreferrer"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1DA1F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+              >
+                🐦 Twitter
+              </a>
+              <a
+                href={`mailto:?subject=${encodeURIComponent(p.name)}&body=${encodeURIComponent('Check out ' + p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#64748b', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+              >
+                📧 Email
+              </a>
+            </div>
+            <button
+              onClick={() => setShowShareModal(false)}
+              style={{ marginTop: 16, width: '100%', padding: '10px', background: 'none', border: '1px solid #ddd', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#64748b' }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Lightbox ── */}
       {lightbox && images[activeImg] && (
