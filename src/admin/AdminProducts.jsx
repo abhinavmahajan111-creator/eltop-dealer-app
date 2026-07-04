@@ -54,41 +54,58 @@ function BulletEditor({ items, onChange }) {
   );
 }
 
-// ── Key-value pairs editor ────────────────────────────────────────────────────
-function KVEditor({ data, onChange, suggestions = [] }) {
-  const entries = Object.entries(data || {});
-  const set = (k, v) => onChange({ ...data, [k]: v });
-  const remove = (k) => { const d = { ...data }; delete d[k]; onChange(d); };
-  const [newKey, setNewKey] = useState("");
-  const addKey = () => {
-    const k = newKey.trim();
-    if (!k || data[k] !== undefined) return;
-    onChange({ ...data, [k]: "" });
-    setNewKey("");
+// ── Fixed predefined specs editor ────────────────────────────────────────────
+const SPEC_FIELDS = [
+  { key: "Power Source",     suggestions: ["Electric", "Battery", "Solar", "Manual", "AC/DC"] },
+  { key: "Room Type",        suggestions: ["Kitchen", "Bedroom", "Living Room", "Bathroom", "Office", "Outdoor", "All Rooms"] },
+  { key: "Mounting Type",    suggestions: ["Ceiling Mount", "Wall Mount", "Floor Mount", "Table Top", "Recessed", "Surface Mount"] },
+  { key: "Special Features", suggestions: [] },
+  { key: "Recommended Use",  suggestions: [] },
+  { key: "Colour",           suggestions: ["White", "Black", "Silver", "Brown", "Ivory", "Chrome", "Gold"] },
+  { key: "Style",            suggestions: ["Classic", "Modern", "Premium", "Standard", "Decorative", "Industrial"] },
+  { key: "Material",         suggestions: ["Aluminium", "Plastic", "Steel", "Copper", "ABS", "Iron", "Brass", "Mixed"] },
+  { key: "Wattage",          suggestions: ["5W", "10W", "15W", "20W", "40W", "60W", "75W", "100W"] },
+  { key: "Voltage",          suggestions: ["12V", "24V", "110V", "220V", "240V", "110-240V"] },
+  { key: "Speed",            suggestions: ["3 Speed", "5 Speed", "Variable", "300 RPM", "400 RPM"] },
+  { key: "Capacity",         suggestions: [] },
+  { key: "Warranty",         suggestions: ["6 Months", "1 Year", "2 Years", "3 Years", "5 Years"] },
+  { key: "Weight",           suggestions: [] },
+  { key: "Dimensions",       suggestions: [] },
+];
+
+function SpecsEditor({ data, onChange }) {
+  const set = (k, v) => {
+    if (v === "") {
+      const d = { ...data }; delete d[k]; onChange(d);
+    } else {
+      onChange({ ...data, [k]: v });
+    }
   };
   return (
     <div>
-      {entries.map(([k, v]) => (
-        <div key={k} style={{ display: "grid", gridTemplateColumns: "160px 1fr auto", gap: 6, marginBottom: 6, alignItems: "center" }}>
-          <span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{k}</span>
-          <input value={v} onChange={e => set(k, e.target.value)} style={{ marginBottom: 0, fontSize: 13 }} />
-          <button type="button" onClick={() => remove(k)} style={{ background: "none", border: "none", color: "#e74c3c", cursor: "pointer", fontSize: 15, padding: "0 4px" }}>✕</button>
-        </div>
-      ))}
-      <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          list="kv-suggestions"
-          value={newKey}
-          onChange={e => setNewKey(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addKey())}
-          placeholder="Field name…"
-          style={{ flex: "0 0 160px", marginBottom: 0, fontSize: 13 }}
-        />
-        <datalist id="kv-suggestions">
-          {suggestions.filter(s => !data[s]).map(s => <option key={s} value={s} />)}
-        </datalist>
-        <button type="button" onClick={addKey} style={{ fontSize: 12, color: "#7B2D8B", background: "none", border: "1px dashed #7B2D8B", borderRadius: 6, padding: "4px 12px", cursor: "pointer" }}>+ Add</button>
-      </div>
+      {SPEC_FIELDS.map(({ key, suggestions }) => {
+        const listId = `spec-${key.replace(/\s+/g, "-")}`;
+        return (
+          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <label style={{ width: 140, fontSize: 12, fontWeight: 600, color: "#64748b", flexShrink: 0 }}>{key}</label>
+            <input
+              list={listId}
+              value={data?.[key] ?? ""}
+              onChange={e => set(key, e.target.value)}
+              placeholder="—"
+              style={{ flex: 1, marginBottom: 0, fontSize: 13 }}
+            />
+            {suggestions.length > 0 && (
+              <datalist id={listId}>
+                {suggestions.map(s => <option key={s} value={s} />)}
+              </datalist>
+            )}
+            {data?.[key] && (
+              <button type="button" onClick={() => set(key, "")} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 14, padding: "0 2px", lineHeight: 1, flexShrink: 0 }}>✕</button>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -368,10 +385,9 @@ export default function AdminProducts() {
             </Section>
 
             <Section title="⚡ Features & Specs">
-              <KVEditor
+              <SpecsEditor
                 data={form.features_specs}
                 onChange={v => setForm({ ...form, features_specs: v })}
-                suggestions={["Power Source", "Room Type", "Mounting Type", "Special Features", "Recommended Use", "Colour", "Style", "Dimensions", "Weight", "Wattage", "Voltage", "Material"]}
               />
             </Section>
 
