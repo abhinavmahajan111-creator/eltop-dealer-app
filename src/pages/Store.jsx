@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 // ── Cart helpers ──────────────────────────────────────────────────────────────
@@ -613,6 +613,7 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function Store() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [search, setSearch]     = useState("");
@@ -644,41 +645,14 @@ export default function Store() {
       });
   }, []);
 
-  // Stage 1: read URL param on mount (before products load)
-  const [urlProductId, setUrlProductId] = useState(null);
+  // Open product from URL ?product=ID
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get('product');
-    console.log('Store mount — URL search:', window.location.search, '→ product id:', id);
-    if (id) setUrlProductId(id);
-  }, []);
-
-  // Stage 2: once products load AND we have a target id, open it
-  useEffect(() => {
-    console.log('Products loaded:', products.length, '| urlProductId:', urlProductId);
-    if (urlProductId && products.length > 0) {
-      const found = products.find(p => String(p.id) === String(urlProductId));
-      console.log('Found product:', found);
-      if (found) {
-        setUrlProductId(null);
-        setTimeout(() => {
-          setSelectedProduct(found);
-          scrollToTop();
-        }, 100);
-      }
+    const productId = searchParams.get('product');
+    if (productId && products.length > 0 && !selectedProduct) {
+      const found = products.find(p => String(p.id) === String(productId));
+      if (found) { setSelectedProduct(found); scrollToTop(); }
     }
-  }, [urlProductId, products]);
-
-  // Sync browser URL with selected product (skip first render to preserve ?product= param)
-  const isInitialLoad = useRef(true);
-  useEffect(() => {
-    if (isInitialLoad.current) { isInitialLoad.current = false; return; }
-    if (selectedProduct) {
-      window.history.pushState({}, '', `/store?product=${selectedProduct.id}`);
-    } else {
-      window.history.pushState({}, '', '/store');
-    }
-  }, [selectedProduct]);
+  }, [searchParams, products]);
 
   const categories = useMemo(() => {
     const cats = [...new Set(products.map(p => p.category).filter(Boolean))].sort();
@@ -924,8 +898,8 @@ export default function Store() {
       {selectedProduct && (
         <ProductDetailView
           product={selectedProduct}
-          onBack={() => { setSelectedProduct(null); scrollToTop(); }}
-          onAdd={p => { cart.add(p); setSelectedProduct(null); scrollToTop(); }}
+          onBack={() => { setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
+          onAdd={p => { cart.add(p); setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
         />
       )}
 
@@ -968,7 +942,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={p => { setSelectedProduct(p); scrollToTop(); }} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} />)}
             </div>
           )}
         </div>
