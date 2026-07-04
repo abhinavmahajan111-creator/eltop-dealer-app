@@ -15,6 +15,8 @@ export default function AdminProducts() {
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryNewName, setCategoryNewName] = useState("");
   const fileInputRef = useRef(null);
 
   const loadProducts = () => {
@@ -134,6 +136,18 @@ export default function AdminProducts() {
     [newUrls[index], newUrls[swap]] = [newUrls[swap], newUrls[index]];
     await supabase.from("products").update({ image_urls: newUrls }).eq("id", form.id);
     setForm((prev) => ({ ...prev, image_urls: newUrls }));
+  };
+
+  const handleCategoryRename = async (oldName, newName) => {
+    if (!newName.trim() || newName === oldName) { setEditingCategory(null); return; }
+    const { error: err } = await supabase
+      .from("products")
+      .update({ category: newName.trim() })
+      .eq("category", oldName);
+    if (!err) {
+      setProducts(prev => prev.map(p => p.category === oldName ? { ...p, category: newName.trim() } : p));
+      setEditingCategory(null);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -328,7 +342,28 @@ export default function AdminProducts() {
                     fontWeight: 700, fontSize: 12, padding: "5px 10px",
                     letterSpacing: "0.5px", textTransform: "uppercase",
                   }}>
-                    {cat}
+                    {editingCategory === cat ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          value={categoryNewName}
+                          onChange={e => setCategoryNewName(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") handleCategoryRename(cat, categoryNewName); if (e.key === "Escape") setEditingCategory(null); }}
+                          autoFocus
+                          style={{ fontWeight: 700, fontSize: 12, background: "transparent", border: "1px solid rgba(255,255,255,.7)", color: "#fff", padding: "2px 6px", borderRadius: 4, outline: "none", letterSpacing: "0.5px", textTransform: "uppercase", width: 180 }}
+                        />
+                        <button onClick={() => handleCategoryRename(cat, categoryNewName)} style={{ background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>✓</button>
+                        <button onClick={() => setEditingCategory(null)} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 13 }}>✗</button>
+                      </span>
+                    ) : (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        {cat}
+                        <span
+                          onClick={() => { setEditingCategory(cat); setCategoryNewName(cat); }}
+                          title="Rename category"
+                          style={{ marginLeft: 4, cursor: "pointer", fontSize: 12, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}
+                        >✏️</span>
+                      </span>
+                    )}
                   </td>
                 </tr>,
                 ...rows.map((p) => (
