@@ -144,7 +144,16 @@ export default function AdminProducts() {
   const [categoryNewName, setCategoryNewName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [itemDetailsVisibility, setItemDetailsVisibility] = useState({
+    brand: true, colour: true, style: true, warranty: true,
+    weight: true, dimensions: true, material: true, wattage: true,
+    voltage: true, power_source: true, mounting_type: true,
+    room_type: true, special_features: true, recommended_use: true,
+  });
   const fileInputRef = useRef(null);
+
+  const toggleItemDetailVisibility = (key) =>
+    setItemDetailsVisibility(prev => ({ ...prev, [key]: !prev[key] }));
 
   const existingCategories = useMemo(
     () => [...new Set(products.map(p => p.category).filter(Boolean))].sort(),
@@ -193,8 +202,35 @@ export default function AdminProducts() {
       mounting_type: p.mounting_type || "", power_source: p.power_source || "",
       material: p.material || "", wattage: p.wattage || "", voltage: p.voltage || "",
       warranty: p.warranty || "", weight: p.weight || "",
-      features_specs: p.features_specs || {}, item_details: p.item_details || {},
+      features_specs: p.features_specs || {},
+      item_details: {},
     });
+    // Load item_details values (support both old flat and new { values, visibility } structures)
+    const idSrc = p.item_details || {};
+    const idVals = idSrc.values || idSrc; // if new structure, use .values; else use flat
+    const DETAIL_KEYS = ["brand","colour","style","warranty","weight","dimensions","material","wattage","voltage","power_source","mounting_type","room_type","special_features","recommended_use"];
+    const loadedVis = idSrc.visibility || {};
+    const vis = {};
+    DETAIL_KEYS.forEach(k => { vis[k] = loadedVis[k] !== false; });
+    setItemDetailsVisibility(vis);
+    // Populate form fields from item_details.values (or fall back to top-level columns)
+    setForm(prev => ({
+      ...prev,
+      brand: idVals.brand || p.brand || "",
+      colour: idVals.colour || p.colour || "",
+      style: idVals.style || p.style || "",
+      warranty: idVals.warranty || p.warranty || "",
+      weight: idVals.weight || p.weight || "",
+      dimensions: idVals.dimensions || p.dimensions || "",
+      material: idVals.material || p.material || "",
+      wattage: idVals.wattage || p.wattage || "",
+      voltage: idVals.voltage || p.voltage || "",
+      power_source: idVals.power_source || p.power_source || "",
+      mounting_type: idVals.mounting_type || p.mounting_type || "",
+      room_type: idVals.room_type || p.room_type || "",
+      special_features: idVals.special_features || p.special_features || "",
+      recommended_use: idVals.recommended_use || p.recommended_use || "",
+    }));
     setError("");
     setShowNewCategory(false); setNewCategoryName("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -225,7 +261,13 @@ export default function AdminProducts() {
       material: form.material || null, wattage: form.wattage || null, voltage: form.voltage || null,
       warranty: form.warranty || null, weight: form.weight || null,
       features_specs: Object.keys(form.features_specs || {}).length ? form.features_specs : null,
-      item_details: Object.keys(form.item_details || {}).length ? form.item_details : null,
+      item_details: (() => {
+        const DETAIL_KEYS = ["brand","colour","style","warranty","weight","dimensions","material","wattage","voltage","power_source","mounting_type","room_type","special_features","recommended_use"];
+        const values = {};
+        DETAIL_KEYS.forEach(k => { if (form[k]) values[k] = form[k]; });
+        const visibility = { ...itemDetailsVisibility };
+        return Object.keys(values).length ? { values, visibility } : null;
+      })(),
     };
     const { data: saved, error: err } = form.id
       ? await supabase.from("products").update(payload).eq("id", form.id).select().single()
@@ -414,29 +456,45 @@ export default function AdminProducts() {
 
             <Section title="📦 Item Details">
               {[
-                ["Brand", "brand", "Eltop by Embassy"],
-                ["Colour", "colour", ""],
-                ["Style", "style", ""],
-                ["Warranty", "warranty", "e.g. 1 Year"],
-                ["Weight", "weight", "e.g. 2.5 kg"],
-                ["Dimensions", "dimensions", "L x W x H cm"],
-                ["Material", "material", ""],
-                ["Wattage", "wattage", "e.g. 60W"],
-                ["Voltage", "voltage", "e.g. 220V"],
-                ["Power Source", "power_source", ""],
-                ["Mounting Type", "mounting_type", ""],
-                ["Room Type", "room_type", ""],
-                ["Special Features", "special_features", ""],
-                ["Recommended Use", "recommended_use", ""],
-              ].map(([label, key, ph]) => (
-                <div key={key} style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                ["Brand", "brand", "Eltop by Embassy", ["Eltop", "Eltop by Embassy", "Embassy Electricals"]],
+                ["Colour", "colour", "e.g. White, Black", ["White","Black","Silver","Gold","Chrome","Bronze","Beige","Grey","Brown","Copper","Ivory","Off White","Matte Black","Matte White"]],
+                ["Style", "style", "e.g. Modern, Traditional", ["Modern","Contemporary","Traditional","Minimalist","Industrial","Rustic","Classic","Vintage","Scandinavian","Art Deco"]],
+                ["Warranty", "warranty", "e.g. 1 Year", ["6 Months","1 Year","2 Years","3 Years","5 Years","Lifetime","No Warranty"]],
+                ["Weight", "weight", "e.g. 2.5 kg", []],
+                ["Dimensions", "dimensions", "L x W x H cm", []],
+                ["Material", "material", "e.g. Aluminium, ABS", ["Aluminium","Stainless Steel","ABS Plastic","Polycarbonate","Glass","Brass","Iron","Copper","Wood","Ceramic","Acrylic","PVC"]],
+                ["Wattage", "wattage", "e.g. 60W", ["5W","7W","9W","12W","15W","18W","24W","36W","40W","60W","100W","150W","200W"]],
+                ["Voltage", "voltage", "e.g. 220V", ["12V","24V","110V","220V","230V","240V","110-240V"]],
+                ["Power Source", "power_source", "", ["AC Power","DC Power","Battery","Solar","USB","Hardwired","Corded Electric","Cordless"]],
+                ["Mounting Type", "mounting_type", "", ["Ceiling","Wall","Floor","Surface","Recessed","Track","Pendant","Flush Mount","Semi-Flush","Chandelier","Sconce","Under Cabinet","Portable","Stem"]],
+                ["Room Type", "room_type", "", ["Living Room","Bedroom","Kitchen","Bathroom","Office","Dining Room","Hallway","Outdoor","Garage","Basement","Study","Children Room","Commercial"]],
+                ["Special Features", "special_features", "", ["Dimmable","Smart Compatible","Energy Saving","Waterproof","Heat Resistant","Anti-Glare","Remote Control","Touch Control","Timer","Motion Sensor","Color Changing","Night Light"]],
+                ["Recommended Use", "recommended_use", "", ["Indoor","Outdoor","Indoor & Outdoor","Residential","Commercial","Industrial"]],
+              ].map(([label, key, ph, suggestions]) => (
+                <div key={key} style={{ display: "grid", gridTemplateColumns: "160px 1fr auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
                   <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{label}</label>
-                  <input
-                    value={form[key]}
-                    onChange={e => setForm({ ...form, [key]: e.target.value })}
-                    placeholder={ph}
-                    style={{ marginBottom: 0, fontSize: 13 }}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      list={`idl-${key}`}
+                      value={form[key]}
+                      onChange={e => setForm({ ...form, [key]: e.target.value })}
+                      placeholder={ph}
+                      style={{ marginBottom: 0, fontSize: 13, width: "100%" }}
+                    />
+                    {suggestions.length > 0 && (
+                      <datalist id={`idl-${key}`}>
+                        {suggestions.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleItemDetailVisibility(key)}
+                    title={itemDetailsVisibility[key] ? "Hide on store" : "Show on store"}
+                    style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer", fontSize: 16, padding: "2px 8px", color: itemDetailsVisibility[key] ? "#7B2D8B" : "#94a3b8" }}
+                  >
+                    {itemDetailsVisibility[key] ? "👁" : "🙈"}
+                  </button>
                 </div>
               ))}
             </Section>
