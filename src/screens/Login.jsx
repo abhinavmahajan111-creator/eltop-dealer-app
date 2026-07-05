@@ -6,6 +6,7 @@ export default function Login() {
   const navigate = useNavigate();
   const { sendOtp, verifyOtp, authBusy, authError } = useApp();
   const [role, setRole]             = useState("Guest");
+  const [showFanmanModal, setShowFanmanModal] = useState(false);
   const [step, setStep]             = useState(1);
   const [emailInput, setEmailInput] = useState("");
   const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
@@ -69,7 +70,10 @@ export default function Login() {
             <img
               src="/assets/fan%20man%20eltop.png"
               alt="Fanman"
-              style={{ display: 'block', margin: '20px auto 0 auto', height: 150, width: 'auto' }}
+              style={{ display: 'block', margin: '20px auto 0 auto', height: 150, width: 'auto', cursor: 'pointer', transition: 'transform 0.2s' }}
+              onClick={() => setShowFanmanModal(true)}
+              onMouseEnter={e => { e.target.style.transform = 'scale(1.05)'; }}
+              onMouseLeave={e => { e.target.style.transform = 'scale(1)'; }}
               onError={e => { e.target.style.display = 'none'; }}
             />
           </>
@@ -120,6 +124,21 @@ export default function Login() {
           </>
         )}
       </div>
+
+      {/* Fanman Modal */}
+      {showFanmanModal && (
+        <div onClick={() => setShowFanmanModal(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+            <img src="/assets/fan%20man%20eltop.png" alt="Eltop Fanman" style={{ height: '70vh', maxHeight: 500, width: 'auto', objectFit: 'contain' }} />
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <a href="/assets/fan%20man%20eltop.png" download="Eltop-Fanman.png" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 8, background: '#7B2D8B', color: 'white', textDecoration: 'none', fontWeight: 'bold', fontSize: 14 }}>⬇️ Download</a>
+              <a href={`https://wa.me/?text=${encodeURIComponent('Hey! Check out Eltop Fanman - our brand mascot! 🎉 ' + window.location.origin + '/assets/fan%20man%20eltop.png')}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 8, background: '#25D366', color: 'white', textDecoration: 'none', fontWeight: 'bold', fontSize: 14 }}>📱 Share on WhatsApp</a>
+              <button onClick={async () => { if (navigator.share) { await navigator.share({ title: 'Eltop Fanman', text: 'Hey I am Eltop Fanman! 🎉', url: window.location.origin + '/assets/fan%20man%20eltop.png' }); } else { navigator.clipboard.writeText(window.location.origin + '/assets/fan%20man%20eltop.png'); alert('Link copied!'); } }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 8, background: '#FF0000', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}>🔗 Share Link</button>
+              <button onClick={() => setShowFanmanModal(false)} style={{ padding: '10px 20px', borderRadius: 8, background: '#333', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: 14 }}>✕ Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
