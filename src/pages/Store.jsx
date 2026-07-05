@@ -1009,8 +1009,8 @@ export default function Store() {
             Kh. No. 154/632, Phirni Road,<br/>
             Pooth Khurd, Bawana Ind. Area,<br/>
             Delhi - 110039<br/><br/>
-            <strong style={{ color: 'white' }}>Ph:</strong> +91 93101 59139<br/>
-            <strong style={{ color: 'white' }}>Email:</strong> embassyelectricindia@gmail.com<br/>
+            <strong style={{ color: 'white' }}>Ph:</strong>{' '}<a href="tel:+919310159139" style={{ color: '#ccc', textDecoration: 'none' }}>+91 93101 59139</a><br/>
+            <strong style={{ color: 'white' }}>Email:</strong>{' '}<a href="mailto:embassyelectricindia@gmail.com" style={{ color: '#ccc', textDecoration: 'none' }}>embassyelectricindia@gmail.com</a><br/>
             <strong style={{ color: 'white' }}>GSTIN:</strong> 07AAGCE1173M1ZH<br/>
             <strong style={{ color: 'white' }}>Udyam Reg:</strong> UDYAM-DL-06-0006878
           </p>
