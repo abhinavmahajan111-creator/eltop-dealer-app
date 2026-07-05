@@ -212,7 +212,7 @@ function ProductCard({ product: p, onAdd, onSelect }) {
         </div>
 
         <button
-          onClick={e => { e.stopPropagation(); onAdd(p); }}
+          onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
           style={{ width: "100%", padding: "8px 0", background: hov ? "#6A1F7A" : "#7B2D8B", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
         >
           + Add to Cart
@@ -356,7 +356,7 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
           </div>
 
           <button
-            onClick={() => onAdd(p)}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
             style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
           >
             + Add to Cart
@@ -633,13 +633,10 @@ export default function Store() {
   const containerRef = useRef(null);
   const cart = useCart();
 
-  const toastTimerRef = useRef(null);
   const handleAddToCart = (product) => {
     cart.add(product);
     setToastProduct(product);
     setShowToast(true);
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setShowToast(false), 3000);
   };
 
   const scrollToTop = () => {
@@ -926,7 +923,7 @@ export default function Store() {
         <ProductDetailView
           product={selectedProduct}
           onBack={() => { setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
-          onAdd={p => { handleAddToCart(p); setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
+          onAdd={p => { handleAddToCart(p); }}
         />
       )}
 
