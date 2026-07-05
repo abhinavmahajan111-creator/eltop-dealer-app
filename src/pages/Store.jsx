@@ -1034,8 +1034,9 @@ export default function Store() {
             <input placeholder="Your Email Id" style={{ flex: 1, padding: '8px 12px', borderRadius: '4px', border: 'none', fontSize: '13px' }} />
             <button style={{ padding: '8px 16px', background: '#FF0000', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>SUBSCRIBE</button>
           </div>
-          <div style={{ marginTop: '20px' }}>
-            <img src="/assets/ELTOP%20LOGO.png" style={{ height: '40px', filter: 'brightness(0) invert(1)' }} alt="Eltop" onError={e => { e.target.style.display = 'none'; }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '20px' }}>
+            <img src="/assets/ELTOP%20LOGO.png" style={{ height: '40px', width: 'auto', filter: 'brightness(0) invert(1)' }} alt="Eltop" onError={e => { e.target.style.display = 'none'; }} />
+            <img src="/assets/EMBASSY%20LOGO.png" style={{ height: '32px', width: 'auto', filter: 'brightness(0) invert(1)' }} alt="Embassy" onError={e => { e.target.style.display = 'none'; }} />
           </div>
         </div>
       </div>
