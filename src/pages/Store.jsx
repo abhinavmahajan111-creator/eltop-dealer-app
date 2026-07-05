@@ -796,7 +796,11 @@ export default function Store() {
         <div className="store-header-inner">
           <div className="store-row1">
             {/* Dual logos */}
-            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', minWidth: '280px', flexShrink: 0 }}>
+            <div
+              onClick={() => { setSelectedProduct(null); setCategory(null); navigate('/store'); scrollToTop(); }}
+              title="Go to Home"
+              style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', minWidth: '280px', flexShrink: 0, cursor: 'pointer' }}
+            >
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'flex-start' }}>
                 <img
                   src="/assets/ELTOP%20LOGO.png"
