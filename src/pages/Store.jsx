@@ -866,18 +866,24 @@ export default function Store() {
 
       {/* ── Hero banner ── */}
       {!selectedProduct && (
-        <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', color: '#fff', textAlign: 'center' }}>
-          <div style={{ zIndex: 2, position: 'relative' }}>
+        <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '30px 20px' : '0 60px', minHeight: 200 }}>
+          {/* Text content */}
+          <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0' }}>
             <div className="store-hero-title">Welcome to Eltop by Embassy</div>
             <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
             <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
           </div>
-          <img
-            src="/assets/fan%20man%20eltop.png"
-            alt="Eltop Fanman"
-            style={{ position: 'absolute', right: isMobile ? 0 : 40, bottom: 0, height: isMobile ? 120 : 180, width: 'auto', zIndex: 1, opacity: isMobile ? 0.5 : 1 }}
-            onError={e => { e.target.style.display = 'none'; }}
-          />
+          {/* Fanman: standing at bottom-right */}
+          {!isMobile && (
+            <div style={{ alignSelf: 'flex-end', flexShrink: 0, zIndex: 2 }}>
+              <img
+                src="/assets/fan%20man%20eltop.png"
+                alt="Eltop Fanman"
+                style={{ height: 200, width: 'auto', display: 'block' }}
+                onError={e => { e.target.style.display = 'none'; }}
+              />
+            </div>
+          )}
         </div>
       )}
 
