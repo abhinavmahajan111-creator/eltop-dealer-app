@@ -621,6 +621,8 @@ export default function Store() {
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showFanmanModal, setShowFanmanModal] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [toastProduct, setToastProduct] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 640);
@@ -630,6 +632,15 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
+
+  const toastTimerRef = useRef(null);
+  const handleAddToCart = (product) => {
+    cart.add(product);
+    setToastProduct(product);
+    setShowToast(true);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setShowToast(false), 3000);
+  };
 
   const scrollToTop = () => {
     if (containerRef.current) containerRef.current.scrollTop = 0;
@@ -915,7 +926,7 @@ export default function Store() {
         <ProductDetailView
           product={selectedProduct}
           onBack={() => { setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
-          onAdd={p => { cart.add(p); setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
+          onAdd={p => { handleAddToCart(p); setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
         />
       )}
 
@@ -958,7 +969,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={cart.add} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={handleAddToCart} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} />)}
             </div>
           )}
         </div>
@@ -1075,6 +1086,21 @@ export default function Store() {
               <button title="Close" onClick={() => setShowFanmanModal(false)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 48, height: 48, borderRadius: '50%', background: '#333', color: 'white', border: 'none', cursor: 'pointer', fontSize: 22 }}>✕</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Add to Cart Toast ── */}
+      {showToast && (
+        <div style={{ position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)', background: '#1A1A1A', color: 'white', padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 12, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.3)', minWidth: 280, maxWidth: '90vw' }}>
+          {toastProduct?.image_urls?.[0] && (
+            <img src={toastProduct.image_urls[0]} style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 6, background: 'white' }} />
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 'bold' }}>✅ Added to Cart!</div>
+            <div style={{ fontSize: 12, color: '#aaa', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{toastProduct?.name}</div>
+          </div>
+          <button onClick={() => { setShowToast(false); setCartOpen(true); }} style={{ padding: '8px 14px', background: '#7B2D8B', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 'bold', whiteSpace: 'nowrap' }}>View Cart →</button>
+          <button onClick={() => setShowToast(false)} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 16, padding: 0 }}>✕</button>
         </div>
       )}
     </div>
