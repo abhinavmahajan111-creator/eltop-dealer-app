@@ -152,7 +152,7 @@ function CategoryCard({ cat, count, image, isAll, onClick }) {
 }
 
 // ── Product Card ──────────────────────────────────────────────────────────────
-function ProductCard({ product: p, onAdd, onSelect }) {
+function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease }) {
   const [hov, setHov] = useState(false);
   const saving = Math.round((Number(p.mrp) || 0) * 0.15);
 
@@ -211,19 +211,27 @@ function ProductCard({ product: p, onAdd, onSelect }) {
           )}
         </div>
 
-        <button
-          onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
-          style={{ width: "100%", padding: "8px 0", background: hov ? "#6A1F7A" : "#7B2D8B", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
-        >
-          + Add to Cart
-        </button>
+        {!qty ? (
+          <button
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
+            style={{ width: "100%", padding: "8px 0", background: hov ? "#6A1F7A" : "#7B2D8B", color: "#fff", border: "none", borderRadius: 7, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "background .15s", marginTop: 2 }}
+          >
+            + Add to Cart
+          </button>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#7B2D8B", borderRadius: 7, overflow: "hidden", width: "100%", marginTop: 2 }}>
+            <button onClick={e => { e.preventDefault(); e.stopPropagation(); onDecrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 20, fontWeight: "bold", cursor: "pointer", padding: "6px 14px", lineHeight: 1 }}>−</button>
+            <span style={{ color: "white", fontWeight: "bold", fontSize: 14 }}>{qty}</span>
+            <button onClick={e => { e.preventDefault(); e.stopPropagation(); onIncrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 20, fontWeight: "bold", cursor: "pointer", padding: "6px 14px", lineHeight: 1 }}>+</button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ── Product Detail View ───────────────────────────────────────────────────────
-function ProductDetailView({ product: p, onBack, onAdd }) {
+function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecrease }) {
   const [activeImg, setActiveImg] = useState(0);
   const [lightbox, setLightbox] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -355,12 +363,20 @@ function ProductDetailView({ product: p, onBack, onAdd }) {
             )}
           </div>
 
-          <button
-            onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
-            style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
-          >
-            + Add to Cart
-          </button>
+          {!qty ? (
+            <button
+              onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
+              style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
+            >
+              + Add to Cart
+            </button>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#7B2D8B", borderRadius: 10, overflow: "hidden", width: "100%", marginBottom: 10 }}>
+              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onDecrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>−</button>
+              <span style={{ color: "white", fontWeight: "bold", fontSize: 20 }}>{qty}</span>
+              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onIncrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>+</button>
+            </div>
+          )}
           <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
             Sign up to place orders at dealer pricing
           </div>
@@ -633,11 +649,16 @@ export default function Store() {
   const containerRef = useRef(null);
   const cart = useCart();
 
+  const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
+
   const handleAddToCart = (product) => {
     cart.add(product);
     setToastProduct(product);
     setShowToast(true);
   };
+
+  const handleIncrease = (id) => cart.change(id, +1);
+  const handleDecrease = (id) => cart.change(id, -1);
 
   const scrollToTop = () => {
     if (containerRef.current) containerRef.current.scrollTop = 0;
@@ -924,6 +945,9 @@ export default function Store() {
           product={selectedProduct}
           onBack={() => { setSelectedProduct(null); navigate('/store'); scrollToTop(); }}
           onAdd={p => { handleAddToCart(p); }}
+          qty={cartQty[selectedProduct.id]}
+          onIncrease={handleIncrease}
+          onDecrease={handleDecrease}
         />
       )}
 
@@ -966,7 +990,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={handleAddToCart} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={handleAddToCart} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} qty={cartQty[p.id]} onIncrease={handleIncrease} onDecrease={handleDecrease} />)}
             </div>
           )}
         </div>
