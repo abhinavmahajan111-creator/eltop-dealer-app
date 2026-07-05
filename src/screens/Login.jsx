@@ -62,9 +62,17 @@ export default function Login() {
         </select>
 
         {isGuest ? (
-          <button className="btn" onClick={() => navigate("/store")}>
-            Continue to Store →
-          </button>
+          <>
+            <button className="btn" onClick={() => navigate("/store")}>
+              Continue to Store →
+            </button>
+            <img
+              src="/assets/fan%20man%20eltop.png"
+              alt="Fanman"
+              style={{ display: 'block', margin: '20px auto 0 auto', height: 150, width: 'auto' }}
+              onError={e => { e.target.style.display = 'none'; }}
+            />
+          </>
         ) : (
           <>
             {step === 1 && (
@@ -112,12 +120,6 @@ export default function Login() {
           </>
         )}
       </div>
-      <img
-        src="/assets/fan%20man%20eltop.png"
-        alt="Fanman"
-        style={{ position: 'absolute', bottom: 60, right: -20, height: 120, width: 'auto', zIndex: 10, pointerEvents: 'none' }}
-        onError={e => { e.target.style.display = 'none'; }}
-      />
     </div>
   );
 }

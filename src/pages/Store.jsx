@@ -873,17 +873,6 @@ export default function Store() {
             <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
             <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
           </div>
-          {/* Fanman: standing at bottom-right */}
-          {!isMobile && (
-            <div style={{ alignSelf: 'flex-end', flexShrink: 0, zIndex: 2 }}>
-              <img
-                src="/assets/fan%20man%20eltop.png"
-                alt="Eltop Fanman"
-                style={{ height: 200, width: 'auto', display: 'block' }}
-                onError={e => { e.target.style.display = 'none'; }}
-              />
-            </div>
-          )}
         </div>
       )}
 
@@ -1041,10 +1030,16 @@ export default function Store() {
           </div>
         </div>
         {/* Column 3: Stay Connected */}
-        <div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <img
+            src="/assets/fan%20man%20eltop.png"
+            alt="Eltop Fanman"
+            style={{ height: 180, width: 'auto', display: 'block', margin: '0 auto 16px auto' }}
+            onError={e => { e.target.style.display = 'none'; }}
+          />
           <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '14px', fontWeight: 'bold', borderBottom: '2px solid #FF0000', paddingBottom: '8px', display: 'inline-block' }}>STAY CONNECTED</h4>
-          <p style={{ fontSize: '13px', marginBottom: '16px', lineHeight: '1.6' }}>Subscribe for latest products, offers and updates from Eltop by Embassy.</p>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <p style={{ fontSize: '13px', marginBottom: '16px', lineHeight: '1.6', textAlign: 'center' }}>Subscribe for latest products, offers and updates from Eltop by Embassy.</p>
+          <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
             <input placeholder="Your Email Id" style={{ flex: 1, padding: '8px 12px', borderRadius: '4px', border: 'none', fontSize: '13px' }} />
             <button style={{ padding: '8px 16px', background: '#FF0000', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}>SUBSCRIBE</button>
           </div>
