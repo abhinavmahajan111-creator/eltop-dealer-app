@@ -855,14 +855,16 @@ export default function Store() {
       </header>
 
       {/* ── Hero banner ── */}
-      <div className="store-hero">
-        <div className="store-hero-title">Welcome to Eltop by Embassy</div>
-        <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
-        <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
-      </div>
+      {!selectedProduct && (
+        <div className="store-hero">
+          <div className="store-hero-title">Welcome to Eltop by Embassy</div>
+          <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
+          <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+        </div>
+      )}
 
       {/* ── Category landing grid ── */}
-      {showLanding && (
+      {!selectedProduct && showLanding && (
         <div className="cat-grid-wrap">
           <div className="cat-grid-title">Shop by Category</div>
           {loading ? (
@@ -903,7 +905,7 @@ export default function Store() {
         />
       )}
 
-      {!showLanding && !selectedProduct && (
+      {!selectedProduct && !showLanding && (
         <div className="store-content" ref={productsRef}>
           <button className="back-btn" onClick={backToCategories}>
             ← Back to Categories
