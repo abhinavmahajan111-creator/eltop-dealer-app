@@ -620,6 +620,12 @@ export default function Store() {
   const [category, setCategory] = useState(null); // null = show category landing
   const [cartOpen, setCartOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
@@ -961,7 +967,7 @@ export default function Store() {
       )}
 
       {/* ── Bottom bar: Social + Care + WhatsApp ── */}
-      <div style={{ background: '#1A1A1A', color: 'white', padding: '16px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+      <div style={{ background: '#1A1A1A', color: 'white', padding: isMobile ? '16px 20px' : '16px 40px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', gap: '16px', textAlign: isMobile ? 'center' : 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{ color: '#aaa', fontSize: '12px' }}>FOLLOW US</span>
           <a href="https://facebook.com" target="_blank" rel="noreferrer">
@@ -980,7 +986,7 @@ export default function Store() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <a href="tel:18001230906" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textDecoration: 'none', color: 'white' }}>
             <span style={{ fontSize: '11px', color: '#aaa' }}>Eltop Care — Toll Free</span>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', letterSpacing: '1px', color: 'white' }}>1800-123-0906</span>
+            <span style={{ fontSize: isMobile ? '16px' : '20px', fontWeight: 'bold', letterSpacing: '1px', color: 'white' }}>1800-123-0906</span>
           </a>
           <div style={{ width: '1px', height: '40px', background: '#444' }}></div>
           <a href="https://wa.me/919310159139" target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'white', textDecoration: 'none' }}>
@@ -994,7 +1000,7 @@ export default function Store() {
       </div>
 
       {/* ── Main footer ── */}
-      <div style={{ background: '#111', color: '#ccc', padding: '40px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '40px' }}>
+      <div style={{ background: '#111', color: '#ccc', padding: isMobile ? '24px 16px' : '40px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: isMobile ? '28px' : '40px' }}>
         {/* Column 1: Head Office */}
         <div>
           <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '14px', fontWeight: 'bold', borderBottom: '2px solid #FF0000', paddingBottom: '8px', display: 'inline-block' }}>HEAD OFFICE</h4>
@@ -1012,7 +1018,7 @@ export default function Store() {
         {/* Column 2: Quick Links */}
         <div>
           <h4 style={{ color: 'white', marginBottom: '16px', fontSize: '14px', fontWeight: 'bold', borderBottom: '2px solid #FF0000', paddingBottom: '8px', display: 'inline-block' }}>QUICK LINKS</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr', gap: '10px', fontSize: '13px' }}>
             <a href="/store" style={{ color: '#ccc', textDecoration: 'none' }}>🏠 Home</a>
             <a href="/store" style={{ color: '#ccc', textDecoration: 'none' }}>📦 All Products</a>
             <a href="/login" style={{ color: '#ccc', textDecoration: 'none' }}>🤝 Dealer Login</a>
@@ -1035,7 +1041,7 @@ export default function Store() {
       </div>
 
       {/* ── Copyright bar ── */}
-      <div style={{ background: '#0a0a0a', color: '#666', padding: '12px 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', flexWrap: 'wrap', gap: '8px' }}>
+      <div style={{ background: '#0a0a0a', color: '#666', padding: isMobile ? '12px 16px' : '12px 40px', display: 'flex', flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', gap: '8px', textAlign: isMobile ? 'center' : 'left' }}>
         <span>© 2026 Embassy Electricals (India) Pvt. Ltd. All rights reserved.</span>
         <div style={{ display: 'flex', gap: '16px' }}>
           <a href="#" style={{ color: '#666', textDecoration: 'none' }}>Privacy Policy</a>
