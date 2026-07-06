@@ -797,13 +797,16 @@ export default function Store() {
           const { razorpay_payment_id } = response;
           console.log('Payment success:', razorpay_payment_id);
 
-          const subtotal = cart.items.reduce((s, i) => s + Number(i.product.mrp || 0) * i.qty, 0);
-          const isDelhi  = data.state === 'Delhi';
-          const cgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
-          const sgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
-          const igst     = isDelhi ? 0 : Math.round(subtotal * 0.18 * 100) / 100;
-          const tax      = Math.round((cgst + sgst + igst) * 100) / 100;
-          const total    = Math.round(subtotal + tax);
+          const grossTotal   = cart.items.reduce((s, i) => s + Number(i.product.mrp || 0) * i.qty, 0);
+          const taxableValue = grossTotal / 1.18;
+          const totalTax     = grossTotal - taxableValue;
+          const isDelhi      = data.state === 'Delhi';
+          const cgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
+          const sgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
+          const igst         = isDelhi ? 0 : Math.round(totalTax * 100) / 100;
+          const subtotal     = Math.round(taxableValue * 100) / 100;
+          const tax          = Math.round(totalTax * 100) / 100;
+          const total        = Math.round(grossTotal);
           const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
 
           // 1. Insert order row
