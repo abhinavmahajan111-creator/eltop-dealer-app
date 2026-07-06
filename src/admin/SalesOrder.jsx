@@ -277,53 +277,86 @@ export default function SalesOrder() {
       </table>
 
       {/* ── GST Breakup ── */}
-      <table style={{ ...s.box, marginTop: -1 }}>
-        <thead>
-          <tr>
-            <th style={s.th}>HSN/SAC</th>
-            <th style={s.th}>Taxable Value</th>
-            <th style={s.th}>CGST Rate</th>
-            <th style={s.th}>CGST Amt</th>
-            <th style={s.th}>SGST Rate</th>
-            <th style={s.th}>SGST Amt</th>
-            <th style={s.th}>Total Tax</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(() => {
-            const groups = {};
-            items.forEach((it) => {
-              const hsn = it.hsn_code || "—";
-              if (!groups[hsn]) groups[hsn] = 0;
-              groups[hsn] += (Number(it.net_rate ?? it.price) / 1.18) * it.qty;
-            });
-            return Object.entries(groups).map(([hsn, basic]) => {
-              const cgst = basic * 0.09;
-              const sgst = basic * 0.09;
-              return (
-                <tr key={hsn}>
-                  <td style={{ ...s.td, ...s.center }}>{hsn}</td>
-                  <td style={{ ...s.td, ...s.right }}>₹{basic.toFixed(2)}</td>
-                  <td style={{ ...s.td, ...s.center }}>9%</td>
-                  <td style={{ ...s.td, ...s.right }}>₹{cgst.toFixed(2)}</td>
-                  <td style={{ ...s.td, ...s.center }}>9%</td>
-                  <td style={{ ...s.td, ...s.right }}>₹{sgst.toFixed(2)}</td>
-                  <td style={{ ...s.td, ...s.right }}>₹{(cgst + sgst).toFixed(2)}</td>
-                </tr>
-              );
-            });
-          })()}
-          <tr style={{ background: "#f5f5f5" }}>
-            <td style={{ ...s.td, ...s.bold }}>Total</td>
-            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalBasic.toFixed(2)}</td>
-            <td style={s.td}></td>
-            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalCgst.toFixed(2)}</td>
-            <td style={s.td}></td>
-            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalSgst.toFixed(2)}</td>
-            <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{(totalCgst + totalSgst).toFixed(2)}</td>
-          </tr>
-        </tbody>
-      </table>
+      {(() => {
+        const isIgst = Number(order.igst || 0) > 0;
+
+        const groups = {};
+        items.forEach((it) => {
+          const hsn = it.hsn_code || "—";
+          if (!groups[hsn]) groups[hsn] = 0;
+          groups[hsn] += (Number(it.net_rate ?? it.price) / 1.18) * it.qty;
+        });
+
+        return (
+          <table style={{ ...s.box, marginTop: -1 }}>
+            <thead>
+              <tr>
+                <th style={s.th}>HSN/SAC</th>
+                <th style={s.th}>Taxable Value</th>
+                {isIgst ? (
+                  <>
+                    <th style={s.th}>IGST Rate</th>
+                    <th style={s.th}>IGST Amt</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={s.th}>CGST Rate</th>
+                    <th style={s.th}>CGST Amt</th>
+                    <th style={s.th}>SGST Rate</th>
+                    <th style={s.th}>SGST Amt</th>
+                  </>
+                )}
+                <th style={s.th}>Total Tax</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(groups).map(([hsn, basic]) => {
+                const tax = basic * 0.18;
+                return (
+                  <tr key={hsn}>
+                    <td style={{ ...s.td, ...s.center }}>{hsn}</td>
+                    <td style={{ ...s.td, ...s.right }}>₹{basic.toFixed(2)}</td>
+                    {isIgst ? (
+                      <>
+                        <td style={{ ...s.td, ...s.center }}>18%</td>
+                        <td style={{ ...s.td, ...s.right }}>₹{tax.toFixed(2)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ ...s.td, ...s.center }}>9%</td>
+                        <td style={{ ...s.td, ...s.right }}>₹{(tax / 2).toFixed(2)}</td>
+                        <td style={{ ...s.td, ...s.center }}>9%</td>
+                        <td style={{ ...s.td, ...s.right }}>₹{(tax / 2).toFixed(2)}</td>
+                      </>
+                    )}
+                    <td style={{ ...s.td, ...s.right }}>₹{tax.toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: "#f5f5f5" }}>
+                <td style={{ ...s.td, ...s.bold }}>Total</td>
+                <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalBasic.toFixed(2)}</td>
+                {isIgst ? (
+                  <>
+                    <td style={s.td}></td>
+                    <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{(totalBasic * 0.18).toFixed(2)}</td>
+                  </>
+                ) : (
+                  <>
+                    <td style={s.td}></td>
+                    <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalCgst.toFixed(2)}</td>
+                    <td style={s.td}></td>
+                    <td style={{ ...s.td, ...s.right, ...s.bold }}>₹{totalSgst.toFixed(2)}</td>
+                  </>
+                )}
+                <td style={{ ...s.td, ...s.right, ...s.bold }}>
+                  ₹{isIgst ? (totalBasic * 0.18).toFixed(2) : (totalCgst + totalSgst).toFixed(2)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        );
+      })()}
 
       {/* ── Grand Total with rounding ── */}
       <table style={{ ...s.box, marginTop: -1 }}>
