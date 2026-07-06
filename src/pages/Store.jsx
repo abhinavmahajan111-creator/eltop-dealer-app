@@ -51,11 +51,11 @@ const catIcon = (name) => CAT_ICONS[name] || "📦";
 function CartDrawer({ cart, onClose, onLoginClick, onPayment }) {
   return (
     <>
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000 }} />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
       <div style={{
         position: "fixed", top: 0, right: 0, bottom: 0,
         width: "min(380px, 100vw)", background: "#fff",
-        zIndex: 1001, display: "flex", flexDirection: "column",
+        zIndex: 2000, display: "flex", flexDirection: "column",
         boxShadow: "-4px 0 24px rgba(0,0,0,.2)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#7B2D8B" }}>
@@ -99,7 +99,7 @@ function CartDrawer({ cart, onClose, onLoginClick, onPayment }) {
             </div>
             <button
               onClick={onPayment}
-              style={{ width: "100%", padding: "14px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit" }}
+              style={{ width: "100%", padding: "14px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", position: "relative", zIndex: 10, pointerEvents: "all" }}
             >
               💳 Pay Now ₹{fmt(cart.total)}
             </button>
@@ -1163,7 +1163,7 @@ export default function Store() {
 
       {/* ── Add to Cart Toast ── */}
       {showToast && (
-        <div style={{ position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)', background: '#1A1A1A', color: 'white', padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 12, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.3)', minWidth: 280, maxWidth: '90vw' }}>
+        <div style={{ position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)', background: '#1A1A1A', color: 'white', padding: '12px 20px', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 12, zIndex: 1000, boxShadow: '0 4px 20px rgba(0,0,0,0.3)', minWidth: 280, maxWidth: '90vw' }}>
           {toastProduct?.image_urls?.[0] && (
             <img src={toastProduct.image_urls[0]} style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 6, background: 'white' }} />
           )}
