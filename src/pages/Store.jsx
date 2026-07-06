@@ -1220,13 +1220,13 @@ export default function Store() {
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
           onLoginClick={() => { setCartOpen(false); navigate("/login"); }}
           onCheckout={() => { setCartOpen(false); setShowCheckout(true); }} />
-        {showCheckout && (
-          <CheckoutModal
-            cart={cart}
-            onClose={() => setShowCheckout(false)}
-            onConfirm={(data) => { setShowCheckout(false); handlePayment(data); }}
-          />
-        )}
+      )}
+      {showCheckout && (
+        <CheckoutModal
+          cart={cart}
+          onClose={() => setShowCheckout(false)}
+          onConfirm={(data) => { setShowCheckout(false); handlePayment(data); }}
+        />
       )}
 
       {/* ── Bottom bar: Social + Care + WhatsApp ── */}
