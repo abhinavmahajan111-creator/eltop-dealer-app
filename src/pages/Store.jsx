@@ -663,13 +663,20 @@ export default function Store() {
   const handleDecrease = (id) => cart.change(id, -1);
 
   const handlePayment = () => {
+    const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TA8OMhO2LFRVHg';
+    console.log('Razorpay key:', RAZORPAY_KEY);
+
+    const existingScript = document.getElementById('razorpay-script');
+    if (existingScript) existingScript.remove();
+
     const script = document.createElement('script');
+    script.id = 'razorpay-script';
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
     script.async = true;
-    document.body.appendChild(script);
+
     script.onload = () => {
       const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        key: RAZORPAY_KEY,
         amount: Math.round(cart.total * 100),
         currency: 'INR',
         name: 'Eltop by Embassy',
@@ -696,7 +703,7 @@ export default function Store() {
             cart.clear();
             setCartOpen(false);
             setShowToast(false);
-            alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id + '\nThank you for shopping with Eltop!');
+            alert('✅ Payment Successful!\nOrder Confirmed!\nPayment ID: ' + razorpay_payment_id);
           } else {
             alert('Payment done but order save failed. Payment ID: ' + razorpay_payment_id);
           }
@@ -708,6 +715,10 @@ export default function Store() {
       const rzp = new window.Razorpay(options);
       rzp.open();
     };
+
+    script.onerror = () => alert('Failed to load payment gateway. Please try again.');
+
+    document.body.appendChild(script);
   };
 
   const scrollToTop = () => {
