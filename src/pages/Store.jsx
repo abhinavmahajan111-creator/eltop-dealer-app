@@ -64,16 +64,31 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
   const [dealerBanner, setDealerBanner] = useState(false);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [dismissedFor, setDismissedFor] = useState(null);
 
-  const checkDealerMatch = async () => {
-    if (bannerDismissed) return;
-    const phone = /^\d{10}$/.test(form.phone.trim()) ? form.phone.trim() : null;
-    const email = form.email.trim() || null;
-    if (!phone && !email) return;
-    const { data } = await supabase.rpc('check_dealer_match', { check_phone: phone, check_email: email });
-    if (data === true) setDealerBanner(true);
-  };
+  const phoneValid = /^\d{10}$/.test(form.phone.trim());
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email.trim());
+
+  useEffect(() => {
+    if (!phoneValid && !emailValid) setDealerBanner(false);
+  }, [phoneValid, emailValid]);
+
+  useEffect(() => {
+    if (!phoneValid && !emailValid) return;
+    if (
+      dismissedFor &&
+      dismissedFor.phone === form.phone.trim() &&
+      dismissedFor.email === form.email.trim()
+    ) return;
+    const timer = setTimeout(async () => {
+      const { data } = await supabase.rpc('check_dealer_match', {
+        check_phone: phoneValid ? form.phone.trim() : null,
+        check_email: emailValid ? form.email.trim() : null,
+      });
+      setDealerBanner(data === true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.phone, form.email]);
 
   const set = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -129,8 +144,8 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14 }}>Contact</div>
           {field('Full Name', 'name', { placeholder: 'Your full name' })}
-          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10, onBlur: checkDealerMatch })}
-          {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true, onBlur: checkDealerMatch })}
+          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
+          {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
 
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14, marginTop: 6 }}>Delivery Address</div>
           {field('Address Line 1', 'line1', { placeholder: 'House/Flat no., Street, Area' })}
@@ -155,7 +170,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
         </div>
 
         <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
-          {dealerBanner && !bannerDismissed && (
+          {dealerBanner && (
             <div style={{ background: '#FF6600', border: '1px solid #E55A00', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <div style={{ flex: 1, fontSize: 13, color: '#fff', lineHeight: 1.4 }}>
                 📋 This contact matches a registered dealer account.{' '}
@@ -164,7 +179,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
                 </button>
                 {' '}to get special pricing.
               </div>
-              <button onClick={() => { setDealerBanner(false); setBannerDismissed(true); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
+              <button onClick={() => { setDealerBanner(false); setDismissedFor({ phone: form.phone.trim(), email: form.email.trim() }); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 14 }}>
