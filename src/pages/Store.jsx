@@ -48,8 +48,116 @@ const CAT_ICONS = {
 };
 const catIcon = (name) => CAT_ICONS[name] || "📦";
 
+// ── Indian States list ────────────────────────────────────────────────────────
+const INDIAN_STATES = [
+  'Andaman and Nicobar Islands','Andhra Pradesh','Arunachal Pradesh','Assam','Bihar',
+  'Chandigarh','Chhattisgarh','Dadra and Nagar Haveli and Daman and Diu','Delhi',
+  'Goa','Gujarat','Haryana','Himachal Pradesh','Jammu and Kashmir','Jharkhand',
+  'Karnataka','Kerala','Ladakh','Lakshadweep','Madhya Pradesh','Maharashtra',
+  'Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Puducherry','Punjab',
+  'Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
+  'Uttarakhand','West Bengal',
+];
+
+// ── Checkout Modal ────────────────────────────────────────────────────────────
+function CheckoutModal({ cart, onClose, onConfirm }) {
+  const [form, setForm] = useState({ name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
+  const [errors, setErrors] = useState({});
+
+  const set = (field, value) => {
+    setForm(prev => ({ ...prev, [field]: value }));
+    setErrors(prev => ({ ...prev, [field]: '' }));
+  };
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim())                    e.name    = 'Required';
+    if (!/^\d{10}$/.test(form.phone.trim()))  e.phone   = 'Enter valid 10-digit number';
+    if (!form.line1.trim())                   e.line1   = 'Required';
+    if (!form.city.trim())                    e.city    = 'Required';
+    if (!form.state)                          e.state   = 'Required';
+    if (!/^\d{6}$/.test(form.pincode.trim())) e.pincode = 'Enter valid 6-digit pincode';
+    return e;
+  };
+
+  const handleSubmit = () => {
+    const e = validate();
+    if (Object.keys(e).length > 0) { setErrors(e); return; }
+    onConfirm(form);
+  };
+
+  const field = (label, key, opts = {}) => (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>
+        {label}
+        {!opts.optional && <span style={{ color: '#DC2626' }}> *</span>}
+        {opts.optional && <span style={{ color: '#94a3b8', fontWeight: 400 }}> (optional)</span>}
+      </label>
+      <input
+        type={opts.type || 'text'}
+        value={form[key]}
+        onChange={e => set(key, e.target.value)}
+        maxLength={opts.maxLength}
+        placeholder={opts.placeholder || ''}
+        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: errors[key] ? '1.5px solid #DC2626' : '1.5px solid #ddd', fontSize: 14, fontFamily: 'inherit', background: '#fff' }}
+      />
+      {errors[key] && <div style={{ fontSize: 11, color: '#DC2626', marginTop: 3 }}>{errors[key]}</div>}
+    </div>
+  );
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 2500 }} />
+      <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 'min(480px, 95vw)', maxHeight: '90vh', background: '#fff', borderRadius: 16, zIndex: 2501, display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,0.25)' }}>
+        <div style={{ padding: '16px 20px', background: '#7B2D8B', borderRadius: '16px 16px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>📦 Delivery Details</span>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,.2)', border: 'none', borderRadius: 6, color: '#fff', width: 32, height: 32, fontSize: 18, cursor: 'pointer' }}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14 }}>Contact</div>
+          {field('Full Name', 'name', { placeholder: 'Your full name' })}
+          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
+          {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
+
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14, marginTop: 6 }}>Delivery Address</div>
+          {field('Address Line 1', 'line1', { placeholder: 'House/Flat no., Street, Area' })}
+          {field('Address Line 2', 'line2', { placeholder: 'Landmark, Colony', optional: true })}
+          {field('City', 'city', { placeholder: 'City' })}
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>
+              State <span style={{ color: '#DC2626' }}>*</span>
+            </label>
+            <select
+              value={form.state}
+              onChange={e => set('state', e.target.value)}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: errors.state ? '1.5px solid #DC2626' : '1.5px solid #ddd', fontSize: 14, fontFamily: 'inherit', background: '#fff' }}
+            >
+              {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            {errors.state && <div style={{ fontSize: 11, color: '#DC2626', marginTop: 3 }}>{errors.state}</div>}
+          </div>
+
+          {field('Pincode', 'pincode', { placeholder: '6-digit pincode', maxLength: 6 })}
+        </div>
+
+        <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 14 }}>
+            <span style={{ color: '#555', fontWeight: 600 }}>Order Total</span>
+            <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(cart.total)}</span>
+          </div>
+          <button onClick={handleSubmit} style={{ width: '100%', padding: '14px 0', background: '#7B2D8B', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Continue to Payment →
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Cart Drawer ───────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onClose, onLoginClick, onPayment, deliveryState, setDeliveryState }) {
+function CartDrawer({ cart, onClose, onLoginClick, onCheckout }) {
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
@@ -98,24 +206,11 @@ function CartDrawer({ cart, onClose, onLoginClick, onPayment, deliveryState, set
               <span style={{ fontSize: 14, fontWeight: 600, color: "#555" }}>Total MRP</span>
               <span style={{ fontSize: 20, fontWeight: 900, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
-                Delivery State <span style={{ color: "#DC2626" }}>*</span>
-              </label>
-              <select
-                value={deliveryState}
-                onChange={e => setDeliveryState(e.target.value)}
-                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, fontFamily: "inherit", background: "#fff" }}
-              >
-                <option value="Delhi">Delhi (CGST 9% + SGST 9%)</option>
-                <option value="Other">Other State (IGST 18%)</option>
-              </select>
-            </div>
             <button
-              onClick={onPayment}
+              onClick={onCheckout}
               style={{ width: "100%", padding: "14px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", position: "relative", zIndex: 10, pointerEvents: "all" }}
             >
-              💳 Pay Now ₹{fmt(cart.total)}
+              Proceed to Pay →
             </button>
             <div style={{ background: "#E8D5F0", border: "1px solid #C084D4", borderRadius: 8, padding: "10px 12px", marginTop: 10, textAlign: "center" }}>
               <div style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700 }}>🎉 Login to get 15% OFF this order!</div>
@@ -665,7 +760,7 @@ export default function Store() {
   const containerRef = useRef(null);
   const cart = useCart();
   const { session } = useApp();
-  const [deliveryState, setDeliveryState] = useState('Delhi');
+  const [showCheckout, setShowCheckout] = useState(false);
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -678,9 +773,8 @@ export default function Store() {
   const handleIncrease = (id) => cart.change(id, +1);
   const handleDecrease = (id) => cart.change(id, -1);
 
-  const handlePayment = () => {
+  const handlePayment = (data) => {
     const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TA8OMhO2LFRVHg';
-    console.log('Razorpay key:', RAZORPAY_KEY);
 
     const existingScript = document.getElementById('razorpay-script');
     if (existingScript) existingScript.remove();
@@ -698,30 +792,35 @@ export default function Store() {
         name: 'Eltop by Embassy',
         description: 'Product Order',
         image: '/assets/ELTOP%20LOGO.png',
+        prefill: { name: data.name, email: data.email || '', contact: data.phone },
         handler: async function (response) {
           const { razorpay_payment_id } = response;
           console.log('Payment success:', razorpay_payment_id);
 
           const subtotal = cart.items.reduce((s, i) => s + Number(i.product.mrp || 0) * i.qty, 0);
-          const isDelhi  = deliveryState === 'Delhi';
+          const isDelhi  = data.state === 'Delhi';
           const cgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
           const sgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
           const igst     = isDelhi ? 0 : Math.round(subtotal * 0.18 * 100) / 100;
           const tax      = Math.round((cgst + sgst + igst) * 100) / 100;
           const total    = Math.round(subtotal + tax);
+          const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
 
           // 1. Insert order row
           const { data: orderRows, error: orderError } = await supabase
             .from('orders')
             .insert([{
               dealer_id:        session?.user?.id ?? null,
+              customer_name:    data.name,
+              customer_phone:   data.phone,
+              customer_email:   data.email || null,
               subtotal:         Math.round(subtotal * 100) / 100,
               tax,
               cgst,
               sgst,
               igst,
               total,
-              delivery_address: deliveryState,
+              delivery_address: deliveryAddress,
               payment_id:       razorpay_payment_id,
               payment_status:   'paid',
               status:           'confirmed',
@@ -739,7 +838,7 @@ export default function Store() {
 
           const orderId = orderRows[0].id;
 
-          // 2. Insert order_items (mirrors AppContext.placeOrder shape)
+          // 2. Insert order_items
           const orderItems = cart.items.map(item => ({
             order_id:   orderId,
             product_id: item.product.id,
@@ -754,9 +853,7 @@ export default function Store() {
             hsn_code:   item.product.hsn_code ?? null,
           }));
 
-          const { error: itemsError } = await supabase
-            .from('order_items')
-            .insert(orderItems);
+          const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
 
           console.log('Order items insert error:', itemsError);
 
@@ -771,7 +868,6 @@ export default function Store() {
           setShowToast(false);
           alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
         },
-        prefill: { name: '', email: '', contact: '' },
         theme: { color: '#7B2D8B' },
         modal: { ondismiss: () => console.log('Payment cancelled by user') },
       };
@@ -1123,9 +1219,14 @@ export default function Store() {
       {cartOpen && (
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
           onLoginClick={() => { setCartOpen(false); navigate("/login"); }}
-          onPayment={handlePayment}
-          deliveryState={deliveryState}
-          setDeliveryState={setDeliveryState} />
+          onCheckout={() => { setCartOpen(false); setShowCheckout(true); }} />
+        {showCheckout && (
+          <CheckoutModal
+            cart={cart}
+            onClose={() => setShowCheckout(false)}
+            onConfirm={(data) => { setShowCheckout(false); handlePayment(data); }}
+          />
+        )}
       )}
 
       {/* ── Bottom bar: Social + Care + WhatsApp ── */}
