@@ -37,7 +37,7 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, profiles(name, email, dealer_code, address, staff_assigned)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, profiles(name, email, dealer_code, address, staff_assigned)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (!error && data) setOrders(data);
@@ -310,14 +310,22 @@ export default function AdminOrders() {
                       <td colSpan={8} style={{ padding: 0 }}>
                         <div className="admin-order-detail">
                           <div className="admin-order-detail-section">
-                            <div className="admin-order-detail-heading">Dealer Info</div>
+                            <div className="admin-order-detail-heading">
+                              {o.dealer_id ? "Dealer Info" : "Customer Info"}
+                            </div>
                             <div className="admin-order-detail-grid">
                               <span className="od-label">Name</span>
-                              <span>{profile?.name || "—"}</span>
+                              <span>{o.dealer_id ? (profile?.name || "—") : (o.customer_name || "—")}</span>
+                              <span className="od-label">Phone</span>
+                              <span>{o.dealer_id ? "—" : (o.customer_phone || "—")}</span>
                               <span className="od-label">Email</span>
-                              <span>{profile?.email || "—"}</span>
-                              <span className="od-label">Dealer Code</span>
-                              <span>{profile?.dealer_code || "—"}</span>
+                              <span>{o.dealer_id ? (profile?.email || "—") : (o.customer_email || "—")}</span>
+                              {o.dealer_id && (
+                                <>
+                                  <span className="od-label">Dealer Code</span>
+                                  <span>{profile?.dealer_code || "—"}</span>
+                                </>
+                              )}
                               <span className="od-label">Address</span>
                               <span>{o.delivery_address || profile?.address || "—"}</span>
                             </div>
