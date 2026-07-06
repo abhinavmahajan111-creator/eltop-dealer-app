@@ -60,9 +60,20 @@ const INDIAN_STATES = [
 ];
 
 // ── Checkout Modal ────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, onClose, onConfirm }) {
+function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
   const [form, setForm] = useState({ name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
+  const [dealerBanner, setDealerBanner] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  const checkDealerMatch = async () => {
+    if (bannerDismissed) return;
+    const phone = /^\d{10}$/.test(form.phone.trim()) ? form.phone.trim() : null;
+    const email = form.email.trim() || null;
+    if (!phone && !email) return;
+    const { data } = await supabase.rpc('check_dealer_match', { check_phone: phone, check_email: email });
+    if (data === true) setDealerBanner(true);
+  };
 
   const set = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -97,6 +108,7 @@ function CheckoutModal({ cart, onClose, onConfirm }) {
         type={opts.type || 'text'}
         value={form[key]}
         onChange={e => set(key, e.target.value)}
+        onBlur={opts.onBlur}
         maxLength={opts.maxLength}
         placeholder={opts.placeholder || ''}
         style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 8, border: errors[key] ? '1.5px solid #DC2626' : '1.5px solid #ddd', fontSize: 14, fontFamily: 'inherit', background: '#fff' }}
@@ -117,8 +129,8 @@ function CheckoutModal({ cart, onClose, onConfirm }) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14 }}>Contact</div>
           {field('Full Name', 'name', { placeholder: 'Your full name' })}
-          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
-          {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
+          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10, onBlur: checkDealerMatch })}
+          {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true, onBlur: checkDealerMatch })}
 
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14, marginTop: 6 }}>Delivery Address</div>
           {field('Address Line 1', 'line1', { placeholder: 'House/Flat no., Street, Area' })}
@@ -143,6 +155,18 @@ function CheckoutModal({ cart, onClose, onConfirm }) {
         </div>
 
         <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
+          {dealerBanner && !bannerDismissed && (
+            <div style={{ background: '#EDE9FE', border: '1px solid #C084D4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1, fontSize: 13, color: '#5B21B6', lineHeight: 1.4 }}>
+                📋 This contact matches a registered dealer account.{' '}
+                <button onClick={onLoginClick} style={{ background: 'none', border: 'none', color: '#7B2D8B', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}>
+                  Login as a dealer
+                </button>
+                {' '}to get special pricing.
+              </div>
+              <button onClick={() => { setDealerBanner(false); setBannerDismissed(true); }} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}>✕</button>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 14 }}>
             <span style={{ color: '#555', fontWeight: 600 }}>Order Total</span>
             <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(cart.total)}</span>
@@ -1229,6 +1253,7 @@ export default function Store() {
           cart={cart}
           onClose={() => setShowCheckout(false)}
           onConfirm={(data) => { setShowCheckout(false); handlePayment(data); }}
+          onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
         />
       )}
 
