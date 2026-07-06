@@ -156,10 +156,10 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
 
         <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
           {dealerBanner && !bannerDismissed && (
-            <div style={{ background: '#EDE9FE', border: '1px solid #C084D4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-              <div style={{ flex: 1, fontSize: 13, color: '#5B21B6', lineHeight: 1.4 }}>
+            <div style={{ background: '#FEF3C7', border: '1px solid #F59E0B', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ flex: 1, fontSize: 13, color: '#92400E', lineHeight: 1.4 }}>
                 📋 This contact matches a registered dealer account.{' '}
-                <button onClick={onLoginClick} style={{ background: 'none', border: 'none', color: '#7B2D8B', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}>
+                <button onClick={onLoginClick} style={{ background: 'none', border: 'none', color: '#B45309', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}>
                   Login as a dealer
                 </button>
                 {' '}to get special pricing.
