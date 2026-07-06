@@ -684,28 +684,37 @@ export default function Store() {
         image: '/assets/ELTOP%20LOGO.png',
         handler: async function (response) {
           const { razorpay_payment_id } = response;
-          const orderData = {
-            items: cart.items.map(item => ({
-              product_id: item.product.id,
-              name: item.product.name,
-              qty: item.qty,
-              mrp: item.product.mrp,
-              amount: item.product.mrp * item.qty,
-            })),
-            total_amount: cart.total,
+          console.log('Payment success:', razorpay_payment_id);
+          console.log('Cart items:', cart.items);
+          console.log('Cart total:', cart.total);
+
+          const orderItems = cart.items.map(item => ({
+            product_id: item.product.id,
+            name: item.product.name,
+            qty: item.qty,
+            mrp: item.product.mrp,
+            amount: item.product.mrp * item.qty,
+          }));
+
+          const { data, error } = await supabase.from('orders').insert([{
             payment_id: razorpay_payment_id,
             payment_status: 'paid',
             status: 'confirmed',
+            total_amount: cart.total,
+            items: JSON.stringify(orderItems),
             created_at: new Date().toISOString(),
-          };
-          const { error } = await supabase.from('orders').insert([orderData]);
+          }]);
+
+          console.log('Order save result:', data, error);
+
           if (!error) {
             cart.clear();
             setCartOpen(false);
             setShowToast(false);
-            alert('✅ Payment Successful!\nOrder Confirmed!\nPayment ID: ' + razorpay_payment_id);
+            alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
           } else {
-            alert('Payment done but order save failed. Payment ID: ' + razorpay_payment_id);
+            console.error('Order save error:', error);
+            alert('Payment done but order save failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + error.message);
           }
         },
         prefill: { name: '', email: '', contact: '' },
