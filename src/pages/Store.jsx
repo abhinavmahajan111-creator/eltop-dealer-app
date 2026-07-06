@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import { useApp } from "../context/AppContext";
 
 // ── Cart helpers ──────────────────────────────────────────────────────────────
 function useCart() {
@@ -48,7 +49,7 @@ const CAT_ICONS = {
 const catIcon = (name) => CAT_ICONS[name] || "📦";
 
 // ── Cart Drawer ───────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onClose, onLoginClick, onPayment }) {
+function CartDrawer({ cart, onClose, onLoginClick, onPayment, deliveryState, setDeliveryState }) {
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
@@ -96,6 +97,19 @@ function CartDrawer({ cart, onClose, onLoginClick, onPayment }) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: "#555" }}>Total MRP</span>
               <span style={{ fontSize: 20, fontWeight: 900, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>
+                Delivery State <span style={{ color: "#DC2626" }}>*</span>
+              </label>
+              <select
+                value={deliveryState}
+                onChange={e => setDeliveryState(e.target.value)}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, fontFamily: "inherit", background: "#fff" }}
+              >
+                <option value="Delhi">Delhi (CGST 9% + SGST 9%)</option>
+                <option value="Other">Other State (IGST 18%)</option>
+              </select>
             </div>
             <button
               onClick={onPayment}
@@ -650,6 +664,8 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
+  const { session } = useApp();
+  const [deliveryState, setDeliveryState] = useState('Delhi');
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -685,37 +701,75 @@ export default function Store() {
         handler: async function (response) {
           const { razorpay_payment_id } = response;
           console.log('Payment success:', razorpay_payment_id);
-          console.log('Cart items:', cart.items);
-          console.log('Cart total:', cart.total);
 
+          const subtotal = cart.items.reduce((s, i) => s + Number(i.product.mrp || 0) * i.qty, 0);
+          const isDelhi  = deliveryState === 'Delhi';
+          const cgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
+          const sgst     = isDelhi ? Math.round(subtotal * 0.09 * 100) / 100 : 0;
+          const igst     = isDelhi ? 0 : Math.round(subtotal * 0.18 * 100) / 100;
+          const tax      = Math.round((cgst + sgst + igst) * 100) / 100;
+          const total    = Math.round(subtotal + tax);
+
+          // 1. Insert order row
+          const { data: orderRows, error: orderError } = await supabase
+            .from('orders')
+            .insert([{
+              dealer_id:        session?.user?.id ?? null,
+              subtotal:         Math.round(subtotal * 100) / 100,
+              tax,
+              cgst,
+              sgst,
+              igst,
+              total,
+              delivery_address: deliveryState,
+              payment_id:       razorpay_payment_id,
+              payment_status:   'paid',
+              status:           'confirmed',
+              created_at:       new Date().toISOString(),
+            }])
+            .select('id');
+
+          console.log('Order insert result:', orderRows, orderError);
+
+          if (orderError) {
+            console.error('Order insert error:', orderError);
+            alert('Payment done but order save failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + orderError.message);
+            return;
+          }
+
+          const orderId = orderRows[0].id;
+
+          // 2. Insert order_items (mirrors AppContext.placeOrder shape)
           const orderItems = cart.items.map(item => ({
+            order_id:   orderId,
             product_id: item.product.id,
-            name: item.product.name,
-            qty: item.qty,
-            mrp: item.product.mrp,
-            amount: item.product.mrp * item.qty,
+            name:       item.product.name,
+            price:      Math.round(Number(item.product.mrp || 0) * 100) / 100,
+            qty:        item.qty,
+            mrp:        item.product.mrp ?? null,
+            dlp:        item.product.dlp ?? item.product.mrp ?? null,
+            net_rate:   Math.round(Number(item.product.mrp || 0) * 100) / 100,
+            discount1:  0,
+            discount2:  0,
+            hsn_code:   item.product.hsn_code ?? null,
           }));
 
-          const { data, error } = await supabase.from('orders').insert([{
-            payment_id: razorpay_payment_id,
-            payment_status: 'paid',
-            status: 'confirmed',
-            total_amount: cart.total,
-            items: JSON.stringify(orderItems),
-            created_at: new Date().toISOString(),
-          }]);
+          const { error: itemsError } = await supabase
+            .from('order_items')
+            .insert(orderItems);
 
-          console.log('Order save result:', data, error);
+          console.log('Order items insert error:', itemsError);
 
-          if (!error) {
-            cart.clear();
-            setCartOpen(false);
-            setShowToast(false);
-            alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
-          } else {
-            console.error('Order save error:', error);
-            alert('Payment done but order save failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + error.message);
+          if (itemsError) {
+            console.error('Order items error:', itemsError);
+            alert('Order saved but items failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + itemsError.message);
+            return;
           }
+
+          cart.clear();
+          setCartOpen(false);
+          setShowToast(false);
+          alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
         },
         prefill: { name: '', email: '', contact: '' },
         theme: { color: '#7B2D8B' },
@@ -726,7 +780,6 @@ export default function Store() {
     };
 
     script.onerror = () => alert('Failed to load payment gateway. Please try again.');
-
     document.body.appendChild(script);
   };
 
@@ -1070,7 +1123,9 @@ export default function Store() {
       {cartOpen && (
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
           onLoginClick={() => { setCartOpen(false); navigate("/login"); }}
-          onPayment={handlePayment} />
+          onPayment={handlePayment}
+          deliveryState={deliveryState}
+          setDeliveryState={setDeliveryState} />
       )}
 
       {/* ── Bottom bar: Social + Care + WhatsApp ── */}
