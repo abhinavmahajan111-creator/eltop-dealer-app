@@ -18,9 +18,11 @@ function useCart() {
       prev.map(i => i.product.id === id ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0)
     );
 
+  const clear = () => setItems([]);
+
   const total = items.reduce((s, i) => s + (Number(i.product.mrp) || 0) * i.qty, 0);
   const count = items.reduce((s, i) => s + i.qty, 0);
-  return { items, add, change, total, count };
+  return { items, add, change, clear, total, count };
 }
 
 const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
@@ -46,7 +48,7 @@ const CAT_ICONS = {
 const catIcon = (name) => CAT_ICONS[name] || "📦";
 
 // ── Cart Drawer ───────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onClose, onLoginClick }) {
+function CartDrawer({ cart, onClose, onLoginClick, onPayment }) {
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1000 }} />
@@ -96,10 +98,10 @@ function CartDrawer({ cart, onClose, onLoginClick }) {
               <span style={{ fontSize: 20, fontWeight: 900, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
             </div>
             <button
-              onClick={() => alert("Thank you! We'll contact you soon.")}
-              style={{ width: "100%", padding: "12px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}
+              onClick={onPayment}
+              style={{ width: "100%", padding: "14px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit" }}
             >
-              Place Order
+              💳 Pay Now ₹{fmt(cart.total)}
             </button>
             <div style={{ background: "#E8D5F0", border: "1px solid #C084D4", borderRadius: 8, padding: "10px 12px", marginTop: 10, textAlign: "center" }}>
               <div style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700 }}>🎉 Login to get 15% OFF this order!</div>
@@ -660,6 +662,54 @@ export default function Store() {
   const handleIncrease = (id) => cart.change(id, +1);
   const handleDecrease = (id) => cart.change(id, -1);
 
+  const handlePayment = () => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    document.body.appendChild(script);
+    script.onload = () => {
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+        amount: Math.round(cart.total * 100),
+        currency: 'INR',
+        name: 'Eltop by Embassy',
+        description: 'Product Order',
+        image: '/assets/ELTOP%20LOGO.png',
+        handler: async function (response) {
+          const { razorpay_payment_id } = response;
+          const orderData = {
+            items: cart.items.map(item => ({
+              product_id: item.product.id,
+              name: item.product.name,
+              qty: item.qty,
+              mrp: item.product.mrp,
+              amount: item.product.mrp * item.qty,
+            })),
+            total_amount: cart.total,
+            payment_id: razorpay_payment_id,
+            payment_status: 'paid',
+            status: 'confirmed',
+            created_at: new Date().toISOString(),
+          };
+          const { error } = await supabase.from('orders').insert([orderData]);
+          if (!error) {
+            cart.clear();
+            setCartOpen(false);
+            setShowToast(false);
+            alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id + '\nThank you for shopping with Eltop!');
+          } else {
+            alert('Payment done but order save failed. Payment ID: ' + razorpay_payment_id);
+          }
+        },
+        prefill: { name: '', email: '', contact: '' },
+        theme: { color: '#7B2D8B' },
+        modal: { ondismiss: () => console.log('Payment cancelled by user') },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    };
+  };
+
   const scrollToTop = () => {
     if (containerRef.current) containerRef.current.scrollTop = 0;
     document.documentElement.scrollTop = 0;
@@ -999,7 +1049,8 @@ export default function Store() {
       {/* ── Cart drawer ── */}
       {cartOpen && (
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
-          onLoginClick={() => { setCartOpen(false); navigate("/login"); }} />
+          onLoginClick={() => { setCartOpen(false); navigate("/login"); }}
+          onPayment={handlePayment} />
       )}
 
       {/* ── Bottom bar: Social + Care + WhatsApp ── */}
