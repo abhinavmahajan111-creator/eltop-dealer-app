@@ -1,11 +1,19 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { useApp } from "../context/AppContext";
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { dealer, email, signOut } = useApp();
-  const initials = dealer.name
+  const { dealer, email, signOut, session, isLoggedIn } = useApp();
+
+  useEffect(() => {
+    if (isLoggedIn === false) navigate("/login", { replace: true });
+  }, [isLoggedIn, navigate]);
+
+  if (!session) return null;
+
+  const initials = (dealer.name || "?")
     .split(" ")
     .slice(0, 2)
     .map((w) => w[0])
