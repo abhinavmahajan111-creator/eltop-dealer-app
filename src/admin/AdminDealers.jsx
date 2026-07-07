@@ -263,10 +263,19 @@ export default function AdminDealers() {
     if (activeTab !== 'bin' || !isSupabaseConfigured) return;
     setBinLoading(true);
     const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
-    Promise.all([
-      supabase.from('profiles').select('*').not('deleted_at', 'is', null).gt('deleted_at', oneYearAgo).order('deleted_at', { ascending: false }),
-      supabase.from('restore_requests').select('*, profiles(shop_name, owner_name, email)').eq('status', 'pending').order('requested_at', { ascending: false }),
-    ]).then(([binRes, reqRes]) => {
+
+    const binQuery = supabase.from('profiles').select('*')
+      .not('deleted_at', 'is', null).gt('deleted_at', oneYearAgo)
+      .order('deleted_at', { ascending: false });
+
+    const reqQuery = supabase.from('restore_requests')
+      .select('id, profile_id, contact_value, requested_at, status, profiles(shop_name, owner_name, email)')
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: false });
+
+    Promise.all([binQuery, reqQuery]).then(([binRes, reqRes]) => {
+      console.log('[RecycleBin] deleted profiles:', binRes.data, 'error:', binRes.error);
+      console.log('[RestoreRequests] data:', reqRes.data, 'error:', reqRes.error, 'status:', reqRes.status, 'statusText:', reqRes.statusText);
       if (binRes.data)  setDeletedDealers(binRes.data);
       if (reqRes.data)  setRestoreRequests(reqRes.data);
       setBinLoading(false);
