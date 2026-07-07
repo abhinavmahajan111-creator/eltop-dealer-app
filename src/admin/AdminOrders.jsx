@@ -37,7 +37,7 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, profiles(name, email, dealer_code, address, staff_assigned)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, profiles(name, email, dealer_code, address, staff_assigned, deleted_at)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (!error && data) setOrders(data);
@@ -311,7 +311,16 @@ export default function AdminOrders() {
                         <div className="admin-order-detail">
                           <div className="admin-order-detail-section">
                             <div className="admin-order-detail-heading">
-                              {o.dealer_id ? "Dealer Info" : "Customer Info"}
+                              {o.dealer_id ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  Dealer Info
+                                  {o.profiles?.deleted_at && (
+                                    <span style={{ fontSize: 10, fontWeight: 700, color: '#c0392b', background: '#fdecea', borderRadius: 4, padding: '2px 7px' }}>
+                                      DELETED
+                                    </span>
+                                  )}
+                                </span>
+                              ) : "Customer Info"}
                             </div>
                             <div className="admin-order-detail-grid">
                               <span className="od-label">Name</span>

@@ -33,6 +33,7 @@ export function AppProvider({ children }) {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
 
+  const [deactivatedAccount, setDeactivatedAccount] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [toastShow, setToastShow] = useState(false);
   const toastTimer = useRef(null);
@@ -62,8 +63,29 @@ export function AppProvider({ children }) {
       .select("*")
       .eq("id", session.user.id)
       .single()
-      .then(({ data, error }) => {
-        if (!error && data) setProfile(data);
+      .then(async ({ data, error }) => {
+        if (!error && data) {
+          if (data.deleted_at) {
+            const { data: existing } = await supabase
+              .from("restore_requests")
+              .select("id")
+              .eq("profile_id", data.id)
+              .eq("status", "pending")
+              .maybeSingle();
+            if (!existing) {
+              await supabase.from("restore_requests").insert({
+                profile_id: data.id,
+                contact_value: session.user.email,
+                status: "pending",
+              });
+            }
+            await supabase.auth.signOut();
+            setSession(null);
+            setDeactivatedAccount(true);
+            return;
+          }
+          setProfile(data);
+        }
       });
   }, [session]);
 
@@ -106,6 +128,7 @@ export function AppProvider({ children }) {
     setSession(null);
     setProfile(DEMO_PROFILE);
     setCart([]);
+    setDeactivatedAccount(false);
   }, []);
 
   // ---------- PRODUCTS ----------
@@ -262,6 +285,8 @@ export function AppProvider({ children }) {
     toastMsg,
     toastShow,
     showToast,
+    deactivatedAccount,
+    clearDeactivated: () => setDeactivatedAccount(false),
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

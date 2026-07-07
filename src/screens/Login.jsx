@@ -4,7 +4,7 @@ import { useApp } from "../context/AppContext";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, authBusy, authError } = useApp();
+  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated } = useApp();
   const [role, setRole]             = useState("Guest");
   const [showFanmanModal, setShowFanmanModal] = useState(false);
   const [step, setStep]             = useState(1);
@@ -41,6 +41,18 @@ export default function Login() {
         <div className="login-logo">ET</div>
         <div className="login-title">Welcome, Dealer</div>
         <div className="login-sub">Login to manage your orders</div>
+
+        {deactivatedAccount && (
+          <div style={{ background: '#fdecea', border: '1px solid #e74c3c', borderRadius: 12, padding: '16px 18px', marginBottom: 20, fontSize: 14, color: '#7b241c', lineHeight: 1.5 }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Account Deactivated</div>
+            Your dealer account is currently deactivated. We've notified the admin to review restoring your access. Please check back later.
+            <div style={{ marginTop: 10 }}>
+              <button onClick={clearDeactivated} style={{ background: 'none', border: 'none', color: '#e74c3c', fontWeight: 700, cursor: 'pointer', fontSize: 13, padding: 0, textDecoration: 'underline' }}>
+                Try a different account
+              </button>
+            </div>
+          </div>
+        )}
 
         <select
           value={role}

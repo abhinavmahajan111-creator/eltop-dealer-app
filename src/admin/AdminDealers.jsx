@@ -231,12 +231,47 @@ export default function AdminDealers() {
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft] = useState("");
   const [savingCreditLimit, setSavingCreditLimit] = useState(false);
+  const [activeTab, setActiveTab]             = useState('dealers');
+  const [deletedDealers, setDeletedDealers]   = useState([]);
+  const [restoreRequests, setRestoreRequests] = useState([]);
+  const [binLoading, setBinLoading]           = useState(false);
+  const [deleteConfirm, setDeleteConfirm]     = useState(null);
+  const [deletingId, setDeletingId]           = useState(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
-    supabase.from("profiles").select("*").order("created_at", { ascending: false })
+    supabase.from("profiles").select("*").is('deleted_at', null).order("created_at", { ascending: false })
       .then(({ data }) => { if (data) setDealers(data); setLoading(false); });
   }, []);
+
+  // Lazy cleanup: permanently delete profiles soft-deleted over 1 year ago
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    supabase.from('profiles').select('id').not('deleted_at', 'is', null).lt('deleted_at', oneYearAgo)
+      .then(async ({ data: expired }) => {
+        if (!expired?.length) return;
+        for (const p of expired) {
+          await supabase.from('orders').update({ dealer_id: null }).eq('dealer_id', p.id);
+          await supabase.from('profiles').delete().eq('id', p.id);
+        }
+      });
+  }, []);
+
+  // Load recycle bin data when tab switches
+  useEffect(() => {
+    if (activeTab !== 'bin' || !isSupabaseConfigured) return;
+    setBinLoading(true);
+    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+    Promise.all([
+      supabase.from('profiles').select('*').not('deleted_at', 'is', null).gt('deleted_at', oneYearAgo).order('deleted_at', { ascending: false }),
+      supabase.from('restore_requests').select('*, profiles(shop_name, owner_name, email)').eq('status', 'pending').order('requested_at', { ascending: false }),
+    ]).then(([binRes, reqRes]) => {
+      if (binRes.data)  setDeletedDealers(binRes.data);
+      if (reqRes.data)  setRestoreRequests(reqRes.data);
+      setBinLoading(false);
+    });
+  }, [activeTab]);
 
   const handleExport = async () => {
     if (!isSupabaseConfigured) return;
@@ -540,6 +575,47 @@ export default function AdminDealers() {
       setSelected(p => ({ ...p, territory: list }));
       setDealers(prev => prev.map(d => d.id === selected.id ? { ...d, territory: list } : d));
     }
+  };
+
+  const handleSoftDelete = async () => {
+    if (!deleteConfirm) return;
+    const { dealer } = deleteConfirm;
+    setDeletingId(dealer.id);
+    const { error } = await supabase.from('profiles')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', dealer.id);
+    if (error) { alert('Failed: ' + error.message); setDeletingId(null); setDeleteConfirm(null); return; }
+    setDealers(prev => prev.filter(d => d.id !== dealer.id));
+    setSelectedDealerIds(prev => { const n = new Set(prev); n.delete(dealer.id); return n; });
+    if (selected?.id === dealer.id) { setSelected(null); setEditing(false); }
+    setDeleteConfirm(null);
+    setDeletingId(null);
+  };
+
+  const handleRestore = async (dealerId) => {
+    const { error } = await supabase.from('profiles').update({ deleted_at: null }).eq('id', dealerId);
+    if (error) { alert('Restore failed: ' + error.message); return; }
+    setDeletedDealers(prev => prev.filter(d => d.id !== dealerId));
+  };
+
+  const handlePermanentDelete = async (dealer) => {
+    if (!window.confirm(`Permanently delete "${dealer.shop_name || dealer.email}"? This cannot be undone.`)) return;
+    await supabase.from('orders').update({ dealer_id: null }).eq('dealer_id', dealer.id);
+    const { error } = await supabase.from('profiles').delete().eq('id', dealer.id);
+    if (error) { alert('Delete failed: ' + error.message); return; }
+    setDeletedDealers(prev => prev.filter(d => d.id !== dealer.id));
+  };
+
+  const handleApproveRestore = async (req) => {
+    await supabase.from('profiles').update({ deleted_at: null }).eq('id', req.profile_id);
+    await supabase.from('restore_requests').update({ status: 'approved' }).eq('id', req.id);
+    setRestoreRequests(prev => prev.filter(r => r.id !== req.id));
+    setDeletedDealers(prev => prev.filter(d => d.id !== req.profile_id));
+  };
+
+  const handleRejectRestore = async (req) => {
+    await supabase.from('restore_requests').update({ status: 'rejected' }).eq('id', req.id);
+    setRestoreRequests(prev => prev.filter(r => r.id !== req.id));
   };
 
   const handleDealerExport = async () => {
@@ -1162,8 +1238,8 @@ export default function AdminDealers() {
             </div>
           </div>
 
-          {/* ── Block/Unblock ── */}
-          <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12 }}>
+          {/* ── Block/Unblock + Delete ── */}
+          <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <button
               className="btn small outline"
               style={{ color: selected.is_blocked ? "#27ae60" : "#c0392b", borderColor: selected.is_blocked ? "#27ae60" : "#c0392b" }}
@@ -1171,9 +1247,16 @@ export default function AdminDealers() {
             >
               {saving ? "…" : selected.is_blocked ? "✓ Unblock Dealer" : "⊘ Block Dealer"}
             </button>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            <span style={{ fontSize: 12, color: "var(--muted)", flex: 1 }}>
               {selected.is_blocked ? "This dealer is currently blocked from placing orders." : "Dealer can place orders normally."}
             </span>
+            <button
+              className="btn small outline"
+              style={{ color: '#c0392b', borderColor: '#c0392b' }}
+              onClick={() => setDeleteConfirm({ dealer: selected })}
+            >
+              🗑 Move to Bin
+            </button>
           </div>
         </div>
       </div>
@@ -1183,7 +1266,27 @@ export default function AdminDealers() {
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
   return (
     <div className="admin-page">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+      {/* Delete confirmation dialog */}
+      {deleteConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 28, maxWidth: 420, width: '90vw', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Move to Recycle Bin?</div>
+            <div style={{ fontSize: 14, color: '#555', marginBottom: 24, lineHeight: 1.5 }}>
+              <strong>{deleteConfirm.dealer.shop_name || deleteConfirm.dealer.email}</strong> will be moved to the Recycle Bin.
+              You can restore it within 1 year, or it will be automatically removed after.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn small outline" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn small" style={{ background: '#c0392b', border: 'none', color: '#fff' }}
+                disabled={!!deletingId} onClick={handleSoftDelete}>
+                {deletingId ? 'Moving…' : 'Move to Bin'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 0 }}>
         <h1 className="admin-title" style={{ margin: 0 }}>Dealers</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {exportStatus && (
@@ -1212,7 +1315,22 @@ export default function AdminDealers() {
           </button>
         </div>
       </div>
-      {loading ? (
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', borderBottom: '2px solid var(--red-light)', marginBottom: 20, marginTop: 16 }}>
+        {[['dealers', 'Active Dealers'], ['bin', '🗑 Recycle Bin']].map(([tab, label]) => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            style={{ background: 'none', border: 'none', padding: '8px 20px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+              color: activeTab === tab ? 'var(--red-dark)' : 'var(--muted)',
+              borderBottom: activeTab === tab ? '2px solid var(--red-dark)' : '2px solid transparent',
+              marginBottom: -2 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'dealers' ? (
+      loading ? (
         <div className="admin-loading">Loading…</div>
       ) : dealers.length === 0 ? (
         <div className="admin-empty">No dealers yet.</div>
@@ -1239,6 +1357,7 @@ export default function AdminDealers() {
                 <th>Phone</th>
                 <th>Territory</th>
                 <th>Status</th>
+                <th style={{ width: 40 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -1284,12 +1403,95 @@ export default function AdminDealers() {
                         {d.is_blocked ? "Blocked" : "Active"}
                       </span>
                     </td>
+                    <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
+                      <button title="Move to Recycle Bin"
+                        onClick={e => { e.stopPropagation(); setDeleteConfirm({ dealer: d }); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}>
+                        🗑
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      )
+      ) : (
+        /* ─── RECYCLE BIN TAB ─── */
+        binLoading ? <div className="admin-loading">Loading…</div> : (
+          <>
+            {restoreRequests.length > 0 && (
+              <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: '#92400e', marginBottom: 14 }}>
+                  📬 Restore Requests ({restoreRequests.length} pending)
+                </div>
+                {restoreRequests.map(req => (
+                  <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #fde68a' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>
+                        {req.profiles?.shop_name || req.profiles?.owner_name || req.profiles?.email || '—'}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#92400e' }}>
+                        Contact: {req.contact_value} · {new Date(req.requested_at).toLocaleDateString('en-IN')}
+                      </div>
+                    </div>
+                    <button className="btn small" style={{ background: '#27ae60', border: 'none', color: '#fff' }}
+                      onClick={() => handleApproveRestore(req)}>✓ Approve & Restore</button>
+                    <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
+                      onClick={() => handleRejectRestore(req)}>Reject</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {deletedDealers.length === 0 ? <div className="admin-empty">Recycle bin is empty.</div> : (
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }}>#</th>
+                      <th>Dealer Code</th>
+                      <th>Shop / Owner</th>
+                      <th>Deleted On</th>
+                      <th>Days Left</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {deletedDealers.map((d, idx) => {
+                      const daysElapsed = Math.floor((Date.now() - new Date(d.deleted_at)) / 86400000);
+                      const daysLeft = 365 - daysElapsed;
+                      return (
+                        <tr key={d.id}>
+                          <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
+                          <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.dealer_code || '—'}</td>
+                          <td>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{d.shop_name || d.owner_name || '—'}</div>
+                            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.email}</div>
+                          </td>
+                          <td style={{ fontSize: 12 }}>{new Date(d.deleted_at).toLocaleDateString('en-IN')}</td>
+                          <td>
+                            <span style={{ fontWeight: 700, fontSize: 12, color: daysLeft < 30 ? '#c0392b' : daysLeft < 90 ? '#e67e22' : '#27ae60' }}>
+                              {daysLeft}d
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                              <button className="btn small outline" onClick={() => handleRestore(d.id)}>↩ Restore</button>
+                              <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
+                                onClick={() => handlePermanentDelete(d)}>🗑 Delete Permanently</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )
       )}
     </div>
   );
