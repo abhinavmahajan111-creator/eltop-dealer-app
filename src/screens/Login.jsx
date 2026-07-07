@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 
@@ -9,7 +9,22 @@ export default function Login() {
   const [showFanmanModal, setShowFanmanModal] = useState(false);
   const [step, setStep]             = useState(1);
   const [emailInput, setEmailInput] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const cooldownRef = useRef(null);
   const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()];
+
+  useEffect(() => () => clearInterval(cooldownRef.current), []);
+
+  function startCooldown(seconds) {
+    clearInterval(cooldownRef.current);
+    setResendCooldown(seconds);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown(prev => {
+        if (prev <= 1) { clearInterval(cooldownRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  }
 
   const isGuest = role === "Guest";
 
@@ -23,6 +38,7 @@ export default function Login() {
   async function goOtp() {
     const ok = await sendOtp(emailInput.trim());
     if (ok) setStep(2);
+    startCooldown(60);
   }
 
   async function verify() {
@@ -130,7 +146,10 @@ export default function Login() {
                 <button className="btn" onClick={verify} disabled={authBusy}>
                   {authBusy ? "Verifying..." : "Verify & Login"}
                 </button>
-                <div className="resend" onClick={goOtp}>Resend OTP</div>
+                {resendCooldown > 0
+                  ? <div className="resend" style={{ opacity: 0.5, cursor: 'default' }}>Resend OTP in {resendCooldown}s</div>
+                  : <div className="resend" onClick={goOtp}>Resend OTP</div>
+                }
               </div>
             )}
           </>
