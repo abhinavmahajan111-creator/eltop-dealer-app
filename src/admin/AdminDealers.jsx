@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
@@ -87,7 +87,6 @@ function Lightbox({ items, index, onClose, onNav }) {
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
       }}
     >
-      {/* Top bar */}
       <div
         onClick={e => e.stopPropagation()}
         style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px" }}
@@ -105,7 +104,6 @@ function Lightbox({ items, index, onClose, onNav }) {
         </div>
       </div>
 
-      {/* Prev arrow */}
       {index > 0 && (
         <button onClick={e => { e.stopPropagation(); onNav(index - 1); }}
           style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,.15)", border: "none", borderRadius: "50%", color: "#fff", width: 44, height: 44, fontSize: 22, cursor: "pointer" }}>
@@ -113,7 +111,6 @@ function Lightbox({ items, index, onClose, onNav }) {
         </button>
       )}
 
-      {/* Media */}
       <div onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "80vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {isVideo
           ? <video src={item.url} controls autoPlay style={{ maxWidth: "90vw", maxHeight: "80vh", borderRadius: 8 }} />
@@ -121,7 +118,6 @@ function Lightbox({ items, index, onClose, onNav }) {
         }
       </div>
 
-      {/* Next arrow */}
       {index < items.length - 1 && (
         <button onClick={e => { e.stopPropagation(); onNav(index + 1); }}
           style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "rgba(255,255,255,.15)", border: "none", borderRadius: "50%", color: "#fff", width: 44, height: 44, fontSize: 22, cursor: "pointer" }}>
@@ -129,7 +125,6 @@ function Lightbox({ items, index, onClose, onNav }) {
         </button>
       )}
 
-      {/* Dot nav */}
       {items.length > 1 && (
         <div onClick={e => e.stopPropagation()} style={{ position: "absolute", bottom: 20, display: "flex", gap: 8 }}>
           {items.map((_, i) => (
@@ -163,7 +158,6 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
         onMouseLeave={() => setHovered(false)}
         onClick={() => { if (url) onView?.(); else if (editing) ref.current?.click(); }}
       >
-        {/* Thumbnail */}
         {uploading
           ? <span style={{ fontSize: 12 }}>⏳</span>
           : url
@@ -173,7 +167,6 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
             : editing ? <span style={{ fontSize: 24 }}>+</span> : <span style={{ fontSize: 11, color: "#ccc" }}>—</span>
         }
 
-        {/* Hover overlay — view/download icons when has URL */}
         {url && hovered && (
           <div style={{
             position: "absolute", inset: 0, background: "rgba(0,0,0,.55)",
@@ -198,7 +191,6 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
           </div>
         )}
 
-        {/* Edit overlay when editing mode and URL exists */}
         {url && editing && !hovered && (
           <div style={{ position: "absolute", bottom: 4, right: 4, background: "rgba(0,0,0,.45)", borderRadius: 4, padding: "2px 4px" }}>
             <span style={{ color: "#fff", fontSize: 10 }}>✏️</span>
@@ -211,37 +203,61 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
   );
 }
 
+// ─── TypeBadge ───────────────────────────────────────────────────────────────
+function TypeBadge({ type }) {
+  const cfg = {
+    dealer:  { bg: '#f0ebff', color: '#6b21a8', label: 'Dealer'  },
+    deleted: { bg: '#fdecea', color: '#c0392b', label: 'Deleted' },
+    guest:   { bg: '#e8f4ff', color: '#1565c0', label: 'Guest'   },
+  };
+  const { bg, color, label } = cfg[type] || { bg: '#f5f5f5', color: '#555', label: type };
+  return (
+    <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: bg, color }}>
+      {label}
+    </span>
+  );
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export default function AdminDealers() {
   const navigate = useNavigate();
-  const [dealers, setDealers]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [selected, setSelected] = useState(null);
-  const [editing, setEditing]   = useState(false);
-  const [edits, setEdits]       = useState({});
-  const [saving, setSaving]     = useState(false);
-  const [uploading, setUploading] = useState({});
-  const [newTerritory, setNewTerritory] = useState("");
-  const [creditUsed, setCreditUsed] = useState(null);
-  const [lightbox, setLightbox] = useState(null); // { items: [...], index: 0 }
-  const [exporting, setExporting] = useState(false);
-  const [exportStatus, setExportStatus] = useState("");
-  const [selectedDealerIds, setSelectedDealerIds] = useState(new Set());
-  const [editingCreditLimit, setEditingCreditLimit] = useState(false);
-  const [creditLimitDraft, setCreditLimitDraft] = useState("");
-  const [savingCreditLimit, setSavingCreditLimit] = useState(false);
-  const [activeTab, setActiveTab]             = useState('dealers');
-  const [deletedDealers, setDeletedDealers]   = useState([]);
+  const [allProfiles, setAllProfiles] = useState([]);
+  const [allOrders, setAllOrders]     = useState([]);
   const [restoreRequests, setRestoreRequests] = useState([]);
-  const [binLoading, setBinLoading]           = useState(false);
-  const [deleteConfirm, setDeleteConfirm]     = useState(null);
-  const [deletingId, setDeletingId]           = useState(null);
+  const [loading, setLoading]         = useState(true);
+  const [selected, setSelected]       = useState(null);       // dealer/deleted profile
+  const [selectedGuest, setSelectedGuest] = useState(null);   // guest row
+  const [typeFilter, setTypeFilter]   = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editing, setEditing]         = useState(false);
+  const [edits, setEdits]             = useState({});
+  const [saving, setSaving]           = useState(false);
+  const [uploading, setUploading]     = useState({});
+  const [newTerritory, setNewTerritory] = useState('');
+  const [creditUsed, setCreditUsed]   = useState(null);
+  const [lightbox, setLightbox]       = useState(null);
+  const [exporting, setExporting]     = useState(false);
+  const [exportStatus, setExportStatus] = useState('');
+  const [editingCreditLimit, setEditingCreditLimit] = useState(false);
+  const [creditLimitDraft, setCreditLimitDraft]     = useState('');
+  const [savingCreditLimit, setSavingCreditLimit]   = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deletingId, setDeletingId]       = useState(null);
 
+  // ─── Data fetch ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
-    supabase.from("profiles").select("*").is('deleted_at', null).order("created_at", { ascending: false })
-      .then(({ data }) => { if (data) setDealers(data); setLoading(false); });
+    Promise.all([
+      supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+      supabase.from('orders').select('id, dealer_id, customer_name, customer_phone, customer_email, total, created_at, status').order('created_at', { ascending: false }),
+      supabase.from('restore_requests').select('id, profile_id, contact_value, requested_at, status, profiles(shop_name, owner_name, email)').eq('status', 'pending').order('requested_at', { ascending: false }),
+    ]).then(([profRes, ordRes, reqRes]) => {
+      if (profRes.data) setAllProfiles(profRes.data);
+      if (ordRes.data)  setAllOrders(ordRes.data);
+      if (reqRes.data)  setRestoreRequests(reqRes.data);
+      setLoading(false);
+    });
   }, []);
 
   // Lazy cleanup: permanently delete profiles soft-deleted over 1 year ago
@@ -251,66 +267,118 @@ export default function AdminDealers() {
     supabase.from('profiles').select('id').not('deleted_at', 'is', null).lt('deleted_at', oneYearAgo)
       .then(async ({ data: expired }) => {
         if (!expired?.length) return;
+        const expiredIds = new Set(expired.map(p => p.id));
         for (const p of expired) {
           await supabase.from('orders').update({ dealer_id: null }).eq('dealer_id', p.id);
           await supabase.from('profiles').delete().eq('id', p.id);
         }
+        setAllProfiles(prev => prev.filter(p => !expiredIds.has(p.id)));
       });
   }, []);
 
-  // Load recycle bin data when tab switches
-  useEffect(() => {
-    if (activeTab !== 'bin' || !isSupabaseConfigured) return;
-    setBinLoading(true);
-    const oneYearAgo = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  // ─── Derived data ───────────────────────────────────────────────────────────
+  const dealerStatsMap = useMemo(() => {
+    const map = {};
+    for (const o of allOrders) {
+      if (!o.dealer_id) continue;
+      if (!map[o.dealer_id]) map[o.dealer_id] = { orderCount: 0, totalSpent: 0, lastOrder: null };
+      map[o.dealer_id].orderCount++;
+      map[o.dealer_id].totalSpent += Number(o.total) || 0;
+      if (!map[o.dealer_id].lastOrder || o.created_at > map[o.dealer_id].lastOrder) {
+        map[o.dealer_id].lastOrder = o.created_at;
+      }
+    }
+    return map;
+  }, [allOrders]);
 
-    const binQuery = supabase.from('profiles').select('*')
-      .not('deleted_at', 'is', null).gt('deleted_at', oneYearAgo)
-      .order('deleted_at', { ascending: false });
+  const guestRows = useMemo(() => {
+    const map = {};
+    for (const o of allOrders) {
+      if (o.dealer_id) continue;
+      const key = o.customer_phone || o.customer_email || o.customer_name || 'unknown';
+      if (!map[key]) map[key] = {
+        _type: 'guest', _key: key,
+        name: o.customer_name || '—',
+        phone: o.customer_phone || '',
+        email: o.customer_email || '',
+        orderCount: 0, totalSpent: 0, lastOrder: null, orders: [],
+      };
+      map[key].orderCount++;
+      map[key].totalSpent += Number(o.total) || 0;
+      if (!map[key].lastOrder || o.created_at > map[key].lastOrder) map[key].lastOrder = o.created_at;
+      map[key].orders.push(o);
+    }
+    return Object.values(map).sort((a, b) => (b.lastOrder || '') > (a.lastOrder || '') ? 1 : -1);
+  }, [allOrders]);
 
-    const reqQuery = supabase.from('restore_requests')
-      .select('id, profile_id, contact_value, requested_at, status, profiles(shop_name, owner_name, email)')
-      .eq('status', 'pending')
-      .order('requested_at', { ascending: false });
+  const unifiedRows = useMemo(() => {
+    const q = searchQuery.toLowerCase();
 
-    Promise.all([binQuery, reqQuery]).then(([binRes, reqRes]) => {
-      console.log('[RecycleBin] deleted profiles:', binRes.data, 'error:', binRes.error);
-      console.log('[RestoreRequests] data:', reqRes.data, 'error:', reqRes.error, 'status:', reqRes.status, 'statusText:', reqRes.statusText);
-      if (binRes.data)  setDeletedDealers(binRes.data);
-      if (reqRes.data)  setRestoreRequests(reqRes.data);
-      setBinLoading(false);
-    });
-  }, [activeTab]);
+    const dealerList = allProfiles
+      .filter(p => {
+        const type = p.deleted_at ? 'deleted' : 'dealer';
+        if (typeFilter !== 'all' && typeFilter !== type) return false;
+        if (!q) return true;
+        return (
+          (p.shop_name || '').toLowerCase().includes(q) ||
+          (p.owner_name || '').toLowerCase().includes(q) ||
+          (p.email || '').toLowerCase().includes(q) ||
+          (p.phone || '').toLowerCase().includes(q) ||
+          (p.dealer_code || '').toLowerCase().includes(q)
+        );
+      })
+      .map(p => ({
+        ...p,
+        _type:       p.deleted_at ? 'deleted' : 'dealer',
+        _name:       p.shop_name || p.owner_name || p.email || '—',
+        _phone:      p.phone || '',
+        _email:      p.email || '',
+        _orderCount: dealerStatsMap[p.id]?.orderCount || 0,
+        _totalSpent: dealerStatsMap[p.id]?.totalSpent || 0,
+        _lastOrder:  dealerStatsMap[p.id]?.lastOrder || p.created_at || null,
+      }));
 
+    const guestList = (typeFilter === 'all' || typeFilter === 'guest')
+      ? guestRows.filter(g => {
+          if (!q) return true;
+          return (
+            g.name.toLowerCase().includes(q) ||
+            g.phone.toLowerCase().includes(q) ||
+            g.email.toLowerCase().includes(q)
+          );
+        }).map(g => ({
+          ...g,
+          _name:       g.name,
+          _phone:      g.phone,
+          _email:      g.email,
+          _orderCount: g.orderCount,
+          _totalSpent: g.totalSpent,
+          _lastOrder:  g.lastOrder,
+        }))
+      : [];
+
+    return [...dealerList, ...guestList].sort((a, b) =>
+      (b._lastOrder || '') > (a._lastOrder || '') ? 1 : -1
+    );
+  }, [allProfiles, guestRows, dealerStatsMap, typeFilter, searchQuery]);
+
+  // ─── Export ─────────────────────────────────────────────────────────────────
   const handleExport = async () => {
     if (!isSupabaseConfigured) return;
     setExporting(true);
-    setExportStatus("Fetching dealer data…");
+    setExportStatus("Fetching data…");
     try {
       const today = new Date();
-      const dd   = String(today.getDate()).padStart(2, "0");
-      const mm   = String(today.getMonth() + 1).padStart(2, "0");
-      const yyyy = today.getFullYear();
-      const dateSuffix = `${dd}${mm}${yyyy}`;
+      const dateSuffix = `${String(today.getDate()).padStart(2,"0")}${String(today.getMonth()+1).padStart(2,"0")}${today.getFullYear()}`;
 
-      // ── Fetch all data in parallel ────────────────────────────────────────
       const [profilesRes, ordersRes, itemsRes] = await Promise.all([
         supabase.from("profiles").select("*").order("created_at", { ascending: false }),
         supabase.from("orders").select("id, status, total, created_at, dealer_id, profiles(dealer_code, name, email, shop_name)").order("created_at", { ascending: false }),
         supabase.from("order_items").select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)"),
       ]);
-      let profiles  = profilesRes.data  || [];
-      let orders    = ordersRes.data    || [];
-      let orderItems = itemsRes.data    || [];
-
-      // ── Filter to selection if active ─────────────────────────────────────
-      if (selectedDealerIds.size > 0) {
-        profiles   = profiles.filter(d => selectedDealerIds.has(d.id));
-        const selectedOrdererIds = new Set(profiles.map(d => d.id));
-        orders     = orders.filter(o => selectedOrdererIds.has(o.dealer_id));
-        const selectedOrderIds = new Set(orders.map(o => o.id));
-        orderItems = orderItems.filter(it => selectedOrderIds.has(it.order_id));
-      }
+      const profiles   = profilesRes.data  || [];
+      const orders     = ordersRes.data    || [];
+      const orderItems = itemsRes.data     || [];
 
       const itemCountMap = {};
       orderItems.forEach(it => { itemCountMap[it.order_id] = (itemCountMap[it.order_id] || 0) + it.qty; });
@@ -318,7 +386,6 @@ export default function AdminDealers() {
       setExportStatus("Building Excel…");
       const wb = XLSX.utils.book_new();
 
-      // ── SHEET 1: Dealers ─────────────────────────────────────────────────
       const dealerRows = profiles.map(d => ({
         "ID":                   d.id,
         "Dealer Code":          d.dealer_code || "",
@@ -347,12 +414,12 @@ export default function AdminDealers() {
         "Google Reviews":       d.google_reviews_count  ?? "",
         "Listing Status":       d.google_listing_status || "",
         "Listing Claimed":      d.google_listing_claimed ? "Yes" : "No",
-        "Status":               d.is_blocked ? "Blocked" : "Active",
+        "Status":               d.deleted_at ? "Deleted" : d.is_blocked ? "Blocked" : "Active",
+        "Deleted At":           d.deleted_at ? new Date(d.deleted_at).toLocaleString("en-IN") : "",
         "Created At":           d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "",
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(dealerRows), "Dealers");
 
-      // ── SHEET 2: Orders ───────────────────────────────────────────────────
       const orderRows = orders.map(o => ({
         "Order ID":     o.id,
         "Dealer Code":  o.profiles?.dealer_code || "",
@@ -365,7 +432,6 @@ export default function AdminDealers() {
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows), "Orders");
 
-      // ── SHEET 3: Order Items ──────────────────────────────────────────────
       const itemRows = orderItems.map(it => {
         const net = Number(it.net_rate ?? it.price) || 0;
         return {
@@ -384,7 +450,6 @@ export default function AdminDealers() {
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows), "Order Items");
 
-      // ── SHEET 4: Media Links ──────────────────────────────────────────────
       const PHOTO_KEYS = [
         { key: "owner_photo",       label: "Owner Photo"    },
         { key: "staff1_photo",      label: "Staff 1 Photo"  },
@@ -410,10 +475,8 @@ export default function AdminDealers() {
         "Media Links"
       );
 
-      // ── Download ──────────────────────────────────────────────────────────
       setExportStatus("Writing file…");
       XLSX.writeFile(wb, `Eltop_Database_Export_${dateSuffix}.xlsx`);
-
     } catch (e) {
       console.error(e);
       alert("Export failed: " + e.message);
@@ -422,6 +485,7 @@ export default function AdminDealers() {
     setExporting(false);
   };
 
+  // ─── Dealer handlers ─────────────────────────────────────────────────────────
   const openDealer = (d) => {
     setSelected(d);
     setEditing(false);
@@ -431,36 +495,32 @@ export default function AdminDealers() {
     setLightbox(null);
     setEditingCreditLimit(false);
     setCreditLimitDraft("");
-    // Fetch sum of pending + confirmed orders for credit utilization
     if (isSupabaseConfigured) {
-      supabase
-        .from("orders")
-        .select("total")
-        .eq("dealer_id", d.id)
-        .in("status", ["pending", "confirmed"])
+      supabase.from("orders").select("total").eq("dealer_id", d.id).in("status", ["pending", "confirmed"])
         .then(({ data }) => {
           if (data) setCreditUsed(data.reduce((sum, o) => sum + Number(o.total || 0), 0));
         });
     }
   };
-  const goBack     = ()  => { setSelected(null); setEditing(false); setEdits({}); setNewTerritory(""); };
+
+  const goBack = () => { setSelected(null); setSelectedGuest(null); setEditing(false); setEdits({}); setNewTerritory(""); };
 
   const startEdit = () => {
     setEdits({
-      owner_name:        selected.owner_name        || "",
-      shop_name:         selected.shop_name         || "",
-      alias_name:        selected.alias_name        || "",
-      registration_type: selected.registration_type || "Unregistered",
-      gstin:             selected.gstin             || "",
-      phone:             selected.phone             || "",
-      phone2:            selected.phone2            || "",
-      address:           selected.address           || "",
-      shop_address:      selected.shop_address      || "",
-      godown_address:    selected.godown_address    || "",
-      staff_assigned:    selected.staff_assigned    || "",
-      staff1_name:       selected.staff1_name       || "",
-      staff2_name:       selected.staff2_name       || "",
-      website:           selected.website           || "",
+      owner_name:                 selected.owner_name                 || "",
+      shop_name:                  selected.shop_name                  || "",
+      alias_name:                 selected.alias_name                 || "",
+      registration_type:          selected.registration_type          || "Unregistered",
+      gstin:                      selected.gstin                      || "",
+      phone:                      selected.phone                      || "",
+      phone2:                     selected.phone2                     || "",
+      address:                    selected.address                    || "",
+      shop_address:               selected.shop_address               || "",
+      godown_address:             selected.godown_address             || "",
+      staff_assigned:             selected.staff_assigned             || "",
+      staff1_name:                selected.staff1_name                || "",
+      staff2_name:                selected.staff2_name                || "",
+      website:                    selected.website                    || "",
       territory:                  Array.isArray(selected.territory) ? [...selected.territory] : [],
       discount1:                  selected.discount1                  ?? 0,
       discount2:                  selected.discount2                  ?? 0,
@@ -476,7 +536,6 @@ export default function AdminDealers() {
   };
 
   const cancelEdit = () => { setEditing(false); setEdits({}); setNewTerritory(""); };
-
   const ev = (field) => edits[field] ?? "";
   const set = (field, val) => setEdits(p => ({ ...p, [field]: val }));
 
@@ -484,20 +543,20 @@ export default function AdminDealers() {
     setSaving(true);
     const isRegistered = edits.registration_type === "Registered";
     const payload = {
-      owner_name:        edits.owner_name,
-      shop_name:         edits.shop_name,
-      alias_name:        edits.alias_name,
-      registration_type: edits.registration_type,
-      gstin:             isRegistered ? edits.gstin : null,
-      phone:             edits.phone,
-      phone2:            edits.phone2,
-      address:           edits.address,
-      shop_address:      edits.shop_address,
-      godown_address:    edits.godown_address,
-      staff_assigned:    edits.staff_assigned,
-      staff1_name:       edits.staff1_name,
-      staff2_name:       edits.staff2_name,
-      website:           edits.website,
+      owner_name:                 edits.owner_name,
+      shop_name:                  edits.shop_name,
+      alias_name:                 edits.alias_name,
+      registration_type:          edits.registration_type,
+      gstin:                      isRegistered ? edits.gstin : null,
+      phone:                      edits.phone,
+      phone2:                     edits.phone2,
+      address:                    edits.address,
+      shop_address:               edits.shop_address,
+      godown_address:             edits.godown_address,
+      staff_assigned:             edits.staff_assigned,
+      staff1_name:                edits.staff1_name,
+      staff2_name:                edits.staff2_name,
+      website:                    edits.website,
       territory:                  edits.territory,
       discount1:                  Number(edits.discount1) || 0,
       discount2:                  Number(edits.discount2) || 0,
@@ -513,7 +572,7 @@ export default function AdminDealers() {
     if (!error) {
       const updated = { ...selected, ...payload };
       setSelected(updated);
-      setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+      setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
     }
     setSaving(false);
     setEditing(false);
@@ -527,7 +586,7 @@ export default function AdminDealers() {
     await supabase.from("profiles").update({ is_blocked: next }).eq("id", selected.id);
     const updated = { ...selected, is_blocked: next };
     setSelected(updated);
-    setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+    setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
     setSaving(false);
   };
 
@@ -538,7 +597,7 @@ export default function AdminDealers() {
       await supabase.from("profiles").update({ [key]: url }).eq("id", selected.id);
       const updated = { ...selected, [key]: url };
       setSelected(updated);
-      setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+      setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
     } catch (e) {
       alert("Upload failed: " + e.message);
     }
@@ -553,7 +612,7 @@ export default function AdminDealers() {
         await supabase.from("profiles").update({ latitude, longitude }).eq("id", selected.id);
         const updated = { ...selected, latitude, longitude };
         setSelected(updated);
-        setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+        setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
       },
       () => alert("Location access denied. Please allow location in your browser.")
     );
@@ -570,7 +629,7 @@ export default function AdminDealers() {
     } else {
       supabase.from("profiles").update({ territory: list }).eq("id", selected.id);
       setSelected(p => ({ ...p, territory: list }));
-      setDealers(prev => prev.map(d => d.id === selected.id ? { ...d, territory: list } : d));
+      setAllProfiles(prev => prev.map(d => d.id === selected.id ? { ...d, territory: list } : d));
     }
     setNewTerritory("");
   };
@@ -582,7 +641,7 @@ export default function AdminDealers() {
     } else {
       supabase.from("profiles").update({ territory: list }).eq("id", selected.id);
       setSelected(p => ({ ...p, territory: list }));
-      setDealers(prev => prev.map(d => d.id === selected.id ? { ...d, territory: list } : d));
+      setAllProfiles(prev => prev.map(d => d.id === selected.id ? { ...d, territory: list } : d));
     }
   };
 
@@ -590,12 +649,10 @@ export default function AdminDealers() {
     if (!deleteConfirm) return;
     const { dealer } = deleteConfirm;
     setDeletingId(dealer.id);
-    const { error } = await supabase.from('profiles')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', dealer.id);
+    const deletedAt = new Date().toISOString();
+    const { error } = await supabase.from('profiles').update({ deleted_at: deletedAt }).eq('id', dealer.id);
     if (error) { alert('Failed: ' + error.message); setDeletingId(null); setDeleteConfirm(null); return; }
-    setDealers(prev => prev.filter(d => d.id !== dealer.id));
-    setSelectedDealerIds(prev => { const n = new Set(prev); n.delete(dealer.id); return n; });
+    setAllProfiles(prev => prev.map(p => p.id === dealer.id ? { ...p, deleted_at: deletedAt } : p));
     if (selected?.id === dealer.id) { setSelected(null); setEditing(false); }
     setDeleteConfirm(null);
     setDeletingId(null);
@@ -604,7 +661,7 @@ export default function AdminDealers() {
   const handleRestore = async (dealerId) => {
     const { error } = await supabase.from('profiles').update({ deleted_at: null }).eq('id', dealerId);
     if (error) { alert('Restore failed: ' + error.message); return; }
-    setDeletedDealers(prev => prev.filter(d => d.id !== dealerId));
+    setAllProfiles(prev => prev.map(p => p.id === dealerId ? { ...p, deleted_at: null } : p));
   };
 
   const handlePermanentDelete = async (dealer) => {
@@ -612,14 +669,14 @@ export default function AdminDealers() {
     await supabase.from('orders').update({ dealer_id: null }).eq('dealer_id', dealer.id);
     const { error } = await supabase.from('profiles').delete().eq('id', dealer.id);
     if (error) { alert('Delete failed: ' + error.message); return; }
-    setDeletedDealers(prev => prev.filter(d => d.id !== dealer.id));
+    setAllProfiles(prev => prev.filter(p => p.id !== dealer.id));
   };
 
   const handleApproveRestore = async (req) => {
     await supabase.from('profiles').update({ deleted_at: null }).eq('id', req.profile_id);
     await supabase.from('restore_requests').update({ status: 'approved' }).eq('id', req.id);
     setRestoreRequests(prev => prev.filter(r => r.id !== req.id));
-    setDeletedDealers(prev => prev.filter(d => d.id !== req.profile_id));
+    setAllProfiles(prev => prev.map(p => p.id === req.profile_id ? { ...p, deleted_at: null } : p));
   };
 
   const handleRejectRestore = async (req) => {
@@ -632,35 +689,20 @@ export default function AdminDealers() {
     const d = selected;
     const code = d.dealer_code || d.id.substring(0, 8);
     const today = new Date();
-    const dd   = String(today.getDate()).padStart(2, "0");
-    const mm   = String(today.getMonth() + 1).padStart(2, "0");
-    const yyyy = today.getFullYear();
-    const filename = `Eltop_${code}_Export_${dd}${mm}${yyyy}.xlsx`;
+    const filename = `Eltop_${code}_Export_${String(today.getDate()).padStart(2,"0")}${String(today.getMonth()+1).padStart(2,"0")}${today.getFullYear()}.xlsx`;
 
     try {
-      // Fetch this dealer's orders
-      const { data: orders } = await supabase
-        .from("orders")
-        .select("id, status, total, created_at, dealer_id")
-        .eq("dealer_id", d.id)
-        .order("created_at", { ascending: false });
-
+      const { data: orders } = await supabase.from("orders").select("id, status, total, created_at, dealer_id").eq("dealer_id", d.id).order("created_at", { ascending: false });
       const orderList = orders || [];
       const orderIds  = orderList.map(o => o.id);
-
-      // Fetch order items for those orders
       let itemList = [];
       if (orderIds.length > 0) {
-        const { data: items } = await supabase
-          .from("order_items")
-          .select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)")
-          .in("order_id", orderIds);
+        const { data: items } = await supabase.from("order_items").select("order_id, name, qty, price, net_rate, mrp, dlp, discount1, discount2, hsn_code, products(sku)").in("order_id", orderIds);
         itemList = items || [];
       }
 
       const wb = XLSX.utils.book_new();
 
-      // ── Sheet 1: Dealer Info ───────────────────────────────────────────────
       const infoRows = [
         { "Field": "ID",                   "Value": d.id },
         { "Field": "Dealer Code",          "Value": d.dealer_code || "" },
@@ -689,12 +731,11 @@ export default function AdminDealers() {
         { "Field": "Google Reviews",       "Value": d.google_reviews_count ?? "" },
         { "Field": "Listing Status",       "Value": d.google_listing_status || "" },
         { "Field": "Listing Claimed",      "Value": d.google_listing_claimed ? "Yes" : "No" },
-        { "Field": "Status",               "Value": d.is_blocked ? "Blocked" : "Active" },
+        { "Field": "Status",               "Value": d.deleted_at ? "Deleted" : d.is_blocked ? "Blocked" : "Active" },
         { "Field": "Member Since",         "Value": d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "" },
       ];
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(infoRows), "Dealer Info");
 
-      // ── Sheet 2: Orders ────────────────────────────────────────────────────
       const orderRows = orderList.map(o => ({
         "Order ID":    o.id,
         "Order Date":  o.created_at ? new Date(o.created_at).toLocaleString("en-IN") : "",
@@ -703,7 +744,6 @@ export default function AdminDealers() {
       }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows.length ? orderRows : [{ "Order ID": "", "Order Date": "", "Status": "", "Total (Rs.)": "" }]), "Orders");
 
-      // ── Sheet 3: Order Items ───────────────────────────────────────────────
       const itemRows = itemList.map(it => {
         const net = Number(it.net_rate ?? it.price) || 0;
         return {
@@ -720,9 +760,8 @@ export default function AdminDealers() {
           "Amount (Rs.)":   net * (it.qty || 0),
         };
       });
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows.length ? itemRows : [{ "Order ID": "", "Product Name": "", "SKU": "", "HSN Code": "", "Qty": "", "MRP (Rs.)": "", "DLP (Rs.)": "", "Disc 1 (%)": "", "Disc 2 (%)": "", "Net Rate (Rs.)": "", "Amount (Rs.)": "" }]), "Order Items");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(itemRows.length ? itemRows : [{}]), "Order Items");
 
-      // ── Sheet 4: Media Links ───────────────────────────────────────────────
       const MEDIA_KEYS = [
         { key: "owner_photo",       label: "Owner Photo",    filename: `${code}_owner-photo.jpg`        },
         { key: "staff1_photo",      label: "Staff 1 Photo",  filename: `${code}_staff1-photo.jpg`       },
@@ -731,9 +770,7 @@ export default function AdminDealers() {
         { key: "shop_board_photo",  label: "Shop Board",     filename: `${code}_shop-board.jpg`         },
         { key: "shop_video",        label: "Interior Video", filename: `${code}_interior-video.mp4`     },
       ];
-      const mediaRows = MEDIA_KEYS
-        .filter(m => !!d[m.key])
-        .map(m => ({ "Photo Type": m.label, "URL": d[m.key], "File Name": m.filename }));
+      const mediaRows = MEDIA_KEYS.filter(m => !!d[m.key]).map(m => ({ "Photo Type": m.label, "URL": d[m.key], "File Name": m.filename }));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mediaRows.length ? mediaRows : [{ "Photo Type": "", "URL": "", "File Name": "" }]), "Media Links");
 
       XLSX.writeFile(wb, filename);
@@ -742,19 +779,100 @@ export default function AdminDealers() {
     }
   };
 
-  // ─── DETAIL VIEW ─────────────────────────────────────────────────────────────
+  // ─── GUEST DETAIL VIEW ────────────────────────────────────────────────────────
+  if (selectedGuest) {
+    const g = selectedGuest;
+    const gOrders = [...g.orders].sort((a, b) => b.created_at > a.created_at ? 1 : -1);
+
+    return (
+      <div className="admin-page">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <button onClick={goBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red-dark)", fontWeight: 700, fontSize: 14, padding: 0 }}>
+            ← Back to Dealers &amp; Customers
+          </button>
+        </div>
+
+        <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 2px 12px rgba(0,0,0,.07)", maxWidth: 760 }}>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 4, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", flexShrink: 0, background: "#e8f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: "#1565c0" }}>
+              {(g.name || "?")[0].toUpperCase()}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: 17, color: "#111" }}>{g.name}</div>
+              {g.phone && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{g.phone}</div>}
+              {g.email && <div style={{ fontSize: 12, color: "var(--muted)" }}>{g.email}</div>}
+            </div>
+            <TypeBadge type="guest" />
+          </div>
+
+          {/* Stats */}
+          <div style={{ display: "flex", gap: 24, padding: "18px 0", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>{g.orderCount}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Orders</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>₹{g.totalSpent.toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Spent</div>
+            </div>
+            {g.lastOrder && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>
+                  {new Date(g.lastOrder).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Last Order</div>
+              </div>
+            )}
+          </div>
+
+          {/* Orders list */}
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 12 }}>
+            Order History
+          </div>
+          {gOrders.length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>No orders.</div>
+          ) : (
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Order ID</th>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: "right" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gOrders.map(o => (
+                    <tr key={o.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/admin/orders`)}>
+                      <td style={{ fontFamily: "monospace", fontSize: 11 }}>{o.id.substring(0, 8)}…</td>
+                      <td style={{ fontSize: 12 }}>{new Date(o.created_at).toLocaleDateString("en-IN")}</td>
+                      <td><span className={`badge ${o.status === 'delivered' ? 'delivered' : o.status === 'pending' ? 'pending' : 'confirmed'}`}>{o.status}</span></td>
+                      <td style={{ textAlign: "right", fontWeight: 700 }}>₹{Number(o.total).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── DEALER / DELETED DETAIL VIEW ────────────────────────────────────────────
   if (selected) {
     const memberSince = new Date(selected.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     const regType     = editing ? ev("registration_type") : (selected.registration_type || "Unregistered");
     const d1          = Number(editing ? ev("discount1") : selected.discount1) || 0;
     const d2          = Number(editing ? ev("discount2") : selected.discount2) || 0;
     const territories = currentTerritories();
+    const isDeleted   = !!selected.deleted_at;
 
-    // shorthand for edit field value
     const E = (field) => ev(field);
     const S = (field) => selected[field] || "";
 
-    // Build ordered list of media items for lightbox navigation
     const code = selected.dealer_code || "dealer";
     const mediaItems = [
       { key: "owner_photo",       label: "Owner Photo",          filename: `${code}_owner-photo.jpg`,       accept: "image/*" },
@@ -783,21 +901,22 @@ export default function AdminDealers() {
           />
         )}
 
-        {/* ── Top bar ── */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 8 }}>
           <button onClick={goBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red-dark)", fontWeight: 700, fontSize: 14, padding: 0 }}>
-            ← Back to Dealers
+            ← Back to Dealers &amp; Customers
           </button>
           {!editing ? (
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn small" style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
-                onClick={() => navigate(`/admin/crm/${selected.id}`)}>
-                View Full CRM →
-              </button>
+              {!isDeleted && (
+                <button className="btn small" style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
+                  onClick={() => navigate(`/admin/crm/${selected.id}`)}>
+                  View Full CRM →
+                </button>
+              )}
               <button className="btn small outline" onClick={handleDealerExport} title="Export this dealer's data to Excel">
                 ⬇️ Export
               </button>
-              <button className="btn small outline" onClick={startEdit}>Edit</button>
+              {!isDeleted && <button className="btn small outline" onClick={startEdit}>Edit</button>}
             </div>
           ) : (
             <div style={{ display: "flex", gap: 8 }}>
@@ -809,10 +928,23 @@ export default function AdminDealers() {
           )}
         </div>
 
-        {/* ── Profile card ── */}
+        {isDeleted && (
+          <div style={{ background: '#fdecea', border: '1px solid #e74c3c', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: '#7b241c', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontWeight: 700 }}>🗑 Deleted dealer</span>
+            <span>· Deleted {new Date(selected.deleted_at).toLocaleDateString('en-IN')}</span>
+            <button className="btn small outline" style={{ marginLeft: 'auto', color: '#27ae60', borderColor: '#27ae60' }}
+              onClick={() => handleRestore(selected.id)}>
+              ↩ Restore
+            </button>
+            <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
+              onClick={() => handlePermanentDelete(selected)}>
+              🗑 Delete Permanently
+            </button>
+          </div>
+        )}
+
         <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 2px 12px rgba(0,0,0,.07)", maxWidth: 760 }}>
 
-          {/* Avatar header */}
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 4, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
             <div style={{
               width: 56, height: 56, borderRadius: "50%", flexShrink: 0,
@@ -830,12 +962,16 @@ export default function AdminDealers() {
                 {selected.dealer_code || "No Code"} · Member since {memberSince}
               </div>
             </div>
-            <span className={`badge ${selected.is_blocked ? "pending" : "delivered"}`}>
-              {selected.is_blocked ? "Blocked" : "Active"}
-            </span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <TypeBadge type={isDeleted ? 'deleted' : 'dealer'} />
+              {!isDeleted && (
+                <span className={`badge ${selected.is_blocked ? "pending" : "delivered"}`}>
+                  {selected.is_blocked ? "Blocked" : "Active"}
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* ══ SECTION 1 — BUSINESS INFO ══ */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 28px" }}>
             <SectionHead title="Business Information" />
 
@@ -883,7 +1019,6 @@ export default function AdminDealers() {
                   </div>
                 ) : null}
 
-                {/* Credit Limit + Utilization */}
                 <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
                   <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Credit Limit</div>
                   {editingCreditLimit ? (
@@ -905,7 +1040,7 @@ export default function AdminDealers() {
                           await supabase.from("profiles").update({ credit_limit: val }).eq("id", selected.id);
                           const updated = { ...selected, credit_limit: val };
                           setSelected(updated);
-                          setDealers(prev => prev.map(d => d.id === selected.id ? updated : d));
+                          setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
                           setSavingCreditLimit(false);
                           setEditingCreditLimit(false);
                         }}
@@ -945,12 +1080,7 @@ export default function AdminDealers() {
                           <span style={{ fontWeight: 700, color: over ? "#c0392b" : pct > 75 ? "#e67e22" : "#27ae60" }}>{pct.toFixed(0)}%</span>
                         </div>
                         <div style={{ height: 8, borderRadius: 4, background: "#e8e8e8", overflow: "hidden" }}>
-                          <div style={{
-                            height: "100%", borderRadius: 4,
-                            width: `${pct}%`,
-                            background: over ? "#c0392b" : pct > 75 ? "#e67e22" : "#27ae60",
-                            transition: "width .4s ease",
-                          }} />
+                          <div style={{ height: "100%", borderRadius: 4, width: `${pct}%`, background: over ? "#c0392b" : pct > 75 ? "#e67e22" : "#27ae60", transition: "width .4s ease" }} />
                         </div>
                         {over && <div style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, marginTop: 4 }}>⚠️ Over credit limit by Rs. {(used - limit).toLocaleString("en-IN")}</div>}
                       </div>
@@ -963,20 +1093,14 @@ export default function AdminDealers() {
               </>
             )}
 
-            {/* Territory tags — always editable inline (no "edit mode" needed to add) */}
             <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
               <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Territories</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 8, minHeight: 28 }}>
                 {territories.length === 0 && <span style={{ fontSize: 13, color: "var(--muted)" }}>No territories added.</span>}
                 {territories.map((t, i) => (
-                  <span key={i} style={{
-                    background: "var(--red-light)", color: "var(--red-dark)", borderRadius: 20,
-                    padding: "4px 11px", fontSize: 12, fontWeight: 600,
-                    display: "flex", alignItems: "center", gap: 5,
-                  }}>
+                  <span key={i} style={{ background: "var(--red-light)", color: "var(--red-dark)", borderRadius: 20, padding: "4px 11px", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
                     {t}
-                    <span onClick={() => removeTerritory(i)}
-                      style={{ cursor: "pointer", opacity: 0.6, fontWeight: 800, lineHeight: 1 }}>✕</span>
+                    <span onClick={() => removeTerritory(i)} style={{ cursor: "pointer", opacity: 0.6, fontWeight: 800, lineHeight: 1 }}>✕</span>
                   </span>
                 ))}
               </div>
@@ -992,7 +1116,6 @@ export default function AdminDealers() {
               </div>
             </div>
 
-            {/* ══ SECTION 2 — CONTACT INFO ══ */}
             <SectionHead title="Contact Information" />
 
             {editing ? (
@@ -1009,7 +1132,6 @@ export default function AdminDealers() {
               </>
             )}
 
-            {/* ══ SECTION 3 — ADDRESSES ══ */}
             <SectionHead title="Addresses & Location" />
 
             {editing ? (
@@ -1026,7 +1148,6 @@ export default function AdminDealers() {
               </>
             )}
 
-            {/* GPS location — always available */}
             <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
               <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>GPS Location</div>
               {selected.latitude ? (
@@ -1043,59 +1164,34 @@ export default function AdminDealers() {
               )}
               <button className="btn small outline" onClick={fetchLocation}>📡 Fetch My Location</button>
             </div>
+          </div>
 
-          </div>{/* end grid */}
-
-          {/* ══ SECTION 4 — MEDIA ══ */}
           <div style={{ borderTop: "2px solid var(--red-light)", paddingTop: 6, marginTop: 8 }}>
-            <div style={{
-              fontSize: 11, fontWeight: 800, textTransform: "uppercase",
-              letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 18, marginTop: 12,
-            }}>
-              Photos & Media
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 18, marginTop: 12 }}>
+              Photos &amp; Media
             </div>
 
-            {/* Staff name + photo pairs */}
             <div style={{ marginBottom: 18 }}>
               <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Staff Members</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
-                {/* Staff 1 */}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <MediaTile
-                    label="Staff 1 Photo"
-                    url={selected.staff1_photo}
-                    uploading={uploading.staff1_photo}
-                    onPick={f => handleMediaUpload("staff1_photo", f)}
-                    editing={true}
-                    onView={() => openLightbox("staff1_photo")}
-                  />
+                  <MediaTile label="Staff 1 Photo" url={selected.staff1_photo} uploading={uploading.staff1_photo} onPick={f => handleMediaUpload("staff1_photo", f)} editing={true} onView={() => openLightbox("staff1_photo")} />
                   {editing
-                    ? <input value={E("staff1_name")} onChange={e => set("staff1_name", e.target.value)}
-                        placeholder="Staff 1 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
+                    ? <input value={E("staff1_name")} onChange={e => set("staff1_name", e.target.value)} placeholder="Staff 1 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
                     : <div style={{ fontSize: 11, color: "#333", fontWeight: 600, textAlign: "center" }}>{selected.staff1_name || "Staff 1"}</div>
                   }
                 </div>
-                {/* Staff 2 */}
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <MediaTile
-                    label="Staff 2 Photo"
-                    url={selected.staff2_photo}
-                    uploading={uploading.staff2_photo}
-                    onPick={f => handleMediaUpload("staff2_photo", f)}
-                    editing={true}
-                    onView={() => openLightbox("staff2_photo")}
-                  />
+                  <MediaTile label="Staff 2 Photo" url={selected.staff2_photo} uploading={uploading.staff2_photo} onPick={f => handleMediaUpload("staff2_photo", f)} editing={true} onView={() => openLightbox("staff2_photo")} />
                   {editing
-                    ? <input value={E("staff2_name")} onChange={e => set("staff2_name", e.target.value)}
-                        placeholder="Staff 2 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
+                    ? <input value={E("staff2_name")} onChange={e => set("staff2_name", e.target.value)} placeholder="Staff 2 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
                     : <div style={{ fontSize: 11, color: "#333", fontWeight: 600, textAlign: "center" }}>{selected.staff2_name || "Staff 2"}</div>
                   }
                 </div>
               </div>
             </div>
 
-            {/* Photo grid */}
-            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop & Owner</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop &amp; Owner</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
               <MediaTile label="Owner Photo"          url={selected.owner_photo}       uploading={uploading.owner_photo}       onPick={f => handleMediaUpload("owner_photo", f)}       editing={true} onView={() => openLightbox("owner_photo")} />
               <MediaTile label="Shop Inside"          url={selected.shop_inside_photo} uploading={uploading.shop_inside_photo} onPick={f => handleMediaUpload("shop_inside_photo", f)} editing={true} onView={() => openLightbox("shop_inside_photo")} />
@@ -1105,104 +1201,60 @@ export default function AdminDealers() {
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov, max 30 seconds.</div>
           </div>
 
-          {/* ══ SECTION 5 — GOOGLE BUSINESS ══ */}
           <div style={{ borderTop: "2px solid var(--red-light)", paddingTop: 6, marginTop: 20 }}>
-            <div style={{
-              fontSize: 11, fontWeight: 800, textTransform: "uppercase",
-              letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 4, marginTop: 12,
-            }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 4, marginTop: 12 }}>
               🗺️ Google Business Listing
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 28px", marginTop: 8 }}>
-
               {editing ? (
                 <>
-                  {/* Google Business Name */}
                   <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Business Name</div>
-                    <input value={ev("google_business_name")} onChange={e => set("google_business_name", e.target.value)}
-                      placeholder="Name as it appears on Google Maps"
-                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                    <input value={ev("google_business_name")} onChange={e => set("google_business_name", e.target.value)} placeholder="Name as it appears on Google Maps" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
                   </div>
-
-                  {/* Google Maps URL */}
                   <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>
                       Google Maps URL
-                      {ev("google_maps_url") && (
-                        <a href={ev("google_maps_url")} target="_blank" rel="noreferrer"
-                          style={{ marginLeft: 10, color: "var(--red-dark)", fontWeight: 700, textTransform: "none" }}>
-                          Open in Maps 🔗
-                        </a>
-                      )}
+                      {ev("google_maps_url") && <a href={ev("google_maps_url")} target="_blank" rel="noreferrer" style={{ marginLeft: 10, color: "var(--red-dark)", fontWeight: 700, textTransform: "none" }}>Open in Maps 🔗</a>}
                     </div>
-                    <input value={ev("google_maps_url")} onChange={e => set("google_maps_url", e.target.value)}
-                      placeholder="Paste full Google Maps listing URL here…"
-                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>
-                      💡 Tip: Search dealer name on Google Maps and paste the share link here
-                    </div>
+                    <input value={ev("google_maps_url")} onChange={e => set("google_maps_url", e.target.value)} placeholder="Paste full Google Maps listing URL here…" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>💡 Tip: Search dealer name on Google Maps and paste the share link here</div>
                   </div>
-
-                  {/* Rating */}
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Rating (1–5)</div>
-                    <input type="number" min="1" max="5" step="0.1" value={ev("google_rating")} onChange={e => set("google_rating", e.target.value)}
-                      placeholder="e.g. 4.3"
-                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                    <input type="number" min="1" max="5" step="0.1" value={ev("google_rating")} onChange={e => set("google_rating", e.target.value)} placeholder="e.g. 4.3" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
                   </div>
-
-                  {/* Reviews Count */}
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Total Reviews</div>
-                    <input type="number" min="0" value={ev("google_reviews_count")} onChange={e => set("google_reviews_count", e.target.value)}
-                      placeholder="e.g. 42"
-                      style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+                    <input type="number" min="0" value={ev("google_reviews_count")} onChange={e => set("google_reviews_count", e.target.value)} placeholder="e.g. 42" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
                   </div>
-
-                  {/* Listing Status */}
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Status</div>
-                    <select value={ev("google_listing_status")} onChange={e => set("google_listing_status", e.target.value)}
-                      style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, marginBottom: 0 }}>
+                    <select value={ev("google_listing_status")} onChange={e => set("google_listing_status", e.target.value)} style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, marginBottom: 0 }}>
                       <option>Active</option>
                       <option>Unclaimed</option>
                       <option>Suspended</option>
                       <option>Not Listed</option>
                     </select>
                   </div>
-
-                  {/* Listing Claimed */}
                   <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, paddingTop: 22 }}>
-                    <input type="checkbox" id="gl_claimed" checked={!!edits.google_listing_claimed}
-                      onChange={e => set("google_listing_claimed", e.target.checked)}
-                      style={{ width: 16, height: 16, accentColor: "var(--red-dark)", cursor: "pointer" }} />
-                    <label htmlFor="gl_claimed" style={{ fontSize: 13, fontWeight: 600, cursor: "pointer", userSelect: "none" }}>
-                      Listing Claimed
-                    </label>
+                    <input type="checkbox" id="gl_claimed" checked={!!edits.google_listing_claimed} onChange={e => set("google_listing_claimed", e.target.checked)} style={{ width: 16, height: 16, accentColor: "var(--red-dark)", cursor: "pointer" }} />
+                    <label htmlFor="gl_claimed" style={{ fontSize: 13, fontWeight: 600, cursor: "pointer", userSelect: "none" }}>Listing Claimed</label>
                   </div>
                 </>
               ) : (
                 <>
-                  {/* Read mode */}
                   <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Business Name</div>
-                    <div style={{ fontSize: 14, fontWeight: 500, color: selected.google_business_name ? "#111" : "var(--muted)" }}>
-                      {selected.google_business_name || "—"}
-                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 500, color: selected.google_business_name ? "#111" : "var(--muted)" }}>{selected.google_business_name || "—"}</div>
                   </div>
-
                   <div style={{ gridColumn: "1 / -1", marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Google Maps URL</div>
                     {selected.google_maps_url
-                      ? <a href={selected.google_maps_url} target="_blank" rel="noreferrer"
-                          style={{ fontSize: 13, color: "var(--red-dark)", fontWeight: 600, wordBreak: "break-all" }}>
-                          Open Listing in Maps 🔗
-                        </a>
+                      ? <a href={selected.google_maps_url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: "var(--red-dark)", fontWeight: 600, wordBreak: "break-all" }}>Open Listing in Maps 🔗</a>
                       : <div style={{ fontSize: 14, color: "var(--muted)" }}>—</div>
                     }
                   </div>
-
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Rating</div>
                     {selected.google_rating != null
@@ -1213,29 +1265,22 @@ export default function AdminDealers() {
                       : <div style={{ fontSize: 14, color: "var(--muted)" }}>—</div>
                     }
                   </div>
-
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Total Reviews</div>
                     <div style={{ fontSize: 14, fontWeight: 500, color: selected.google_reviews_count != null ? "#111" : "var(--muted)" }}>
                       {selected.google_reviews_count != null ? `${selected.google_reviews_count} reviews` : "—"}
                     </div>
                   </div>
-
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Status</div>
                     <span style={{
                       display: "inline-block", padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700,
-                      background: selected.google_listing_status === "Active" ? "#e8f8f0"
-                        : selected.google_listing_status === "Suspended" ? "#fdecea"
-                        : "#f5f5f5",
-                      color: selected.google_listing_status === "Active" ? "#27ae60"
-                        : selected.google_listing_status === "Suspended" ? "#c0392b"
-                        : "#777",
+                      background: selected.google_listing_status === "Active" ? "#e8f8f0" : selected.google_listing_status === "Suspended" ? "#fdecea" : "#f5f5f5",
+                      color: selected.google_listing_status === "Active" ? "#27ae60" : selected.google_listing_status === "Suspended" ? "#c0392b" : "#777",
                     }}>
                       {selected.google_listing_status || "Not Listed"}
                     </span>
                   </div>
-
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600 }}>Listing Claimed</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: selected.google_listing_claimed ? "#27ae60" : "#c0392b" }}>
@@ -1247,32 +1292,37 @@ export default function AdminDealers() {
             </div>
           </div>
 
-          {/* ── Block/Unblock + Delete ── */}
-          <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <button
-              className="btn small outline"
-              style={{ color: selected.is_blocked ? "#27ae60" : "#c0392b", borderColor: selected.is_blocked ? "#27ae60" : "#c0392b" }}
-              disabled={saving} onClick={handleToggleBlock}
-            >
-              {saving ? "…" : selected.is_blocked ? "✓ Unblock Dealer" : "⊘ Block Dealer"}
-            </button>
-            <span style={{ fontSize: 12, color: "var(--muted)", flex: 1 }}>
-              {selected.is_blocked ? "This dealer is currently blocked from placing orders." : "Dealer can place orders normally."}
-            </span>
-            <button
-              className="btn small outline"
-              style={{ color: '#c0392b', borderColor: '#c0392b' }}
-              onClick={() => setDeleteConfirm({ dealer: selected })}
-            >
-              🗑 Move to Bin
-            </button>
-          </div>
+          {!isDeleted && (
+            <div style={{ marginTop: 28, paddingTop: 18, borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <button
+                className="btn small outline"
+                style={{ color: selected.is_blocked ? "#27ae60" : "#c0392b", borderColor: selected.is_blocked ? "#27ae60" : "#c0392b" }}
+                disabled={saving} onClick={handleToggleBlock}
+              >
+                {saving ? "…" : selected.is_blocked ? "✓ Unblock Dealer" : "⊘ Block Dealer"}
+              </button>
+              <span style={{ fontSize: 12, color: "var(--muted)", flex: 1 }}>
+                {selected.is_blocked ? "This dealer is currently blocked from placing orders." : "Dealer can place orders normally."}
+              </span>
+              <button
+                className="btn small outline"
+                style={{ color: '#c0392b', borderColor: '#c0392b' }}
+                onClick={() => setDeleteConfirm({ dealer: selected })}
+              >
+                🗑 Move to Bin
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
+  const dealerCount  = allProfiles.filter(p => !p.deleted_at).length;
+  const deletedCount = allProfiles.filter(p =>  p.deleted_at).length;
+  const guestCount   = guestRows.length;
+
   return (
     <div className="admin-page">
       {/* Delete confirmation dialog */}
@@ -1295,212 +1345,127 @@ export default function AdminDealers() {
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 0 }}>
-        <h1 className="admin-title" style={{ margin: 0 }}>Dealers</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* Title + Controls */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <h1 className="admin-title" style={{ margin: 0 }}>Dealers &amp; Customers</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {exportStatus && (
             <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>{exportStatus}</span>
           )}
-          {selectedDealerIds.size > 0 && (
-            <button
-              onClick={() => setSelectedDealerIds(new Set())}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--muted)", textDecoration: "underline", padding: 0, whiteSpace: "nowrap" }}
-            >
-              Clear Selection
-            </button>
-          )}
+          <input
+            type="text"
+            placeholder="Search name, phone, email…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{ width: 220, marginBottom: 0, fontSize: 13 }}
+          />
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            style={{ padding: "8px 12px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", background: "#fff", cursor: "pointer" }}
+          >
+            <option value="all">All Types ({dealerCount + deletedCount + guestCount})</option>
+            <option value="dealer">Dealers ({dealerCount})</option>
+            <option value="guest">Guests ({guestCount})</option>
+            <option value="deleted">Deleted ({deletedCount})</option>
+          </select>
           <button
             className="btn small outline"
             onClick={handleExport}
-            disabled={exporting || loading || dealers.length === 0}
+            disabled={exporting || loading}
             style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700, whiteSpace: "nowrap" }}
           >
-            {exporting
-              ? "⏳ Exporting…"
-              : selectedDealerIds.size > 0
-                ? `⬇️ Export Selected (${selectedDealerIds.size})`
-                : "⬇️ Export All Data"
-            }
+            {exporting ? "⏳ Exporting…" : "⬇️ Export All Data"}
           </button>
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', borderBottom: '2px solid var(--red-light)', marginBottom: 20, marginTop: 16 }}>
-        {[['dealers', 'Active Dealers'], ['bin', '🗑 Recycle Bin']].map(([tab, label]) => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            style={{ background: 'none', border: 'none', padding: '8px 20px', fontWeight: 700, fontSize: 14, cursor: 'pointer',
-              color: activeTab === tab ? 'var(--red-dark)' : 'var(--muted)',
-              borderBottom: activeTab === tab ? '2px solid var(--red-dark)' : '2px solid transparent',
-              marginBottom: -2 }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Restore Requests banner */}
+      {restoreRequests.length > 0 && (
+        <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 12, padding: '16px 20px', marginBottom: 20 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: '#92400e', marginBottom: 14 }}>
+            📬 Restore Requests ({restoreRequests.length} pending)
+          </div>
+          {restoreRequests.map(req => (
+            <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #fde68a' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  {req.profiles?.shop_name || req.profiles?.owner_name || req.profiles?.email || '—'}
+                </div>
+                <div style={{ fontSize: 11, color: '#92400e' }}>
+                  Contact: {req.contact_value} · {new Date(req.requested_at).toLocaleDateString('en-IN')}
+                </div>
+              </div>
+              <button className="btn small" style={{ background: '#27ae60', border: 'none', color: '#fff' }}
+                onClick={() => handleApproveRestore(req)}>✓ Approve &amp; Restore</button>
+              <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
+                onClick={() => handleRejectRestore(req)}>Reject</button>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {activeTab === 'dealers' ? (
-      loading ? (
+      {loading ? (
         <div className="admin-loading">Loading…</div>
-      ) : dealers.length === 0 ? (
-        <div className="admin-empty">No dealers yet.</div>
+      ) : unifiedRows.length === 0 ? (
+        <div className="admin-empty">
+          {searchQuery || typeFilter !== 'all' ? 'No results match your filter.' : 'No dealers or customers yet.'}
+        </div>
       ) : (
         <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
               <tr>
-                <th style={{ width: 32, textAlign: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={dealers.length > 0 && selectedDealerIds.size === dealers.length}
-                    ref={el => { if (el) el.indeterminate = selectedDealerIds.size > 0 && selectedDealerIds.size < dealers.length; }}
-                    onChange={e => {
-                      if (e.target.checked) setSelectedDealerIds(new Set(dealers.map(d => d.id)));
-                      else setSelectedDealerIds(new Set());
-                    }}
-                    style={{ cursor: "pointer", accentColor: "var(--red-dark)", width: 14, height: 14 }}
-                  />
-                </th>
                 <th style={{ width: 36 }}>#</th>
-                <th>Dealer Code</th>
-                <th>Shop / Owner</th>
+                <th style={{ width: 70 }}>Type</th>
+                <th>Name</th>
                 <th>Phone</th>
-                <th>Territory</th>
-                <th>Status</th>
+                <th>Email</th>
+                <th style={{ textAlign: 'right' }}>Orders</th>
+                <th style={{ textAlign: 'right' }}>Spent</th>
+                <th>Last Order</th>
                 <th style={{ width: 40 }}></th>
               </tr>
             </thead>
             <tbody>
-              {dealers.map((d, idx) => {
-                const territories = Array.isArray(d.territory) ? d.territory : [];
-                const isChecked = selectedDealerIds.has(d.id);
-                return (
-                  <tr
-                    key={d.id}
-                    onClick={() => openDealer(d)}
-                    style={{ cursor: "pointer", background: isChecked ? "#f5eef8" : undefined }}
-                    className="admin-dealer-row"
-                  >
-                    <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={e => {
-                          setSelectedDealerIds(prev => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(d.id);
-                            else next.delete(d.id);
-                            return next;
-                          });
-                        }}
-                        style={{ cursor: "pointer", accentColor: "var(--red-dark)", width: 14, height: 14 }}
-                      />
-                    </td>
-                    <td style={{ color: "var(--muted)", fontSize: 12, textAlign: "center" }}>{idx + 1}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>{d.dealer_code || "—"}</td>
-                    <td>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>
-                        {d.shop_name || d.owner_name || (d.name !== "New Dealer" ? d.name : "—")}
-                      </div>
-                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{d.email}</div>
-                    </td>
-                    <td style={{ fontSize: 12 }}>{d.phone || "—"}</td>
-                    <td style={{ fontSize: 11, color: "var(--muted)" }}>
-                      {territories.slice(0, 2).join(", ")}{territories.length > 2 ? ` +${territories.length - 2}` : ""}
-                    </td>
-                    <td>
-                      <span className={`badge ${d.is_blocked ? "pending" : "delivered"}`}>
-                        {d.is_blocked ? "Blocked" : "Active"}
-                      </span>
-                    </td>
-                    <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
+              {unifiedRows.map((row, idx) => (
+                <tr
+                  key={row._type === 'guest' ? `guest-${row._key}` : row.id}
+                  onClick={() => row._type === 'guest' ? setSelectedGuest(row) : openDealer(row)}
+                  style={{ cursor: 'pointer' }}
+                  className="admin-dealer-row"
+                >
+                  <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
+                  <td><TypeBadge type={row._type} /></td>
+                  <td>
+                    <div style={{ fontWeight: 700, fontSize: 13 }}>{row._name}</div>
+                    {row._type !== 'guest' && row.dealer_code && (
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{row.dealer_code}</div>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 12 }}>{row._phone || '—'}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._email || '—'}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, fontSize: 13 }}>{row._orderCount || '—'}</td>
+                  <td style={{ textAlign: 'right', fontSize: 12 }}>
+                    {row._totalSpent ? `₹${Number(row._totalSpent).toLocaleString('en-IN')}` : '—'}
+                  </td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                    {row._lastOrder ? new Date(row._lastOrder).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                  </td>
+                  <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                    {row._type !== 'guest' && (
                       <button title="Move to Recycle Bin"
-                        onClick={e => { e.stopPropagation(); setDeleteConfirm({ dealer: d }); }}
+                        onClick={e => { e.stopPropagation(); setDeleteConfirm({ dealer: row }); }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}>
                         🗑
                       </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      )
-      ) : (
-        /* ─── RECYCLE BIN TAB ─── */
-        binLoading ? <div className="admin-loading">Loading…</div> : (
-          <>
-            {restoreRequests.length > 0 && (
-              <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
-                <div style={{ fontWeight: 800, fontSize: 14, color: '#92400e', marginBottom: 14 }}>
-                  📬 Restore Requests ({restoreRequests.length} pending)
-                </div>
-                {restoreRequests.map(req => (
-                  <div key={req.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #fde68a' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13 }}>
-                        {req.profiles?.shop_name || req.profiles?.owner_name || req.profiles?.email || '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#92400e' }}>
-                        Contact: {req.contact_value} · {new Date(req.requested_at).toLocaleDateString('en-IN')}
-                      </div>
-                    </div>
-                    <button className="btn small" style={{ background: '#27ae60', border: 'none', color: '#fff' }}
-                      onClick={() => handleApproveRestore(req)}>✓ Approve & Restore</button>
-                    <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
-                      onClick={() => handleRejectRestore(req)}>Reject</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {deletedDealers.length === 0 ? <div className="admin-empty">Recycle bin is empty.</div> : (
-              <div className="admin-table-wrap">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 36 }}>#</th>
-                      <th>Dealer Code</th>
-                      <th>Shop / Owner</th>
-                      <th>Deleted On</th>
-                      <th>Days Left</th>
-                      <th style={{ textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deletedDealers.map((d, idx) => {
-                      const daysElapsed = Math.floor((Date.now() - new Date(d.deleted_at)) / 86400000);
-                      const daysLeft = 365 - daysElapsed;
-                      return (
-                        <tr key={d.id}>
-                          <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
-                          <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{d.dealer_code || '—'}</td>
-                          <td>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>{d.shop_name || d.owner_name || '—'}</div>
-                            <div style={{ fontSize: 11, color: 'var(--muted)' }}>{d.email}</div>
-                          </td>
-                          <td style={{ fontSize: 12 }}>{new Date(d.deleted_at).toLocaleDateString('en-IN')}</td>
-                          <td>
-                            <span style={{ fontWeight: 700, fontSize: 12, color: daysLeft < 30 ? '#c0392b' : daysLeft < 90 ? '#e67e22' : '#27ae60' }}>
-                              {daysLeft}d
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                              <button className="btn small outline" onClick={() => handleRestore(d.id)}>↩ Restore</button>
-                              <button className="btn small outline" style={{ color: '#c0392b', borderColor: '#c0392b' }}
-                                onClick={() => handlePermanentDelete(d)}>🗑 Delete Permanently</button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )
       )}
     </div>
   );
