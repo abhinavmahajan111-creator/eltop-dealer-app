@@ -813,7 +813,12 @@ export default function Store() {
   const handleDecrease = (id) => cart.change(id, -1);
 
   const handlePayment = (data) => {
-    const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_TA8OMhO2LFRVHg';
+    const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID;
+    if (!RAZORPAY_KEY) {
+      console.error('VITE_RAZORPAY_KEY_ID is not set!');
+      alert('Payment gateway is not configured. Please contact support.');
+      return;
+    }
 
     const existingScript = document.getElementById('razorpay-script');
     if (existingScript) existingScript.remove();
