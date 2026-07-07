@@ -51,6 +51,18 @@ export default function Login() {
     if (e.target.value && i < otpRefs.length - 1) otpRefs[i + 1].current?.focus();
   }
 
+  function handleOtpKeyDown(e, i) {
+    if (e.key === 'Backspace') {
+      if (e.target.value) {
+        e.target.value = '';
+      } else if (i > 0) {
+        const prev = otpRefs[i - 1].current;
+        if (prev) { prev.value = ''; prev.focus(); }
+      }
+      e.preventDefault();
+    }
+  }
+
   return (
     <div className="screen" id="screen-login">
       <div className="content">
@@ -137,6 +149,7 @@ export default function Login() {
                       maxLength={1}
                       className="otp-box"
                       onInput={e => handleOtpInput(e, i)}
+                      onKeyDown={e => handleOtpKeyDown(e, i)}
                     />
                   ))}
                 </div>
