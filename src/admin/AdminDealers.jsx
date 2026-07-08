@@ -1447,6 +1447,18 @@ export default function AdminDealers() {
           />
           <button
             className="btn small outline"
+            onClick={() => setTypeFilter(f => f === 'deleted' ? 'all' : 'deleted')}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", fontWeight: 700,
+              ...(typeFilter === 'deleted'
+                ? { background: "var(--red-dark)", color: "#fff", borderColor: "var(--red-dark)" }
+                : { borderColor: "var(--muted)", color: "var(--muted)" }),
+            }}
+          >
+            🗑 Deleted{deletedCount > 0 ? ` (${deletedCount})` : ''}
+          </button>
+          <button
+            className="btn small outline"
             onClick={handleExport}
             disabled={exporting || loading}
             style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700, whiteSpace: "nowrap" }}
