@@ -379,7 +379,7 @@ export default function AdminDealers() {
       ? guestRows.filter(g => !g._isDeletedGuest && guestMatchesSearch(g)).map(mapGuest)
       : [];
 
-    const deletedGuestRows = (typeFilter === 'all' || typeFilter === 'deleted')
+    const deletedGuestRows = typeFilter === 'deleted'
       ? guestRows.filter(g => g._isDeletedGuest && guestMatchesSearch(g)).map(mapGuest)
       : [];
 
