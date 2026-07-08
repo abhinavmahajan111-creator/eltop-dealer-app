@@ -379,65 +379,92 @@ export default function AdminProducts() {
       {/* ── Basic info form (new product or editing existing) ── */}
       {(formOpen || form.id) && (
         <form className="admin-form" onSubmit={handleSubmit}>
-          <input
-            type="text" placeholder="Product name" value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-          <select
-            value={showNewCategory ? "__new__" : (form.category || "")}
-            onChange={e => {
-              if (e.target.value === "__new__") {
-                setShowNewCategory(true);
-                setNewCategoryName("");
-                setForm({ ...form, category: "" });
-              } else {
-                setShowNewCategory(false);
-                setNewCategoryName("");
-                setForm({ ...form, category: e.target.value });
-              }
-            }}
-            style={{ marginBottom: showNewCategory ? 6 : undefined }}
-          >
-            <option value="">— Select category —</option>
-            {existingCategories.map(c => <option key={c} value={c}>{c}</option>)}
-            <option value="__new__">+ Create New Category</option>
-          </select>
-          {showNewCategory && (
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Product Name</label>
             <input
-              type="text"
-              placeholder="Enter new category name"
-              value={newCategoryName}
-              autoFocus
-              onChange={e => {
-                setNewCategoryName(e.target.value);
-                setForm({ ...form, category: e.target.value });
-              }}
+              type="text" placeholder="e.g. LED Ceiling Fan 48″" value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Category</label>
+            <select
+              value={showNewCategory ? "__new__" : (form.category || "")}
+              onChange={e => {
+                if (e.target.value === "__new__") {
+                  setShowNewCategory(true);
+                  setNewCategoryName("");
+                  setForm({ ...form, category: "" });
+                } else {
+                  setShowNewCategory(false);
+                  setNewCategoryName("");
+                  setForm({ ...form, category: e.target.value });
+                }
+              }}
+              style={{ marginBottom: showNewCategory ? 6 : undefined }}
+            >
+              <option value="">— Select category —</option>
+              {existingCategories.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__new__">+ Create New Category</option>
+            </select>
+          </div>
+          {showNewCategory && (
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>New Category Name</label>
+              <input
+                type="text"
+                placeholder="Enter new category name"
+                value={newCategoryName}
+                autoFocus
+                onChange={e => {
+                  setNewCategoryName(e.target.value);
+                  setForm({ ...form, category: e.target.value });
+                }}
+              />
+            </div>
           )}
-          <input
-            type="number" placeholder="MRP (₹)" value={form.mrp}
-            onChange={(e) => setForm({ ...form, mrp: e.target.value })}
-          />
-          <input
-            type="number" placeholder="DLP — Dealer List Price (₹)" value={form.dlp}
-            onChange={(e) => setForm({ ...form, dlp: e.target.value })}
-          />
-          <input
-            type="text" placeholder="HSN Code" value={form.hsn_code}
-            onChange={(e) => setForm({ ...form, hsn_code: e.target.value })}
-          />
-          <input
-            type="text" placeholder="Unit (e.g. pc, box)" value={form.unit}
-            onChange={(e) => setForm({ ...form, unit: e.target.value })}
-          />
-          <input
-            type="number" placeholder="Standard Packing (pcs/box, e.g. 12)" value={form.standard_packing}
-            onChange={(e) => setForm({ ...form, standard_packing: e.target.value })}
-          />
-          <input
-            type="number" placeholder="Stock" value={form.stock}
-            onChange={(e) => setForm({ ...form, stock: e.target.value })}
-          />
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>MRP (₹)</label>
+            <input
+              type="number" placeholder="e.g. 1799" value={form.mrp}
+              onChange={(e) => setForm({ ...form, mrp: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>DLP — Dealer List Price (₹)</label>
+            <input
+              type="number" placeholder="e.g. 1450" value={form.dlp}
+              onChange={(e) => setForm({ ...form, dlp: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>HSN Code</label>
+            <input
+              type="text" placeholder="e.g. 94054090" value={form.hsn_code}
+              onChange={(e) => setForm({ ...form, hsn_code: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Unit</label>
+            <input
+              type="text" placeholder="e.g. pc, box, set" value={form.unit}
+              onChange={(e) => setForm({ ...form, unit: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Standard Packing (pcs/box)</label>
+            <input
+              type="number" placeholder="e.g. 12" value={form.standard_packing}
+              onChange={(e) => setForm({ ...form, standard_packing: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Stock</label>
+            <input
+              type="number" placeholder="0" value={form.stock}
+              onChange={(e) => setForm({ ...form, stock: e.target.value })}
+            />
+          </div>
           {/* ── Rich detail sections (shown when editing existing product) ── */}
           {form.id && (<>
             <Section title="📝 About This Item">

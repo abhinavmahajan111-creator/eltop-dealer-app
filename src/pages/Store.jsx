@@ -60,7 +60,7 @@ const INDIAN_STATES = [
 ];
 
 // ── Checkout Modal ────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) {
+function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, otpVerified, setOtpVerified, effectiveTotal }) {
   const [form, setForm] = useState(initialData || { name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
   const [dealerBanner, setDealerBanner] = useState(false);
@@ -68,11 +68,12 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
 
   // ── Repeat guest OTP state ──
   const [repeatGuest, setRepeatGuest] = useState(false);       // email matched a past guest order
+  const [repeatGuestName, setRepeatGuestName] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [otpError, setOtpError] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
-  const [otpVerified, setOtpVerified] = useState(false);
+  // otpVerified / setOtpVerified are lifted to Store parent (passed as props)
   const [otpCooldown, setOtpCooldown] = useState(0);
   const otpRefs = useRef([]);
   const cooldownRef = useRef(null);
@@ -107,7 +108,19 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
     const timer = setTimeout(async () => {
       const { data } = await supabase.rpc('check_repeat_guest', { check_email: form.email.trim() });
       setRepeatGuest(data === true);
-      if (data !== true) { setOtpSent(false); setOtpVerified(false); }
+      if (data === true) {
+        const { data: row } = await supabase
+          .from('orders')
+          .select('customer_name')
+          .is('dealer_id', null)
+          .ilike('customer_email', form.email.trim())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setRepeatGuestName(row?.customer_name?.trim() || '');
+      } else {
+        setOtpSent(false); setOtpVerified(false); setRepeatGuestName('');
+      }
     }, 500);
     return () => clearTimeout(timer);
   }, [form.email]);
@@ -250,10 +263,10 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
           {repeatGuest && !otpVerified && (
             <div style={{ background: '#e0f7f4', border: '1px solid #00bfa5', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: '#00695c', marginBottom: 4 }}>
-                👋 Welcome back!
+                👋 Welcome back{repeatGuestName ? `, ${repeatGuestName}` : ''}!
               </div>
               <div style={{ fontSize: 12, color: '#004d40', marginBottom: otpSent ? 10 : 8, lineHeight: 1.5 }}>
-                We found previous orders with this email. Verify to confirm your identity.
+                We recognise your email from a previous order. Verify to save your details and speed up checkout.
               </div>
               {!otpSent ? (
                 <button
@@ -306,7 +319,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
           )}
           {otpVerified && (
             <div style={{ background: '#e8f5e9', border: '1px solid #4caf50', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#2e7d32', fontWeight: 600 }}>
-              ✓ Email verified — this order will be tagged as a confirmed repeat customer.
+              ✓ Identity verified — thanks for confirming{repeatGuestName ? `, ${repeatGuestName}` : ''}!
             </div>
           )}
           {dealerBanner && (
@@ -323,7 +336,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, fontSize: 14 }}>
             <span style={{ color: '#555', fontWeight: 600 }}>Order Total</span>
-            <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(cart.total)}</span>
+            <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(effectiveTotal)}</span>
           </div>
           <button onClick={handleSubmit} style={{ width: '100%', padding: '14px 0', background: '#7B2D8B', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
             Continue to Payment →
@@ -335,7 +348,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) 
 }
 
 // ── Cart Drawer ───────────────────────────────────────────────────────────────
-function CartDrawer({ cart, onClose, onLoginClick, onCheckout }) {
+function CartDrawer({ cart, onClose, onLoginClick, onCheckout, getPrice }) {
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
@@ -367,7 +380,12 @@ function CartDrawer({ cart, onClose, onLoginClick, onCheckout }) {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, color: "#1e293b", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{p.name}</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: "#DC2626" }}>₹{fmt(p.mrp)}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#DC2626" }}>
+                  ₹{fmt(getPrice(p))}
+                  {getPrice(p) < Number(p.mrp) && (
+                    <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400, marginLeft: 4, textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span>
+                  )}
+                </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                 <button onClick={() => cart.change(p.id, +1)} style={qtyBtnStyle}>+</button>
@@ -380,20 +398,21 @@ function CartDrawer({ cart, onClose, onLoginClick, onCheckout }) {
 
         {cart.items.length > 0 && (
           <div style={{ padding: "14px 16px", borderTop: "2px solid #eee" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#555" }}>Total MRP</span>
-              <span style={{ fontSize: 20, fontWeight: 900, color: "#1e293b" }}>₹{fmt(cart.total)}</span>
-            </div>
+            {(() => {
+              const drawerTotal = cart.items.reduce((s, { product, qty }) => s + getPrice(product) * qty, 0);
+              return (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: "#555" }}>Your Total</span>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: "#1e293b" }}>₹{fmt(drawerTotal)}</span>
+                </div>
+              );
+            })()}
             <button
               onClick={onCheckout}
               style={{ width: "100%", padding: "14px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", position: "relative", zIndex: 10, pointerEvents: "all" }}
             >
               Proceed to Pay →
             </button>
-            <div style={{ background: "#E8D5F0", border: "1px solid #C084D4", borderRadius: 8, padding: "10px 12px", marginTop: 10, textAlign: "center" }}>
-              <div style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700 }}>🎉 Login to get 15% OFF this order!</div>
-              <span onClick={onLoginClick} style={{ fontSize: 12, color: "#7B2D8B", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>Login / Sign Up →</span>
-            </div>
           </div>
         )}
       </div>
@@ -441,9 +460,8 @@ function CategoryCard({ cat, count, image, isAll, onClick }) {
 }
 
 // ── Product Card ──────────────────────────────────────────────────────────────
-function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease }) {
+function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease, effectivePrice, pricingMode }) {
   const [hov, setHov] = useState(false);
-  const saving = Math.round((Number(p.mrp) || 0) * 0.15);
 
   return (
     <div
@@ -471,7 +489,7 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease 
             {p.category}
           </span>
         )}
-        {saving > 0 && (
+        {pricingMode === 'guest-verified' && (
           <span style={{ position: "absolute", top: 6, right: 6, background: "#E8001C", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 20 }}>
             -15%
           </span>
@@ -490,12 +508,19 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease 
 
         <div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-            <span style={{ fontSize: 9, color: "#94a3b8", textTransform: "uppercase" }}>MRP</span>
-            <span style={{ fontSize: 16, fontWeight: 900, color: "#DC2626" }}>₹{fmt(p.mrp)}</span>
+            {pricingMode === 'guest-verified' && (
+              <span style={{ fontSize: 9, color: "#94a3b8", textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span>
+            )}
+            <span style={{ fontSize: 16, fontWeight: 900, color: "#DC2626" }}>₹{fmt(effectivePrice)}</span>
           </div>
-          {saving > 0 && (
+          {pricingMode === 'guest-verified' && (
             <div style={{ fontSize: 10, color: "#16a34a", fontWeight: 700, marginTop: 1 }}>
-              🔓 Login to save ₹{fmt(saving)}!
+              15% off MRP
+            </div>
+          )}
+          {pricingMode === 'dealer' && (
+            <div style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 700, marginTop: 1 }}>
+              Your dealer price
             </div>
           )}
         </div>
@@ -520,7 +545,7 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease 
 }
 
 // ── Product Detail View ───────────────────────────────────────────────────────
-function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecrease }) {
+function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecrease, effectivePrice, pricingMode }) {
   const [activeImg, setActiveImg] = useState(0);
   const [lightbox, setLightbox] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -528,7 +553,6 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
   const [showItemDetails, setShowItemDetails] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
-  const saving = Math.round((Number(p.mrp) || 0) * 0.15);
   const images = getImages(p);
 
   // Close lightbox on Escape key
@@ -643,13 +667,21 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
           </div>
 
           <div style={{ background: "#fff7f7", border: "1px solid #fecaca", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>MRP (incl. all taxes)</div>
-            <div style={{ fontSize: 32, fontWeight: 900, color: "#DC2626" }}>₹{fmt(p.mrp)}</div>
-            {saving > 0 && (
-              <div style={{ marginTop: 6, fontSize: 13, color: "#16a34a", fontWeight: 700 }}>
-                🔓 Login as dealer to save ₹{fmt(saving)} (15% OFF)
-              </div>
-            )}
+            <div style={{ fontSize: 12, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+              {pricingMode === 'dealer' ? 'Your Price (incl. all taxes)' : 'Price (incl. all taxes)'}
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontSize: 32, fontWeight: 900, color: "#DC2626" }}>₹{fmt(effectivePrice)}</span>
+              {pricingMode === 'guest-verified' && (
+                <>
+                  <span style={{ fontSize: 16, color: "#94a3b8", textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span>
+                  <span style={{ fontSize: 13, color: "#16a34a", fontWeight: 700 }}>15% off</span>
+                </>
+              )}
+              {pricingMode === 'full' && (
+                <span style={{ fontSize: 13, color: "#94a3b8" }}>MRP</span>
+              )}
+            </div>
           </div>
 
           {!qty ? (
@@ -937,9 +969,29 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
-  const { session } = useApp();
+  const { session, dealer } = useApp();
   const [showCheckout, setShowCheckout] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
   const savedCheckoutData = useRef(null);
+
+  const isDealer = Boolean(session?.user?.id);
+
+  const getPrice = useCallback((p) => {
+    if (isDealer) {
+      const d1 = Number(dealer?.discount1 || 0);
+      const d2 = Number(dealer?.discount2 || 0);
+      return Math.round(Number(p.dlp ?? p.mrp || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
+    }
+    if (otpVerified) return Math.round(Number(p.mrp || 0) * 0.85);
+    return Number(p.mrp || 0);
+  }, [isDealer, otpVerified, dealer]);
+
+  const effectiveTotal = useMemo(
+    () => cart.items.reduce((s, i) => s + getPrice(i.product) * i.qty, 0),
+    [cart.items, getPrice]
+  );
+
+  const pricingMode = isDealer ? 'dealer' : otpVerified ? 'guest-verified' : 'full';
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -953,6 +1005,12 @@ export default function Store() {
   const handleDecrease = (id) => cart.change(id, -1);
 
   const handlePayment = (data, { emailVerified = false } = {}) => {
+    // Snapshot pricing at call time — avoids stale closures in the async Razorpay handler
+    const d1 = isDealer ? Number(dealer?.discount1 || 0) : 0;
+    const d2 = isDealer ? Number(dealer?.discount2 || 0) : 0;
+    const capturedItems = cart.items.map(i => ({ ...i, effectivePrice: getPrice(i.product) }));
+    const capturedTotal = capturedItems.reduce((s, i) => s + i.effectivePrice * i.qty, 0);
+
     const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID;
     if (!RAZORPAY_KEY) {
       console.error('VITE_RAZORPAY_KEY_ID is not set!');
@@ -971,7 +1029,7 @@ export default function Store() {
     script.onload = () => {
       const options = {
         key: RAZORPAY_KEY,
-        amount: Math.round(cart.total * 100),
+        amount: Math.round(capturedTotal * 100),
         currency: 'INR',
         name: 'Eltop by Embassy',
         description: 'Product Order',
@@ -981,7 +1039,7 @@ export default function Store() {
           const { razorpay_payment_id } = response;
           console.log('Payment success:', razorpay_payment_id);
 
-          const grossTotal   = cart.items.reduce((s, i) => s + Number(i.product.mrp || 0) * i.qty, 0);
+          const grossTotal   = capturedTotal;
           const taxableValue = grossTotal / 1.18;
           const totalTax     = grossTotal - taxableValue;
           const isDelhi      = data.state === 'Delhi';
@@ -1027,17 +1085,17 @@ export default function Store() {
           const orderId = orderRows[0].id;
 
           // 2. Insert order_items
-          const orderItems = cart.items.map(item => ({
+          const orderItems = capturedItems.map(item => ({
             order_id:   orderId,
             product_id: item.product.id,
             name:       item.product.name,
-            price:      Math.round(Number(item.product.mrp || 0) * 100) / 100,
+            price:      Math.round(item.effectivePrice * 100) / 100,
             qty:        item.qty,
             mrp:        item.product.mrp ?? null,
             dlp:        item.product.dlp ?? item.product.mrp ?? null,
-            net_rate:   Math.round(Number(item.product.mrp || 0) * 100) / 100,
-            discount1:  0,
-            discount2:  0,
+            net_rate:   Math.round(item.effectivePrice * 100) / 100,
+            discount1:  d1,
+            discount2:  d2,
             hsn_code:   item.product.hsn_code ?? null,
           }));
 
@@ -1359,6 +1417,8 @@ export default function Store() {
           qty={cartQty[selectedProduct.id]}
           onIncrease={handleIncrease}
           onDecrease={handleDecrease}
+          effectivePrice={getPrice(selectedProduct)}
+          pricingMode={pricingMode}
         />
       )}
 
@@ -1401,7 +1461,7 @@ export default function Store() {
             </div>
           ) : (
             <div className="store-grid">
-              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={handleAddToCart} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} qty={cartQty[p.id]} onIncrease={handleIncrease} onDecrease={handleDecrease} />)}
+              {filtered.map(p => <ProductCard key={p.id} product={p} onAdd={handleAddToCart} onSelect={p => { setSelectedProduct(p); navigate(`/store?product=${p.id}`); scrollToTop(); }} qty={cartQty[p.id]} onIncrease={handleIncrease} onDecrease={handleDecrease} effectivePrice={getPrice(p)} pricingMode={pricingMode} />)}
             </div>
           )}
         </div>
@@ -1411,7 +1471,8 @@ export default function Store() {
       {cartOpen && (
         <CartDrawer cart={cart} onClose={() => setCartOpen(false)}
           onLoginClick={() => { setCartOpen(false); navigate("/login"); }}
-          onCheckout={() => { setCartOpen(false); setShowCheckout(true); }} />
+          onCheckout={() => { setCartOpen(false); setShowCheckout(true); }}
+          getPrice={getPrice} />
       )}
       {showCheckout && (
         <CheckoutModal
@@ -1420,6 +1481,9 @@ export default function Store() {
           onConfirm={(data, opts) => { savedCheckoutData.current = { data, opts }; setShowCheckout(false); handlePayment(data, opts); }}
           onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
           initialData={savedCheckoutData.current?.data}
+          otpVerified={otpVerified}
+          setOtpVerified={setOtpVerified}
+          effectiveTotal={effectiveTotal}
         />
       )}
 
