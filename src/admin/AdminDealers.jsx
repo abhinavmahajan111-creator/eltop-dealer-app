@@ -246,6 +246,7 @@ export default function AdminDealers() {
   const [deletingId, setDeletingId]           = useState(null);
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const typeDropdownRef = useRef(null);
+  const [deletedGuests, setDeletedGuests]     = useState([]);
 
   useEffect(() => {
     if (!typeDropdownOpen) return;
@@ -265,10 +266,12 @@ export default function AdminDealers() {
       supabase.from('profiles').select('*').order('created_at', { ascending: false }),
       supabase.from('orders').select('id, dealer_id, customer_name, customer_phone, customer_email, total, created_at, status').order('created_at', { ascending: false }),
       supabase.from('restore_requests').select('id, profile_id, contact_value, requested_at, status, profiles(shop_name, owner_name, email)').eq('status', 'pending').order('requested_at', { ascending: false }),
-    ]).then(([profRes, ordRes, reqRes]) => {
+      supabase.from('deleted_guests').select('guest_key, deleted_at, restored_at').is('restored_at', null),
+    ]).then(([profRes, ordRes, reqRes, dgRes]) => {
       if (profRes.data) setAllProfiles(profRes.data);
       if (ordRes.data)  setAllOrders(ordRes.data);
       if (reqRes.data)  setRestoreRequests(reqRes.data);
+      if (dgRes.data)   setDeletedGuests(dgRes.data);
       setLoading(false);
     });
   }, []);
@@ -290,6 +293,8 @@ export default function AdminDealers() {
   }, []);
 
   // ─── Derived data ───────────────────────────────────────────────────────────
+  const deletedGuestKeysSet = useMemo(() => new Set(deletedGuests.map(dg => dg.guest_key)), [deletedGuests]);
+
   const dealerStatsMap = useMemo(() => {
     const map = {};
     for (const o of allOrders) {
@@ -310,7 +315,7 @@ export default function AdminDealers() {
       if (o.dealer_id) continue;
       const key = o.customer_phone || o.customer_email || o.customer_name || 'unknown';
       if (!map[key]) map[key] = {
-        _type: 'guest', _key: key,
+        _key: key,
         name: o.customer_name || '—',
         phone: o.customer_phone || '',
         email: o.customer_email || '',
@@ -321,8 +326,12 @@ export default function AdminDealers() {
       if (!map[key].lastOrder || o.created_at > map[key].lastOrder) map[key].lastOrder = o.created_at;
       map[key].orders.push(o);
     }
-    return Object.values(map).sort((a, b) => (b.lastOrder || '') > (a.lastOrder || '') ? 1 : -1);
-  }, [allOrders]);
+    return Object.values(map).map(g => ({
+      ...g,
+      _type: deletedGuestKeysSet.has(g._key) ? 'deleted' : 'guest',
+      _isDeletedGuest: deletedGuestKeysSet.has(g._key),
+    })).sort((a, b) => (b.lastOrder || '') > (a.lastOrder || '') ? 1 : -1);
+  }, [allOrders, deletedGuestKeysSet]);
 
   const unifiedRows = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -351,24 +360,30 @@ export default function AdminDealers() {
         _lastOrder:  dealerStatsMap[p.id]?.lastOrder || p.created_at || null,
       }));
 
-    const guestList = (typeFilter === 'all' || typeFilter === 'guest')
-      ? guestRows.filter(g => {
-          if (!q) return true;
-          return (
-            g.name.toLowerCase().includes(q) ||
-            g.phone.toLowerCase().includes(q) ||
-            g.email.toLowerCase().includes(q)
-          );
-        }).map(g => ({
-          ...g,
-          _name:       g.name,
-          _phone:      g.phone,
-          _email:      g.email,
-          _orderCount: g.orderCount,
-          _totalSpent: g.totalSpent,
-          _lastOrder:  g.lastOrder,
-        }))
+    const guestMatchesSearch = (g) => !q || (
+      g.name.toLowerCase().includes(q) ||
+      g.phone.toLowerCase().includes(q) ||
+      g.email.toLowerCase().includes(q)
+    );
+    const mapGuest = g => ({
+      ...g,
+      _name:       g.name,
+      _phone:      g.phone,
+      _email:      g.email,
+      _orderCount: g.orderCount,
+      _totalSpent: g.totalSpent,
+      _lastOrder:  g.lastOrder,
+    });
+
+    const activeGuests = (typeFilter === 'all' || typeFilter === 'guest')
+      ? guestRows.filter(g => !g._isDeletedGuest && guestMatchesSearch(g)).map(mapGuest)
       : [];
+
+    const deletedGuestRows = (typeFilter === 'all' || typeFilter === 'deleted')
+      ? guestRows.filter(g => g._isDeletedGuest && guestMatchesSearch(g)).map(mapGuest)
+      : [];
+
+    const guestList = [...activeGuests, ...deletedGuestRows];
 
     return [...dealerList, ...guestList].sort((a, b) =>
       (b._lastOrder || '') > (a._lastOrder || '') ? 1 : -1
@@ -685,6 +700,31 @@ export default function AdminDealers() {
     setAllProfiles(prev => prev.filter(p => p.id !== dealer.id));
   };
 
+  const handleSoftDeleteGuest = async () => {
+    if (!deleteConfirm?.guest) return;
+    const guest = deleteConfirm.guest;
+    setDeletingId(`guest-${guest._key}`);
+    const { error } = await supabase.from('deleted_guests').upsert(
+      { guest_key: guest._key, deleted_at: new Date().toISOString(), restored_at: null },
+      { onConflict: 'guest_key' }
+    );
+    if (error) { alert('Failed: ' + error.message); setDeletingId(null); setDeleteConfirm(null); return; }
+    setDeletedGuests(prev => [
+      ...prev.filter(dg => dg.guest_key !== guest._key),
+      { guest_key: guest._key, deleted_at: new Date().toISOString(), restored_at: null },
+    ]);
+    if (selectedGuest?._key === guest._key) setSelectedGuest(null);
+    setDeleteConfirm(null);
+    setDeletingId(null);
+  };
+
+  const handleRestoreGuest = async (guestKey) => {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('deleted_guests').update({ restored_at: now }).eq('guest_key', guestKey);
+    if (error) { alert('Restore failed: ' + error.message); return; }
+    setDeletedGuests(prev => prev.filter(dg => dg.guest_key !== guestKey));
+  };
+
   const handleApproveRestore = async (req) => {
     await supabase.from('profiles').update({ deleted_at: null }).eq('id', req.profile_id);
     await supabase.from('restore_requests').update({ status: 'approved' }).eq('id', req.id);
@@ -795,6 +835,7 @@ export default function AdminDealers() {
   // ─── GUEST DETAIL VIEW ────────────────────────────────────────────────────────
   if (selectedGuest) {
     const g = selectedGuest;
+    const isDeletedGuest = g._isDeletedGuest;
     const gOrders = [...g.orders].sort((a, b) => b.created_at > a.created_at ? 1 : -1);
     const avgSpent = g.orderCount ? g.totalSpent / g.orderCount : 0;
     const now2 = Date.now();
@@ -810,14 +851,27 @@ export default function AdminDealers() {
           <button onClick={goBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red-dark)", fontWeight: 700, fontSize: 14, padding: 0 }}>
             ← Back to Dealers &amp; Customers
           </button>
-          <button
-            className="btn small"
-            style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
-            onClick={() => navigate(`/admin/crm/guest/${encodeURIComponent(g._key)}`)}
-          >
-            View Full CRM →
-          </button>
+          {!isDeletedGuest && (
+            <button
+              className="btn small"
+              style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
+              onClick={() => navigate(`/admin/crm/guest/${encodeURIComponent(g._key)}`)}
+            >
+              View Full CRM →
+            </button>
+          )}
         </div>
+
+        {isDeletedGuest && (
+          <div style={{ background: '#fdecea', border: '1px solid #e74c3c', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13, color: '#7b241c', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontWeight: 700 }}>🗑 Deleted guest</span>
+            <span>· Hidden from the active list</span>
+            <button className="btn small outline" style={{ marginLeft: 'auto', color: '#27ae60', borderColor: '#27ae60' }}
+              onClick={() => handleRestoreGuest(g._key)}>
+              ↩ Restore
+            </button>
+          </div>
+        )}
 
         <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 2px 12px rgba(0,0,0,.07)", maxWidth: 760 }}>
           {/* Header */}
@@ -1347,8 +1401,8 @@ export default function AdminDealers() {
 
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
   const dealerCount  = allProfiles.filter(p => !p.deleted_at).length;
-  const deletedCount = allProfiles.filter(p =>  p.deleted_at).length;
-  const guestCount   = guestRows.length;
+  const deletedCount = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
+  const guestCount   = guestRows.filter(g => !g._isDeletedGuest).length;
 
   return (
     <div className="admin-page">
@@ -1358,13 +1412,18 @@ export default function AdminDealers() {
           <div style={{ background: '#fff', borderRadius: 14, padding: 28, maxWidth: 420, width: '90vw', boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
             <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>Move to Recycle Bin?</div>
             <div style={{ fontSize: 14, color: '#555', marginBottom: 24, lineHeight: 1.5 }}>
-              <strong>{deleteConfirm.dealer.shop_name || deleteConfirm.dealer.email}</strong> will be moved to the Recycle Bin.
-              You can restore it within 1 year, or it will be automatically removed after.
+              <strong>
+                {deleteConfirm.guest
+                  ? (deleteConfirm.guest._name || deleteConfirm.guest._email || deleteConfirm.guest._key)
+                  : (deleteConfirm.dealer.shop_name || deleteConfirm.dealer.email)}
+              </strong> will be moved to the Recycle Bin. Orders are not affected.
+              {!deleteConfirm.guest && ' You can restore within 1 year.'}
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button className="btn small outline" onClick={() => setDeleteConfirm(null)}>Cancel</button>
               <button className="btn small" style={{ background: '#c0392b', border: 'none', color: '#fff' }}
-                disabled={!!deletingId} onClick={handleSoftDelete}>
+                disabled={!!deletingId}
+                onClick={deleteConfirm.guest ? handleSoftDeleteGuest : handleSoftDelete}>
                 {deletingId ? 'Moving…' : 'Move to Bin'}
               </button>
             </div>
@@ -1518,21 +1577,17 @@ export default function AdminDealers() {
                     {row._lastOrder ? new Date(row._lastOrder).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                   </td>
                   <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                    {row._type === 'guest' ? (
-                      <button
-                        title="View Guest CRM"
-                        onClick={e => { e.stopPropagation(); navigate(`/admin/crm/guest/${encodeURIComponent(row._key)}`); }}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red-dark)', fontSize: 12, fontWeight: 700, padding: '2px 6px', borderRadius: 6, whiteSpace: 'nowrap' }}
-                      >
-                        CRM →
-                      </button>
-                    ) : (
-                      <button title="Move to Recycle Bin"
-                        onClick={e => { e.stopPropagation(); setDeleteConfirm({ dealer: row }); }}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}>
-                        🗑
-                      </button>
-                    )}
+                    <button
+                      title="Move to Recycle Bin"
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (row._type === 'guest') setDeleteConfirm({ guest: row });
+                        else if (row._type === 'dealer') setDeleteConfirm({ dealer: row });
+                      }}
+                      style={{ background: 'none', border: 'none', cursor: row._type === 'deleted' ? 'default' : 'pointer', color: row._type === 'deleted' ? '#ccc' : '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}
+                    >
+                      🗑
+                    </button>
                   </td>
                 </tr>
               ))}
