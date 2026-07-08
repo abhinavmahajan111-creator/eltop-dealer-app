@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
@@ -222,6 +222,7 @@ function TypeBadge({ type }) {
 
 export default function AdminDealers() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [allProfiles, setAllProfiles] = useState([]);
   const [allOrders, setAllOrders]     = useState([]);
   const [restoreRequests, setRestoreRequests] = useState([]);
@@ -247,6 +248,14 @@ export default function AdminDealers() {
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const typeDropdownRef = useRef(null);
   const [deletedGuests, setDeletedGuests]     = useState([]);
+
+  useEffect(() => {
+    if (!location.state?.resetAt) return;
+    setTypeFilter('all');
+    setSearchQuery('');
+    setSelected(null);
+    setSelectedGuest(null);
+  }, [location.state?.resetAt]);
 
   useEffect(() => {
     if (!typeDropdownOpen) return;

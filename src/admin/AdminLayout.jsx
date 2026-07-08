@@ -30,6 +30,10 @@ export default function AdminLayout() {
               className={({ isActive }) =>
                 "admin-navitem" + (isActive ? " active" : "")
               }
+              onClick={item.to === "/admin/dealers" ? (e) => {
+                e.preventDefault();
+                navigate(item.to, { state: { resetAt: Date.now() } });
+              } : undefined}
             >
               <span className="ic">{item.icon}</span>
               {item.label}
