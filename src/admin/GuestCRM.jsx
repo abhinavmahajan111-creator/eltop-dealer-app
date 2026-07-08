@@ -50,7 +50,7 @@ export default function GuestCRM() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     supabase
       .from("orders")
-      .select("id, customer_name, customer_phone, customer_email, total, created_at, status, delivery_address")
+      .select("id, customer_name, customer_phone, customer_email, total, created_at, status, delivery_address, email_verified")
       .or(`customer_phone.eq.${key},customer_email.eq.${key}`)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
@@ -207,7 +207,7 @@ export default function GuestCRM() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                      {["", "Order ID", "Date", "Total", "Status"].map(h => (
+                      {["", "Order ID", "Date", "Total", "Status", ""].map(h => (
                         <th key={h} style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
                       ))}
                     </tr>
@@ -226,10 +226,15 @@ export default function GuestCRM() {
                             {o.status}
                           </span>
                         </td>
+                        <td style={{ padding: "8px" }}>
+                          {o.email_verified && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#27ae60', background: '#eafaf1', borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap' }}>✓ verified</span>
+                          )}
+                        </td>
                       </tr>,
                       expandedOrderId === o.id && (
                         <tr key={`${o.id}-d`}>
-                          <td colSpan={5} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
+                          <td colSpan={6} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
                             {!orderItemsCache[o.id] ? (
                               <div style={{ color: "var(--muted)" }}>Loading…</div>
                             ) : orderItemsCache[o.id].length === 0 ? (

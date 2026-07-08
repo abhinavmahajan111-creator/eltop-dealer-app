@@ -66,6 +66,17 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
   const [dealerBanner, setDealerBanner] = useState(false);
   const [dismissedFor, setDismissedFor] = useState(null);
 
+  // ── Repeat guest OTP state ──
+  const [repeatGuest, setRepeatGuest] = useState(false);       // email matched a past guest order
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
+  const [otpError, setOtpError] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+  const otpRefs = useRef([]);
+  const cooldownRef = useRef(null);
+
   const phoneValid = /^\d{10}$/.test(form.phone.trim());
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email.trim());
 
@@ -90,6 +101,71 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
     return () => clearTimeout(timer);
   }, [form.phone, form.email]);
 
+  // Debounced repeat-guest check on email change
+  useEffect(() => {
+    if (!emailValid) { setRepeatGuest(false); setOtpSent(false); setOtpVerified(false); return; }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase.rpc('check_repeat_guest', { check_email: form.email.trim() });
+      setRepeatGuest(data === true);
+      if (data !== true) { setOtpSent(false); setOtpVerified(false); }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [form.email]);
+
+  const startCooldown = () => {
+    setOtpCooldown(30);
+    clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setOtpCooldown(prev => {
+        if (prev <= 1) { clearInterval(cooldownRef.current); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const sendGuestOtp = async () => {
+    setOtpError('');
+    setOtpBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: form.email.trim(),
+      options: { shouldCreateUser: true, emailRedirectTo: undefined },
+    });
+    setOtpBusy(false);
+    if (error) { setOtpError(error.message); return; }
+    setOtpSent(true);
+    setOtpDigits(['', '', '', '', '', '']);
+    startCooldown();
+    setTimeout(() => otpRefs.current[0]?.focus(), 100);
+  };
+
+  const verifyGuestOtp = async () => {
+    const token = otpDigits.join('');
+    if (token.length < 6) { setOtpError('Enter all 6 digits'); return; }
+    setOtpError('');
+    setOtpBusy(true);
+    const { error } = await supabase.auth.verifyOtp({ email: form.email.trim(), token, type: 'email' });
+    if (!error) await supabase.auth.signOut(); // immediately clear transient session
+    setOtpBusy(false);
+    if (error) { setOtpError('Invalid or expired code. Try again.'); return; }
+    setOtpVerified(true);
+    clearInterval(cooldownRef.current);
+  };
+
+  const handleOtpKey = (idx, e) => {
+    if (e.key === 'Backspace' && !otpDigits[idx] && idx > 0) {
+      otpRefs.current[idx - 1]?.focus();
+    }
+  };
+
+  const handleOtpChange = (idx, val) => {
+    const ch = val.replace(/\D/g, '').slice(-1);
+    const next = [...otpDigits];
+    next[idx] = ch;
+    setOtpDigits(next);
+    setOtpError('');
+    if (ch && idx < 5) otpRefs.current[idx + 1]?.focus();
+  };
+
   const set = (field, value) => {
     setForm(prev => ({ ...prev, [field]: value }));
     setErrors(prev => ({ ...prev, [field]: '' }));
@@ -109,7 +185,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
   const handleSubmit = () => {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
-    onConfirm(form);
+    onConfirm(form, { emailVerified: otpVerified });
   };
 
   const field = (label, key, opts = {}) => (
@@ -170,6 +246,69 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
         </div>
 
         <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
+          {/* ── Repeat guest recognition ── */}
+          {repeatGuest && !otpVerified && (
+            <div style={{ background: '#e0f7f4', border: '1px solid #00bfa5', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#00695c', marginBottom: 4 }}>
+                👋 Welcome back!
+              </div>
+              <div style={{ fontSize: 12, color: '#004d40', marginBottom: otpSent ? 10 : 8, lineHeight: 1.5 }}>
+                We found previous orders with this email. Verify to confirm your identity.
+              </div>
+              {!otpSent ? (
+                <button
+                  onClick={sendGuestOtp}
+                  disabled={otpBusy}
+                  style={{ background: '#00897b', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: otpBusy ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+                >
+                  {otpBusy ? 'Sending…' : 'Send Verification Code'}
+                </button>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, color: '#004d40', marginBottom: 8 }}>
+                    Enter the 6-digit code sent to <strong>{form.email.trim()}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    {otpDigits.map((d, i) => (
+                      <input
+                        key={i}
+                        ref={el => otpRefs.current[i] = el}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={d}
+                        onChange={e => handleOtpChange(i, e.target.value)}
+                        onKeyDown={e => handleOtpKey(i, e)}
+                        style={{ width: 36, height: 40, textAlign: 'center', fontSize: 18, fontWeight: 700, borderRadius: 8, border: otpError ? '1.5px solid #DC2626' : '1.5px solid #00bfa5', fontFamily: 'inherit', background: '#fff' }}
+                      />
+                    ))}
+                  </div>
+                  {otpError && <div style={{ fontSize: 11, color: '#DC2626', marginBottom: 6 }}>{otpError}</div>}
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <button
+                      onClick={verifyGuestOtp}
+                      disabled={otpBusy || otpDigits.join('').length < 6}
+                      style={{ background: '#00897b', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 700, fontSize: 13, cursor: otpBusy ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}
+                    >
+                      {otpBusy ? 'Verifying…' : 'Verify'}
+                    </button>
+                    <button
+                      onClick={sendGuestOtp}
+                      disabled={otpCooldown > 0 || otpBusy}
+                      style={{ background: 'none', border: 'none', color: otpCooldown > 0 ? '#94a3b8' : '#00897b', fontSize: 12, cursor: otpCooldown > 0 ? 'default' : 'pointer', fontFamily: 'inherit', fontWeight: 600 }}
+                    >
+                      {otpCooldown > 0 ? `Resend in ${otpCooldown}s` : 'Resend'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {otpVerified && (
+            <div style={{ background: '#e8f5e9', border: '1px solid #4caf50', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#2e7d32', fontWeight: 600 }}>
+              ✓ Email verified — this order will be tagged as a confirmed repeat customer.
+            </div>
+          )}
           {dealerBanner && (
             <div style={{ background: '#FF6600', border: '1px solid #E55A00', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
               <div style={{ flex: 1, fontSize: 13, color: '#fff', lineHeight: 1.4 }}>
@@ -812,7 +951,7 @@ export default function Store() {
   const handleIncrease = (id) => cart.change(id, +1);
   const handleDecrease = (id) => cart.change(id, -1);
 
-  const handlePayment = (data) => {
+  const handlePayment = (data, { emailVerified = false } = {}) => {
     const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID;
     if (!RAZORPAY_KEY) {
       console.error('VITE_RAZORPAY_KEY_ID is not set!');
@@ -871,6 +1010,7 @@ export default function Store() {
               payment_id:       razorpay_payment_id,
               payment_status:   'paid',
               status:           'confirmed',
+              email_verified:   emailVerified || false,
               created_at:       new Date().toISOString(),
             }])
             .select('id');
@@ -1272,7 +1412,7 @@ export default function Store() {
         <CheckoutModal
           cart={cart}
           onClose={() => setShowCheckout(false)}
-          onConfirm={(data) => { setShowCheckout(false); handlePayment(data); }}
+          onConfirm={(data, opts) => { setShowCheckout(false); handlePayment(data, opts); }}
           onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
         />
       )}

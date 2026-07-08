@@ -37,7 +37,7 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, profiles(name, email, dealer_code, address, staff_assigned, deleted_at)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, email_verified, profiles(name, email, dealer_code, address, staff_assigned, deleted_at)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (!error && data) setOrders(data);
@@ -328,7 +328,12 @@ export default function AdminOrders() {
                               <span className="od-label">Phone</span>
                               <span>{o.dealer_id ? "—" : (o.customer_phone || "—")}</span>
                               <span className="od-label">Email</span>
-                              <span>{o.dealer_id ? (profile?.email || "—") : (o.customer_email || "—")}</span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {o.dealer_id ? (profile?.email || "—") : (o.customer_email || "—")}
+                                {!o.dealer_id && o.email_verified && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: '#27ae60', background: '#eafaf1', borderRadius: 4, padding: '1px 6px' }}>✓ verified</span>
+                                )}
+                              </span>
                               {o.dealer_id && (
                                 <>
                                   <span className="od-label">Dealer Code</span>
