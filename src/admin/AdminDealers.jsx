@@ -242,8 +242,21 @@ export default function AdminDealers() {
   const [editingCreditLimit, setEditingCreditLimit] = useState(false);
   const [creditLimitDraft, setCreditLimitDraft]     = useState('');
   const [savingCreditLimit, setSavingCreditLimit]   = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [deletingId, setDeletingId]       = useState(null);
+  const [deleteConfirm, setDeleteConfirm]     = useState(null);
+  const [deletingId, setDeletingId]           = useState(null);
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
+  const typeDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!typeDropdownOpen) return;
+    const handler = (e) => {
+      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target)) {
+        setTypeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [typeDropdownOpen]);
 
   // ─── Data fetch ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1359,16 +1372,6 @@ export default function AdminDealers() {
             onChange={e => setSearchQuery(e.target.value)}
             style={{ width: 220, marginBottom: 0, fontSize: 13 }}
           />
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            style={{ padding: "8px 12px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", background: "#fff", cursor: "pointer" }}
-          >
-            <option value="all">All Types ({dealerCount + deletedCount + guestCount})</option>
-            <option value="dealer">Dealers ({dealerCount})</option>
-            <option value="guest">Guests ({guestCount})</option>
-            <option value="deleted">Deleted ({deletedCount})</option>
-          </select>
           <button
             className="btn small outline"
             onClick={handleExport}
@@ -1417,7 +1420,55 @@ export default function AdminDealers() {
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
-                <th style={{ width: 70 }}>Type</th>
+                <th style={{ width: 90, position: 'relative' }} ref={typeDropdownRef}>
+                  <button
+                    onClick={() => setTypeDropdownOpen(o => !o)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                      fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px',
+                      color: typeFilter !== 'all' ? 'var(--red-dark)' : 'inherit',
+                      display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
+                    }}
+                    title="Filter by type"
+                  >
+                    {typeFilter === 'all'     ? 'Type'
+                     : typeFilter === 'dealer'  ? 'Type: Dealers'
+                     : typeFilter === 'guest'   ? 'Type: Guests'
+                     : 'Type: Deleted'}
+                    {' '}▾
+                  </button>
+                  {typeDropdownOpen && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 0, zIndex: 200,
+                      background: '#fff', border: '1.5px solid var(--border)',
+                      borderRadius: 10, boxShadow: '0 4px 18px rgba(0,0,0,.12)',
+                      minWidth: 170, overflow: 'hidden', marginTop: 6,
+                    }}>
+                      {[
+                        { value: 'all',     label: 'All Types',       count: dealerCount + deletedCount + guestCount },
+                        { value: 'dealer',  label: 'Dealers',         count: dealerCount  },
+                        { value: 'guest',   label: 'Guests',          count: guestCount   },
+                        { value: 'deleted', label: 'Deleted',         count: deletedCount },
+                      ].map(opt => (
+                        <div
+                          key={opt.value}
+                          onClick={() => { setTypeFilter(opt.value); setTypeDropdownOpen(false); }}
+                          style={{
+                            padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            background: typeFilter === opt.value ? 'var(--red-light)' : '#fff',
+                            color: typeFilter === opt.value ? 'var(--red-dark)' : '#111',
+                          }}
+                          onMouseEnter={e => { if (typeFilter !== opt.value) e.currentTarget.style.background = '#f9f9f9'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = typeFilter === opt.value ? 'var(--red-light)' : '#fff'; }}
+                        >
+                          <span>{opt.label}</span>
+                          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500, marginLeft: 8 }}>{opt.count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </th>
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Email</th>
