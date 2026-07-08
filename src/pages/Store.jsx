@@ -60,8 +60,8 @@ const INDIAN_STATES = [
 ];
 
 // ── Checkout Modal ────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, onClose, onConfirm, onLoginClick }) {
-  const [form, setForm] = useState({ name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
+function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData }) {
+  const [form, setForm] = useState(initialData || { name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
   const [dealerBanner, setDealerBanner] = useState(false);
   const [dismissedFor, setDismissedFor] = useState(null);
@@ -939,6 +939,7 @@ export default function Store() {
   const cart = useCart();
   const { session } = useApp();
   const [showCheckout, setShowCheckout] = useState(false);
+  const savedCheckoutData = useRef(null);
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -1056,7 +1057,11 @@ export default function Store() {
           alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
         },
         theme: { color: '#7B2D8B' },
-        modal: { ondismiss: () => console.log('Payment cancelled by user') },
+        modal: {
+          ondismiss: () => setShowCheckout(true),
+          escape: true,
+          animation: false,
+        },
       };
       const rzp = new window.Razorpay(options);
       rzp.open();
@@ -1412,8 +1417,9 @@ export default function Store() {
         <CheckoutModal
           cart={cart}
           onClose={() => setShowCheckout(false)}
-          onConfirm={(data, opts) => { setShowCheckout(false); handlePayment(data, opts); }}
+          onConfirm={(data, opts) => { savedCheckoutData.current = { data, opts }; setShowCheckout(false); handlePayment(data, opts); }}
           onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
+          initialData={savedCheckoutData.current?.data}
         />
       )}
 
