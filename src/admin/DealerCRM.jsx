@@ -277,7 +277,7 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
   const val = { fontSize: 14, fontWeight: 500 };
 
   return (
-    <div style={{ fontFamily: "Arial, sans-serif", minHeight: "100vh", background: "#f5f0f5", color: "#222" }}>
+    <div style={{ fontFamily: "Arial, sans-serif", position: "fixed", inset: 0, zIndex: 1000, overflowY: "auto", background: "#f5f0f5", color: "#222" }}>
       {/* ── Header ── */}
       <div style={{ background: "var(--red-dark)", color: "#fff", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16 }}>
         <button

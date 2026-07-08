@@ -796,79 +796,93 @@ export default function AdminDealers() {
   if (selectedGuest) {
     const g = selectedGuest;
     const gOrders = [...g.orders].sort((a, b) => b.created_at > a.created_at ? 1 : -1);
+    const avgSpent = g.orderCount ? g.totalSpent / g.orderCount : 0;
+    const now2 = Date.now();
+    const msMonth = 30 * 24 * 3600 * 1000;
+    const monthsSpan = g.orders.length > 1
+      ? Math.max(1, (now2 - new Date(gOrders[gOrders.length - 1].created_at).getTime()) / msMonth)
+      : 1;
+    const freq = (g.orderCount / monthsSpan).toFixed(1);
 
     return (
       <div className="admin-page">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 8 }}>
           <button onClick={goBack} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red-dark)", fontWeight: 700, fontSize: 14, padding: 0 }}>
             ← Back to Dealers &amp; Customers
+          </button>
+          <button
+            className="btn small"
+            style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}
+            onClick={() => navigate(`/admin/crm/guest/${encodeURIComponent(g._key)}`)}
+          >
+            View Full CRM →
           </button>
         </div>
 
         <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 2px 12px rgba(0,0,0,.07)", maxWidth: 760 }}>
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 4, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
-            <div style={{ width: 52, height: 52, borderRadius: "50%", flexShrink: 0, background: "#e8f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: "#1565c0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", flexShrink: 0, background: "#e8f4ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#1565c0" }}>
               {(g.name || "?")[0].toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 17, color: "#111" }}>{g.name}</div>
-              {g.phone && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{g.phone}</div>}
-              {g.email && <div style={{ fontSize: 12, color: "var(--muted)" }}>{g.email}</div>}
+              {g.phone && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>📞 {g.phone}</div>}
+              {g.email && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>✉️ {g.email}</div>}
             </div>
             <TypeBadge type="guest" />
           </div>
 
-          {/* Stats */}
-          <div style={{ display: "flex", gap: 24, padding: "18px 0", borderBottom: "1px solid var(--border)", marginBottom: 20 }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>{g.orderCount}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Orders</div>
+          {/* Stats row */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 12, padding: "20px 0", borderBottom: "1px solid var(--border)" }}>
+            {[
+              { label: "Orders",     value: g.orderCount },
+              { label: "Total Spent", value: `₹${g.totalSpent.toLocaleString("en-IN")}` },
+              { label: "Avg Order",  value: `₹${avgSpent.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+              { label: "Frequency",  value: `${freq}/mo` },
+              g.lastOrder ? { label: "Last Order", value: new Date(g.lastOrder).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) } : null,
+            ].filter(Boolean).map(({ label, value }) => (
+              <div key={label} style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--red-dark)" }}>{value}</div>
+                <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginTop: 3 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Order History */}
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 14 }}>
+              Order History
             </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>₹{g.totalSpent.toLocaleString("en-IN")}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Spent</div>
-            </div>
-            {g.lastOrder && (
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "#111" }}>
-                  {new Date(g.lastOrder).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Last Order</div>
+            {gOrders.length === 0 ? (
+              <div style={{ color: "var(--muted)", fontSize: 13 }}>No orders.</div>
+            ) : (
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }}>#</th>
+                      <th>Order ID</th>
+                      <th>Date</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: "right" }}>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gOrders.map((o, idx) => (
+                      <tr key={o.id} style={{ cursor: "pointer" }} className="admin-dealer-row" onClick={() => navigate(`/admin/orders`)}>
+                        <td style={{ color: "var(--muted)", fontSize: 12, textAlign: "center" }}>{idx + 1}</td>
+                        <td style={{ fontFamily: "monospace", fontSize: 11 }}>{o.id.substring(0, 8)}…</td>
+                        <td style={{ fontSize: 12 }}>{new Date(o.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+                        <td><span className={`badge ${o.status === 'delivered' ? 'delivered' : o.status === 'pending' ? 'pending' : 'confirmed'}`}>{o.status}</span></td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>₹{Number(o.total).toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
-
-          {/* Orders list */}
-          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.8px", color: "var(--red-dark)", marginBottom: 12 }}>
-            Order History
-          </div>
-          {gOrders.length === 0 ? (
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>No orders.</div>
-          ) : (
-            <div className="admin-table-wrap">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Order ID</th>
-                    <th>Date</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: "right" }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gOrders.map(o => (
-                    <tr key={o.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/admin/orders`)}>
-                      <td style={{ fontFamily: "monospace", fontSize: 11 }}>{o.id.substring(0, 8)}…</td>
-                      <td style={{ fontSize: 12 }}>{new Date(o.created_at).toLocaleDateString("en-IN")}</td>
-                      <td><span className={`badge ${o.status === 'delivered' ? 'delivered' : o.status === 'pending' ? 'pending' : 'confirmed'}`}>{o.status}</span></td>
-                      <td style={{ textAlign: "right", fontWeight: 700 }}>₹{Number(o.total).toLocaleString("en-IN")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -1504,7 +1518,15 @@ export default function AdminDealers() {
                     {row._lastOrder ? new Date(row._lastOrder).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                   </td>
                   <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                    {row._type !== 'guest' && (
+                    {row._type === 'guest' ? (
+                      <button
+                        title="View Guest CRM"
+                        onClick={e => { e.stopPropagation(); navigate(`/admin/crm/guest/${encodeURIComponent(row._key)}`); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red-dark)', fontSize: 12, fontWeight: 700, padding: '2px 6px', borderRadius: 6, whiteSpace: 'nowrap' }}
+                      >
+                        CRM →
+                      </button>
+                    ) : (
                       <button title="Move to Recycle Bin"
                         onClick={e => { e.stopPropagation(); setDeleteConfirm({ dealer: row }); }}
                         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}>
