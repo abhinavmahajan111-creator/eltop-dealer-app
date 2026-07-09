@@ -206,9 +206,10 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
 // ─── TypeBadge ───────────────────────────────────────────────────────────────
 function TypeBadge({ type }) {
   const cfg = {
-    dealer:  { bg: '#f0ebff', color: '#6b21a8', label: 'Dealer'  },
-    deleted: { bg: '#fdecea', color: '#c0392b', label: 'Deleted' },
-    guest:   { bg: '#e8f4ff', color: '#1565c0', label: 'Guest'   },
+    dealer:   { bg: '#f0ebff', color: '#6b21a8', label: 'Dealer'   },
+    deleted:  { bg: '#fdecea', color: '#c0392b', label: 'Deleted'  },
+    guest:    { bg: '#e8f4ff', color: '#1565c0', label: 'Guest'    },
+    customer: { bg: '#f0fdf4', color: '#15803d', label: 'Customer' },
   };
   const { bg, color, label } = cfg[type] || { bg: '#f5f5f5', color: '#555', label: type };
   return (
@@ -346,6 +347,7 @@ export default function AdminDealers() {
     const q = searchQuery.toLowerCase();
 
     const dealerList = allProfiles
+      .filter(p => p.is_dealer === true)
       .filter(p => {
         const type = p.deleted_at ? 'deleted' : 'dealer';
         if (typeFilter !== 'all' && typeFilter !== type) return false;
@@ -368,6 +370,26 @@ export default function AdminDealers() {
         _totalSpent: dealerStatsMap[p.id]?.totalSpent || 0,
         _lastOrder:  dealerStatsMap[p.id]?.lastOrder || p.created_at || null,
       }));
+
+    const customerList = (typeFilter === 'all' || typeFilter === 'customer')
+      ? allProfiles
+          .filter(p => p.is_dealer === false && !p.deleted_at)
+          .filter(p => !q || (
+            (p.name  || '').toLowerCase().includes(q) ||
+            (p.email || '').toLowerCase().includes(q) ||
+            (p.phone || '').toLowerCase().includes(q)
+          ))
+          .map(p => ({
+            ...p,
+            _type:       'customer',
+            _name:       p.name  || p.email || '—',
+            _phone:      p.phone || '',
+            _email:      p.email || '',
+            _orderCount: 0,
+            _totalSpent: 0,
+            _lastOrder:  p.created_at || null,
+          }))
+      : [];
 
     const guestMatchesSearch = (g) => !q || (
       g.name.toLowerCase().includes(q) ||
@@ -394,7 +416,7 @@ export default function AdminDealers() {
 
     const guestList = [...activeGuests, ...deletedGuestRows];
 
-    return [...dealerList, ...guestList].sort((a, b) =>
+    return [...dealerList, ...customerList, ...guestList].sort((a, b) =>
       (b._lastOrder || '') > (a._lastOrder || '') ? 1 : -1
     );
   }, [allProfiles, guestRows, dealerStatsMap, typeFilter, searchQuery]);
@@ -514,6 +536,50 @@ export default function AdminDealers() {
 
       setExportStatus("Writing file…");
       XLSX.writeFile(wb, `Eltop_Database_Export_${dateSuffix}.xlsx`);
+
+      // ── Customers export (separate file) ───────────────────────────────────
+      setExportStatus("Fetching customers…");
+      const [custRes, addrRes] = await Promise.all([
+        supabase.from("profiles").select("id, name, phone, email, created_at").eq("is_dealer", false).is("deleted_at", null).order("created_at", { ascending: false }),
+        supabase.from("customer_addresses").select("*").order("created_at", { ascending: true }),
+      ]);
+      const customers = custRes.data || [];
+      const addrMap   = {};
+      (addrRes.data || []).forEach(a => {
+        if (!addrMap[a.profile_id]) addrMap[a.profile_id] = [];
+        addrMap[a.profile_id].push(a);
+      });
+      const customerRows = [];
+      customers.forEach(c => {
+        const addrs = addrMap[c.id] || [];
+        const base = {
+          "Profile ID":         c.id,
+          "Account Name":       c.name  || "",
+          "Account Phone":      c.phone || "",
+          "Account Email":      c.email || "",
+          "Account Created At": c.created_at ? new Date(c.created_at).toLocaleString("en-IN") : "",
+        };
+        if (addrs.length === 0) {
+          customerRows.push({ ...base, "Contact Type": "account", "Address Label": "", "Recipient Name": "", "Recipient Phone": "", "Address Line 1": "", "Address Line 2": "", "City": "", "State": "", "Pincode": "", "Is Default": "" });
+        } else {
+          addrs.forEach(a => customerRows.push({
+            ...base,
+            "Contact Type":    "delivery",
+            "Address Label":   a.label          || "",
+            "Recipient Name":  a.recipient_name || "",
+            "Recipient Phone": a.phone          || "",
+            "Address Line 1":  a.address_line1  || "",
+            "Address Line 2":  a.address_line2  || "",
+            "City":            a.city           || "",
+            "State":           a.state          || "",
+            "Pincode":         a.pincode        || "",
+            "Is Default":      a.is_default ? "Yes" : "No",
+          }));
+        }
+      });
+      const custWb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(custWb, XLSX.utils.json_to_sheet(customerRows.length ? customerRows : [{}]), "Customers");
+      XLSX.writeFile(custWb, `customers-export-${dateSuffix}.xlsx`);
     } catch (e) {
       console.error(e);
       alert("Export failed: " + e.message);
@@ -1409,9 +1475,10 @@ export default function AdminDealers() {
   }
 
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
-  const dealerCount  = allProfiles.filter(p => !p.deleted_at).length;
-  const deletedCount = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
-  const guestCount   = guestRows.filter(g => !g._isDeletedGuest).length;
+  const dealerCount   = allProfiles.filter(p => !p.deleted_at && p.is_dealer === true).length;
+  const customerCount = allProfiles.filter(p => !p.deleted_at && p.is_dealer === false).length;
+  const deletedCount  = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
+  const guestCount    = guestRows.filter(g => !g._isDeletedGuest).length;
 
   return (
     <div className="admin-page">
@@ -1525,9 +1592,10 @@ export default function AdminDealers() {
                     }}
                     title="Filter by type"
                   >
-                    {typeFilter === 'all'     ? 'Type'
-                     : typeFilter === 'dealer'  ? 'Type: Dealers'
-                     : typeFilter === 'guest'   ? 'Type: Guests'
+                    {typeFilter === 'all'      ? 'Type'
+                     : typeFilter === 'dealer'   ? 'Type: Dealers'
+                     : typeFilter === 'customer' ? 'Type: Customers'
+                     : typeFilter === 'guest'    ? 'Type: Guests'
                      : 'Type: Deleted'}
                     {' '}▾
                   </button>
@@ -1539,10 +1607,11 @@ export default function AdminDealers() {
                       minWidth: 170, overflow: 'hidden', marginTop: 6,
                     }}>
                       {[
-                        { value: 'all',     label: 'All Types',       count: dealerCount + deletedCount + guestCount },
-                        { value: 'dealer',  label: 'Dealers',         count: dealerCount  },
-                        { value: 'guest',   label: 'Guests',          count: guestCount   },
-                        { value: 'deleted', label: 'Deleted',         count: deletedCount },
+                        { value: 'all',      label: 'All Types',  count: dealerCount + customerCount + guestCount + deletedCount },
+                        { value: 'dealer',   label: 'Dealers',    count: dealerCount   },
+                        { value: 'customer', label: 'Customers',  count: customerCount },
+                        { value: 'guest',    label: 'Guests',     count: guestCount    },
+                        { value: 'deleted',  label: 'Deleted',    count: deletedCount  },
                       ].map(opt => (
                         <div
                           key={opt.value}
@@ -1576,7 +1645,11 @@ export default function AdminDealers() {
               {unifiedRows.map((row, idx) => (
                 <tr
                   key={row._type === 'guest' ? `guest-${row._key}` : row.id}
-                  onClick={() => row._type === 'guest' ? setSelectedGuest(row) : openDealer(row)}
+                  onClick={() => {
+                    if (row._type === 'guest') setSelectedGuest(row);
+                    else if (row._type === 'customer') navigate(`/admin/crm/customer/${row.id}`);
+                    else openDealer(row);
+                  }}
                   style={{ cursor: 'pointer' }}
                   className="admin-dealer-row"
                 >
@@ -1605,7 +1678,7 @@ export default function AdminDealers() {
                         if (row._type === 'guest') setDeleteConfirm({ guest: row });
                         else if (row._type === 'dealer') setDeleteConfirm({ dealer: row });
                       }}
-                      style={{ background: 'none', border: 'none', cursor: row._type === 'deleted' ? 'default' : 'pointer', color: row._type === 'deleted' ? '#ccc' : '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}
+                      style={{ background: 'none', border: 'none', cursor: (row._type === 'deleted' || row._type === 'customer') ? 'default' : 'pointer', color: (row._type === 'deleted' || row._type === 'customer') ? '#ccc' : '#c0392b', fontSize: 15, padding: '2px 6px', borderRadius: 6 }}
                     >
                       🗑
                     </button>

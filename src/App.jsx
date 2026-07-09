@@ -23,6 +23,7 @@ import AdminDealers from "./admin/AdminDealers";
 import SalesOrder from "./admin/SalesOrder";
 import DealerCRM from "./admin/DealerCRM";
 import GuestCRM from "./admin/GuestCRM";
+import CustomerCRM from "./admin/CustomerCRM";
 
 export default function App() {
   return (
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="/admin/orders/:id/print" element={<SalesOrder />} />
         <Route path="/admin/crm/:dealerId" element={<DealerCRM />} />
         <Route path="/admin/crm/guest/:guestKey" element={<GuestCRM />} />
+        <Route path="/admin/crm/customer/:profileId" element={<CustomerCRM />} />
       </Route>
 
       <Route path="/store" element={<Store />} />
