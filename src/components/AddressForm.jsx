@@ -1,3 +1,14 @@
+const INDIAN_STATES = [
+  "Andaman and Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh",
+  "Assam", "Bihar", "Chandigarh", "Chhattisgarh",
+  "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Goa", "Gujarat",
+  "Haryana", "Himachal Pradesh", "Jammu and Kashmir", "Jharkhand",
+  "Karnataka", "Kerala", "Ladakh", "Lakshadweep", "Madhya Pradesh",
+  "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha",
+  "Puducherry", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana",
+  "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+];
+
 export default function AddressForm({ form, onChange, onSave, onCancel, saving, error }) {
   const set = (k, v) => onChange(prev => ({ ...prev, [k]: v, _validationError: undefined }));
   const inp = { display: "block", marginTop: 4, width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
@@ -36,13 +47,20 @@ export default function AddressForm({ form, onChange, onSave, onCancel, saving, 
         ].map(([k, label]) => (
           <label key={k} style={{ fontSize: 12, color: "#555", gridColumn: (k === "address_line1" || k === "address_line2") ? "1 / -1" : undefined }}>
             {label}{required.includes(k) && <span style={{ color: "#dc2626" }}> *</span>}
-            <input
-              value={form[k] || ""}
-              onChange={e => set(k, (k === "phone" || k === "pincode") ? e.target.value.replace(/\D/g, "") : e.target.value)}
-              maxLength={k === "phone" ? 10 : k === "pincode" ? 6 : undefined}
-              inputMode={(k === "phone" || k === "pincode") ? "numeric" : "text"}
-              style={inp}
-            />
+            {k === "state" ? (
+              <select value={form.state || ""} onChange={e => set("state", e.target.value)} style={inp}>
+                <option value="" disabled>Select State</option>
+                {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            ) : (
+              <input
+                value={form[k] || ""}
+                onChange={e => set(k, (k === "phone" || k === "pincode") ? e.target.value.replace(/\D/g, "") : e.target.value)}
+                maxLength={k === "phone" ? 10 : k === "pincode" ? 6 : undefined}
+                inputMode={(k === "phone" || k === "pincode") ? "numeric" : "text"}
+                style={inp}
+              />
+            )}
           </label>
         ))}
       </div>
