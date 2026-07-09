@@ -978,7 +978,7 @@ export default function Store() {
     if (isDealer) {
       const d1 = Number(dealer?.discount1 || 0);
       const d2 = Number(dealer?.discount2 || 0);
-      return Math.round(Number(p.dlp ?? p.mrp || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
+      return Math.round(Number((p.dlp ?? p.mrp) || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
     }
     if (otpVerified || isCustomer) return Math.round(Number(p.mrp || 0) * 0.85);
     return Number(p.mrp || 0);
