@@ -38,7 +38,7 @@ export default function Login() {
   async function goOtp() {
     const ok = await sendOtp(emailInput.trim());
     if (ok) setStep(2);
-    startCooldown(30);
+    if (ok) startCooldown(30);
   }
 
   async function verify() {
