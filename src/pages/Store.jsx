@@ -1141,6 +1141,23 @@ export default function Store() {
           cart.clear();
           setCartOpen(false);
           setShowToast(false);
+          // Fire-and-forget confirmation email — don't block UX on delivery
+          if (data.email) {
+            supabase.functions.invoke('send-order-confirmation', {
+              body: {
+                order_id:       orderId,
+                payment_id:     razorpay_payment_id,
+                customer_name:  data.name,
+                customer_email: data.email,
+                total,
+                items: capturedItems.map(item => ({
+                  name:  item.product.name,
+                  qty:   item.qty,
+                  price: Math.round(item.effectivePrice * 100) / 100,
+                })),
+              },
+            }).catch(err => console.error('Confirmation email failed (non-blocking):', err));
+          }
           alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
         },
         theme: { color: '#7B2D8B' },
