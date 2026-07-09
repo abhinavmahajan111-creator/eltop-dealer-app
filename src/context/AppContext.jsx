@@ -32,6 +32,7 @@ export function AppProvider({ children }) {
   const [invoices, setInvoices] = useState(staticInvoices);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [isDealer, setIsDealer] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -53,7 +54,10 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setSessionChecked(true);
+    });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess);
     });
@@ -335,6 +339,7 @@ export function AppProvider({ children }) {
     isDealer,
     isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
     profileLoaded,
+    sessionChecked,
     isAdmin,
     adminChecked,
     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
