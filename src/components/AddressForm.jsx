@@ -35,7 +35,7 @@ export default function AddressForm({ form, onChange, onSave, onCancel, saving, 
           ["pincode",        "Pincode (6 digits)"],
         ].map(([k, label]) => (
           <label key={k} style={{ fontSize: 12, color: "#555", gridColumn: (k === "address_line1" || k === "address_line2") ? "1 / -1" : undefined }}>
-            {label}
+            {label}{required.includes(k) && <span style={{ color: "#dc2626" }}> *</span>}
             <input
               value={form[k] || ""}
               onChange={e => set(k, (k === "phone" || k === "pincode") ? e.target.value.replace(/\D/g, "") : e.target.value)}
