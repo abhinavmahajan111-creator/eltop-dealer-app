@@ -1147,13 +1147,15 @@ export default function Store() {
           setCartOpen(false);
           setShowToast(false);
           // Fire-and-forget confirmation email — don't block UX on delivery
-          if (data.email) {
+          const confirmationEmail = data.email || session?.user?.email || null;
+          console.log('[order-confirmation] email:', confirmationEmail, '| data.email:', data.email, '| session.email:', session?.user?.email);
+          if (confirmationEmail) {
             supabase.functions.invoke('send-order-confirmation', {
               body: {
                 order_id:       orderId,
                 payment_id:     razorpay_payment_id,
                 customer_name:  data.name,
-                customer_email: data.email,
+                customer_email: confirmationEmail,
                 total,
                 items: capturedItems.map(item => ({
                   name:  item.product.name,
