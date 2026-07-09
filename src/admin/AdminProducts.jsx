@@ -270,7 +270,7 @@ export default function AdminProducts() {
       })(),
     };
     const { data: saved, error: err } = form.id
-      ? await supabase.from("products").update(payload).eq("id", form.id).select().single()
+      ? await supabase.from("products").update(payload).eq("id", form.id).select().maybeSingle()
       : await supabase.from("products").insert(payload).select().single();
     setSaving(false);
     if (err) { setError(err.message); return; }
