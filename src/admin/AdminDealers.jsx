@@ -1480,6 +1480,10 @@ export default function AdminDealers() {
   const deletedCount  = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
   const guestCount    = guestRows.filter(g => !g._isDeletedGuest).length;
 
+  // DEBUG — remove after confirming dropdown renders correctly
+  console.log('[AdminDealers] counts', { dealerCount, customerCount, guestCount, deletedCount, allProfilesLen: allProfiles.length });
+  console.log('[AdminDealers] dropdown options', ['all','dealer','customer','guest','deleted']);
+
   return (
     <div className="admin-page">
       {/* Delete confirmation dialog */}
