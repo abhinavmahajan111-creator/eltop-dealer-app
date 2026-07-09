@@ -35,6 +35,7 @@ export function AppProvider({ children }) {
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [isDealer, setIsDealer] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
 
   const [deactivatedAccount, setDeactivatedAccount] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
@@ -162,6 +163,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!isSupabaseConfigured || !session?.user) {
       setIsAdmin(false);
+      setAdminChecked(false);
       return;
     }
     supabase
@@ -169,7 +171,10 @@ export function AppProvider({ children }) {
       .select('id')
       .eq('id', session.user.id)
       .maybeSingle()
-      .then(({ data }) => setIsAdmin(Boolean(data)));
+      .then(({ data }) => {
+        setIsAdmin(Boolean(data));
+        setAdminChecked(true);
+      });
   }, [session]);
 
   const signOut = useCallback(async () => {
@@ -179,6 +184,7 @@ export function AppProvider({ children }) {
     setIsDealer(false);
     setProfileLoaded(false);
     setIsAdmin(false);
+    setAdminChecked(false);
     setCart([]);
     setDeactivatedAccount(false);
   }, []);
@@ -330,6 +336,7 @@ export function AppProvider({ children }) {
     isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
     profileLoaded,
     isAdmin,
+    adminChecked,
     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
     dealer: profile,
     products,
