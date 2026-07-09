@@ -60,7 +60,7 @@ const INDIAN_STATES = [
 ];
 
 // ── Checkout Modal ────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, otpVerified, setOtpVerified, effectiveTotal }) {
+function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, otpVerified, setOtpVerified, effectiveTotal, isCustomer }) {
   const [form, setForm] = useState(initialData || { name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
   const [dealerBanner, setDealerBanner] = useState(false);
@@ -260,7 +260,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
 
         <div style={{ padding: '14px 20px 20px', borderTop: '1px solid #eee' }}>
           {/* ── Repeat guest recognition ── */}
-          {repeatGuest && !otpVerified && (
+          {repeatGuest && !otpVerified && !isCustomer && (
             <div style={{ background: '#e0f7f4', border: '1px solid #00bfa5', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
               <div style={{ fontWeight: 700, fontSize: 13, color: '#00695c', marginBottom: 4 }}>
                 👋 Welcome back{repeatGuestName ? `, ${repeatGuestName}` : ''}!
@@ -969,12 +969,10 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
-  const { session, dealer } = useApp();
+  const { session, dealer, isDealer, isCustomer } = useApp();
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const savedCheckoutData = useRef(null);
-
-  const isDealer = Boolean(session?.user?.id);
 
   const getPrice = useCallback((p) => {
     if (isDealer) {
@@ -982,16 +980,16 @@ export default function Store() {
       const d2 = Number(dealer?.discount2 || 0);
       return Math.round(Number(p.dlp ?? p.mrp || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
     }
-    if (otpVerified) return Math.round(Number(p.mrp || 0) * 0.85);
+    if (otpVerified || isCustomer) return Math.round(Number(p.mrp || 0) * 0.85);
     return Number(p.mrp || 0);
-  }, [isDealer, otpVerified, dealer]);
+  }, [isDealer, otpVerified, isCustomer, dealer]);
 
   const effectiveTotal = useMemo(
     () => cart.items.reduce((s, i) => s + getPrice(i.product) * i.qty, 0),
     [cart.items, getPrice]
   );
 
-  const pricingMode = isDealer ? 'dealer' : otpVerified ? 'guest-verified' : 'full';
+  const pricingMode = isDealer ? 'dealer' : (otpVerified || isCustomer) ? 'guest-verified' : 'full';
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -1055,7 +1053,7 @@ export default function Store() {
           const { data: orderRows, error: orderError } = await supabase
             .from('orders')
             .insert([{
-              dealer_id:        session?.user?.id ?? null,
+              dealer_id:        isDealer ? session.user.id : null,
               customer_name:    data.name,
               customer_phone:   data.phone,
               customer_email:   data.email || null,
@@ -1478,12 +1476,13 @@ export default function Store() {
         <CheckoutModal
           cart={cart}
           onClose={() => setShowCheckout(false)}
-          onConfirm={(data, opts) => { savedCheckoutData.current = { data, opts }; setShowCheckout(false); handlePayment(data, opts); }}
+          onConfirm={(data, opts) => { const finalOpts = { ...opts, emailVerified: opts.emailVerified || isCustomer }; savedCheckoutData.current = { data, opts: finalOpts }; setShowCheckout(false); handlePayment(data, finalOpts); }}
           onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
           initialData={savedCheckoutData.current?.data}
           otpVerified={otpVerified}
           setOtpVerified={setOtpVerified}
           effectiveTotal={effectiveTotal}
+          isCustomer={isCustomer}
         />
       )}
 

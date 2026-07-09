@@ -32,6 +32,9 @@ export function AppProvider({ children }) {
   const [invoices, setInvoices] = useState(staticInvoices);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [isDealer, setIsDealer] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [deactivatedAccount, setDeactivatedAccount] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
@@ -57,36 +60,68 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !session?.user) return;
-    supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", session.user.id)
-      .single()
-      .then(async ({ data, error }) => {
-        if (!error && data) {
-          if (data.deleted_at) {
-            const { data: existing } = await supabase
-              .from("restore_requests")
-              .select("id")
-              .eq("profile_id", data.id)
-              .eq("status", "pending")
-              .maybeSingle();
-            if (!existing) {
-              await supabase.from("restore_requests").insert({
-                profile_id: data.id,
-                contact_value: session.user.email,
-                status: "pending",
-              });
-            }
-            await supabase.auth.signOut();
-            setSession(null);
-            setDeactivatedAccount(true);
-            return;
+    if (!isSupabaseConfigured) return;
+    if (!session?.user) {
+      setIsDealer(false);
+      setProfileLoaded(false);
+      return;
+    }
+    setProfileLoaded(false);
+
+    async function fetchProfile(isRetry = false) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", session.user.id)
+        .single();
+
+      if (!error && data) {
+        if (data.deleted_at) {
+          const { data: existing } = await supabase
+            .from("restore_requests")
+            .select("id")
+            .eq("profile_id", data.id)
+            .eq("status", "pending")
+            .maybeSingle();
+          if (!existing) {
+            await supabase.from("restore_requests").insert({
+              profile_id: data.id,
+              contact_value: session.user.email,
+              status: "pending",
+            });
           }
-          setProfile(data);
+          await supabase.auth.signOut();
+          setSession(null);
+          setDeactivatedAccount(true);
+          setIsDealer(false);
+          setProfileLoaded(true);
+          return;
         }
-      });
+        setProfile(data);
+        setIsDealer(data.is_dealer === true);
+        setProfileLoaded(true);
+        return;
+      }
+
+      // PGRST116 = "no rows returned" — confirmed customer (no profile row).
+      // Any other error code means the fetch itself failed (network/timeout/RLS)
+      // and we genuinely don't know the user's role yet.
+      if (error?.code === 'PGRST116') {
+        setIsDealer(false);
+        setProfileLoaded(true);
+        return;
+      }
+
+      if (!isRetry) {
+        setTimeout(() => fetchProfile(true), 1500);
+      } else {
+        console.error('[AppContext] Profile fetch failed after retry:', error);
+        setIsDealer(false);
+        // profileLoaded stays false — treat as "still unknown," not confirmed customer
+      }
+    }
+
+    fetchProfile();
   }, [session]);
 
   const sendOtp = useCallback(async (emailAddress) => {
@@ -123,10 +158,27 @@ export function AppProvider({ children }) {
     return true;
   }, [email]);
 
+  // Check admins table whenever session changes
+  useEffect(() => {
+    if (!isSupabaseConfigured || !session?.user) {
+      setIsAdmin(false);
+      return;
+    }
+    supabase
+      .from('admins')
+      .select('id')
+      .eq('id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => setIsAdmin(Boolean(data)));
+  }, [session]);
+
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured) await supabase.auth.signOut();
     setSession(null);
     setProfile(DEMO_PROFILE);
+    setIsDealer(false);
+    setProfileLoaded(false);
+    setIsAdmin(false);
     setCart([]);
     setDeactivatedAccount(false);
   }, []);
@@ -274,6 +326,11 @@ export function AppProvider({ children }) {
     setEmail,
     session,
     isLoggedIn: isSupabaseConfigured ? Boolean(session) : null,
+    isDealer,
+    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
+    profileLoaded,
+    isAdmin,
+    dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
     dealer: profile,
     products,
     invoices,
