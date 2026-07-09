@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { useApp } from "../context/AppContext";
+import AddressForm from "../components/AddressForm";
 
 function fmt(n) { return Number(n || 0).toLocaleString("en-IN"); }
 function fmtDate(s) {
@@ -20,20 +21,39 @@ function StatCard({ label, value, sub }) {
   );
 }
 
-const TABS = ["My Orders", "Overview"];
+const TABS = ["My Orders", "Overview", "Profile & Addresses"];
+const EMPTY_ADDR = { label: "", recipient_name: "", phone: "", address_line1: "", address_line2: "", city: "", state: "", pincode: "", is_default: false };
 
 export default function MyAccount() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { session, signOut } = useApp();
 
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(() => searchParams.get("tab") === "profile" ? 2 : 0);
+
+  // Orders state
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderItemsCache, setOrderItemsCache] = useState({});
 
-  const email = session?.user?.email || "";
+  // Profile state
+  const [profileName, setProfileName] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState(null); // { type: "ok"|"err", text }
 
+  // Address state
+  const [addresses, setAddresses] = useState([]);
+  const [addrLoading, setAddrLoading] = useState(true);
+  const [addrForm, setAddrForm] = useState(null); // null = closed, EMPTY_ADDR = new, {...row} = editing
+  const [addrSaving, setAddrSaving] = useState(false);
+  const [addrError, setAddrError] = useState("");
+
+  const email = session?.user?.email || "";
+  const userId = session?.user?.id;
+
+  // Fetch orders
   useEffect(() => {
     if (!isSupabaseConfigured || !email) { setLoading(false); return; }
     supabase
@@ -48,6 +68,38 @@ export default function MyAccount() {
       });
   }, [email]);
 
+  // Fetch profile row (name + phone)
+  useEffect(() => {
+    if (!isSupabaseConfigured || !userId) return;
+    supabase
+      .from("profiles")
+      .select("name, phone")
+      .eq("id", userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setProfileName(data.name || "");
+          setProfilePhone(data.phone || "");
+        }
+      });
+  }, [userId]);
+
+  // Fetch saved addresses
+  useEffect(() => {
+    if (!isSupabaseConfigured || !userId) { setAddrLoading(false); return; }
+    supabase
+      .from("customer_addresses")
+      .select("*")
+      .eq("profile_id", userId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) console.error("[MyAccount] address fetch:", error);
+        setAddresses(data || []);
+        setAddrLoading(false);
+      });
+  }, [userId]);
+
   const toggleOrder = async (orderId) => {
     if (expandedOrderId === orderId) { setExpandedOrderId(null); return; }
     setExpandedOrderId(orderId);
@@ -56,14 +108,84 @@ export default function MyAccount() {
     setOrderItemsCache(prev => ({ ...prev, [orderId]: data || [] }));
   };
 
+  async function saveProfile() {
+    if (!profileName.trim()) { setProfileMsg({ type: "err", text: "Name is required." }); return; }
+    if (!/^\d{10}$/.test(profilePhone.trim())) { setProfileMsg({ type: "err", text: "Phone must be 10 digits." }); return; }
+    setProfileSaving(true);
+    setProfileMsg(null);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ name: profileName.trim(), phone: profilePhone.trim() })
+      .eq("id", userId);
+    setProfileSaving(false);
+    setProfileMsg(error
+      ? { type: "err", text: error.message }
+      : { type: "ok",  text: "Profile saved." });
+  }
+
+  async function saveAddress(form) {
+    setAddrSaving(true);
+    setAddrError("");
+    const isDefault = Boolean(form.is_default);
+
+    if (isDefault) {
+      const { error: clearErr } = await supabase
+        .from("customer_addresses")
+        .update({ is_default: false })
+        .eq("profile_id", userId);
+      if (clearErr) { setAddrError(clearErr.message); setAddrSaving(false); return; }
+    }
+
+    const payload = {
+      profile_id:     userId,
+      label:          form.label.trim(),
+      recipient_name: form.recipient_name.trim(),
+      phone:          form.phone.trim(),
+      address_line1:  form.address_line1.trim(),
+      address_line2:  form.address_line2?.trim() || "",
+      city:           form.city.trim(),
+      state:          form.state.trim(),
+      pincode:        form.pincode.trim(),
+      is_default:     isDefault,
+    };
+
+    let error;
+    if (form.id) {
+      ({ error } = await supabase.from("customer_addresses").update(payload).eq("id", form.id));
+    } else {
+      ({ error } = await supabase.from("customer_addresses").insert(payload));
+    }
+
+    if (error) { setAddrError(error.message); setAddrSaving(false); return; }
+
+    const { data } = await supabase
+      .from("customer_addresses")
+      .select("*")
+      .eq("profile_id", userId)
+      .order("is_default", { ascending: false })
+      .order("created_at", { ascending: true });
+    setAddresses(data || []);
+    setAddrForm(null);
+    setAddrSaving(false);
+  }
+
+  async function deleteAddress(id) {
+    if (!window.confirm("Delete this address?")) return;
+    const { error } = await supabase.from("customer_addresses").delete().eq("id", id);
+    if (error) { alert(error.message); return; }
+    setAddresses(prev => prev.filter(a => a.id !== id));
+  }
+
   const customerName = orders[0]?.customer_name || email;
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
   const avgOrder = orders.length ? totalRevenue / orders.length : 0;
   const lastOrder = orders[0] ? fmtDateOnly(orders[0].created_at) : "Never";
 
-  const card = { background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 16 };
-  const lbl  = { fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 2 };
-  const val  = { fontSize: 14, fontWeight: 500 };
+  const card       = { background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 16 };
+  const lbl        = { fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 2 };
+  const val        = { fontSize: 14, fontWeight: 500 };
+  const inputStyle = { display: "block", marginTop: 4, width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" };
+  const btnOutline = { background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
 
   if (loading) return (
     <div style={{ position: "fixed", inset: 0, background: "#f8f4f8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#94a3b8" }}>
@@ -103,6 +225,7 @@ export default function MyAccount() {
             color: tab === i ? "#7B2D8B" : "#555",
             borderBottom: tab === i ? "2px solid #7B2D8B" : "2px solid transparent",
             whiteSpace: "nowrap",
+            fontFamily: "inherit",
           }}>{t}</button>
         ))}
       </div>
@@ -228,6 +351,105 @@ export default function MyAccount() {
               </div>
             </div>
           </>
+        )}
+
+        {/* TAB 2: PROFILE & ADDRESSES */}
+        {tab === 2 && (
+          <div style={{ maxWidth: 600 }}>
+
+            {/* Edit basic info */}
+            <div style={card}>
+              <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 14 }}>Basic Info</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <label style={{ fontSize: 13, color: "#555" }}>
+                  Full Name *
+                  <input
+                    value={profileName}
+                    onChange={e => { setProfileName(e.target.value); setProfileMsg(null); }}
+                    placeholder="Your name"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ fontSize: 13, color: "#555" }}>
+                  Phone (10 digits)
+                  <input
+                    value={profilePhone}
+                    onChange={e => { setProfilePhone(e.target.value.replace(/\D/g, "").slice(0, 10)); setProfileMsg(null); }}
+                    placeholder="9876543210"
+                    inputMode="numeric"
+                    style={inputStyle}
+                  />
+                </label>
+                {profileMsg && (
+                  <div style={{ fontSize: 13, color: profileMsg.type === "ok" ? "#16a34a" : "#dc2626", fontWeight: 600 }}>
+                    {profileMsg.text}
+                  </div>
+                )}
+                <button
+                  onClick={saveProfile}
+                  disabled={profileSaving}
+                  style={{ alignSelf: "flex-start", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontWeight: 700, fontSize: 13, cursor: profileSaving ? "not-allowed" : "pointer", opacity: profileSaving ? 0.7 : 1, fontFamily: "inherit" }}
+                >
+                  {profileSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            {/* Saved addresses */}
+            <div style={card}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>Saved Addresses</div>
+                {!addrForm && (
+                  <button
+                    onClick={() => { setAddrForm({ ...EMPTY_ADDR }); setAddrError(""); }}
+                    style={{ background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    + Add New Address
+                  </button>
+                )}
+              </div>
+
+              {addrForm && (
+                <AddressForm
+                  form={addrForm}
+                  onChange={setAddrForm}
+                  onSave={saveAddress}
+                  onCancel={() => { setAddrForm(null); setAddrError(""); }}
+                  saving={addrSaving}
+                  error={addrError}
+                />
+              )}
+
+              {addrLoading ? (
+                <div style={{ color: "#94a3b8", fontSize: 13 }}>Loading…</div>
+              ) : addresses.length === 0 && !addrForm ? (
+                <div style={{ color: "#94a3b8", textAlign: "center", padding: 24, fontSize: 13 }}>
+                  No saved addresses yet. Add one above to speed up checkout.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {addresses.map(a => (
+                    <div key={a.id} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", position: "relative" }}>
+                      {a.is_default && (
+                        <span style={{ position: "absolute", top: 10, right: 12, background: "#7B2D8B", color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "2px 8px" }}>
+                          Default
+                        </span>
+                      )}
+                      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{a.label}</div>
+                      <div style={{ fontSize: 13, color: "#444" }}>{a.recipient_name} · {a.phone}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
+                        {a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}, {a.city}, {a.state} – {a.pincode}
+                      </div>
+                      <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                        <button onClick={() => { setAddrForm({ ...a }); setAddrError(""); }} style={btnOutline}>Edit</button>
+                        <button onClick={() => deleteAddress(a.id)} style={{ ...btnOutline, color: "#dc2626", borderColor: "#fca5a5" }}>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

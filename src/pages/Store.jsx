@@ -1380,6 +1380,13 @@ export default function Store() {
                       </button>
                       <div style={{ height: 1, background: "#e2e8f0" }} />
                       <button
+                        onClick={() => { setAccountMenuOpen(false); navigate("/my-account?tab=profile"); }}
+                        style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}
+                      >
+                        👤 My Profile
+                      </button>
+                      <div style={{ height: 1, background: "#e2e8f0" }} />
+                      <button
                         onClick={async () => { setAccountMenuOpen(false); await signOut(); }}
                         style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, color: "#dc2626" }}
                       >
