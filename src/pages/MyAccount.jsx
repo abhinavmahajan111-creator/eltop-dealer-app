@@ -420,9 +420,9 @@ export default function MyAccount() {
                 />
               )}
 
-              {addrLoading ? (
+              {!addrForm && (addrLoading ? (
                 <div style={{ color: "#94a3b8", fontSize: 13 }}>Loading…</div>
-              ) : addresses.length === 0 && !addrForm ? (
+              ) : addresses.length === 0 ? (
                 <div style={{ color: "#94a3b8", textAlign: "center", padding: 24, fontSize: 13 }}>
                   No saved addresses yet. Add one above to speed up checkout.
                 </div>
@@ -447,7 +447,7 @@ export default function MyAccount() {
                     </div>
                   ))}
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
