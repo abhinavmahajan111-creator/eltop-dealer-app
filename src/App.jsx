@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import PhoneFrame from "./components/PhoneFrame";
 import AdminRoute from "./components/AdminRoute";
+import DealerRoute from "./components/DealerRoute";
 import Store from "./pages/Store";
 import Splash from "./screens/Splash";
 import Login from "./screens/Login";
@@ -27,14 +28,16 @@ export default function App() {
       <Route element={<PhoneFrame />}>
         <Route path="/" element={<Splash />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/catalogue" element={<Catalogue />} />
-        <Route path="/product/:id" element={<ProductDetail />} />
-        <Route path="/cart" element={<Cart />} />
-        <Route path="/confirm" element={<OrderConfirm />} />
-        <Route path="/tracking" element={<OrderTracking />} />
-        <Route path="/ledger" element={<Ledger />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route element={<DealerRoute />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/catalogue" element={<Catalogue />} />
+          <Route path="/product/:id" element={<ProductDetail />} />
+          <Route path="/cart" element={<Cart />} />
+          <Route path="/confirm" element={<OrderConfirm />} />
+          <Route path="/tracking" element={<OrderTracking />} />
+          <Route path="/ledger" element={<Ledger />} />
+          <Route path="/profile" element={<Profile />} />
+        </Route>
       </Route>
 
       <Route element={<AdminRoute />}>
