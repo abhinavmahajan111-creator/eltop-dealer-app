@@ -76,6 +76,32 @@ Always end a non-trivial change with a short "please verify in browser" checklis
 
 ---
 
+## Deployment verification — MANDATORY after every push
+
+A push succeeding (`git push` showing "master -> master") only means the CODE reached GitHub —
+it does NOT mean the site actually updated. Vercel builds can fail silently after a successful push,
+and if nobody checks, the site keeps serving an OLD build indefinitely while everyone believes the
+new change is live. This has already happened once (4 consecutive deployments failed and went
+unnoticed for ~19 hours while testing continued against stale code).
+
+**After every push, before considering any task "done":**
+1. Tell the person explicitly: "Please check the Vercel deployments page and confirm this build
+   shows 'Ready', not 'Error' — https://vercel.com/[project]/deployments"
+2. Do NOT assume the push succeeding means the deploy succeeded. Do NOT mark a task complete
+   based on `git push` output alone.
+3. If the person reports "Error" status, ask them to open that deployment and share the build log
+   /error message — diagnose from that, don't guess.
+4. If several changes have been pushed in a row without checking Vercel in between, explicitly flag
+   this to the person: "We've pushed N changes since the last confirmed 'Ready' deploy — let's check
+   Vercel before continuing, so we know which changes are actually live."
+
+**One-time setup recommended (not a per-session task, just flag it once if it doesn't seem to be
+set up yet):** Vercel has built-in deployment failure notifications (Settings → Notifications →
+email or Slack on failed deployment). This is the real fix for catching failures immediately without
+relying on someone remembering to check — suggest the person enable it if they haven't already.
+
+---
+
 ## Git hygiene
 
 - Never leave uncommitted changes at the end of a session unless explicitly asked to leave them staged.
