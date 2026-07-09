@@ -49,7 +49,7 @@ export default function AddressForm({ form, onChange, onSave, onCancel, saving, 
             {label}{required.includes(k) && <span style={{ color: "#dc2626" }}> *</span>}
             {k === "state" ? (
               <select value={form.state || ""} onChange={e => set("state", e.target.value)} style={inp}>
-                <option value="" disabled>Select State</option>
+                <option value="">Select State</option>
                 {INDIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             ) : (
