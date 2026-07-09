@@ -65,6 +65,20 @@ when they shouldn't be? Common patterns to check for:
 State explicitly in your summary which of these you checked and what you found — "no edge cases of
 this type apply here" is a fine answer, but don't skip stating it.
 
+### 7. Wrapped a function in useCallback/useMemo/useRef, or otherwise added a new React hook?
+Check the import line at the top of the file — confirm the hook you just used is actually imported
+from `"react"`. This has caused a live bug before: `getPrice` was wrapped in `useCallback` during
+the pricing overhaul, but `useCallback` was never added to the import line, so the build succeeded
+(Vite didn't catch it) while the page crashed at runtime with "Uncaught ReferenceError: useCallback
+is not defined" — a completely blank/black screen on `/store`, only visible in the browser console,
+not in the build log.
+
+**A passing `npm run build` does NOT prove the page actually works.** Build success only means the
+code compiled/bundled — it does not execute the code path that would trigger a runtime
+ReferenceError like this. After any change that touches hooks, imports, or conditionally-executed
+code, say so explicitly and ask the person to actually load the affected page and check the browser
+console (F12 → Console tab) for red errors — not just confirm the build was green.
+
 ---
 
 ## Still requires human testing (Claude Code cannot verify these itself)
