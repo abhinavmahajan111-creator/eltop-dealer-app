@@ -1034,6 +1034,11 @@ export default function Store() {
   const handleDecrease = (id) => cart.change(id, -1);
 
   const handlePayment = (data, { emailVerified = false } = {}) => {
+    if (!data?.name?.trim() || !data?.phone?.trim()) {
+      console.error('[handlePayment] called with missing customer fields', data);
+      alert('Order cannot be placed: customer name and phone are required. Please try again.');
+      return;
+    }
     // Snapshot pricing at call time — avoids stale closures in the async Razorpay handler
     const d1 = isDealer ? Number(dealer?.discount1 || 0) : 0;
     const d2 = isDealer ? Number(dealer?.discount2 || 0) : 0;
