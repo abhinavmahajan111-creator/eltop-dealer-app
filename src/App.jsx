@@ -2,7 +2,9 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import PhoneFrame from "./components/PhoneFrame";
 import AdminRoute from "./components/AdminRoute";
 import DealerRoute from "./components/DealerRoute";
+import CustomerRoute from "./components/CustomerRoute";
 import Store from "./pages/Store";
+import MyAccount from "./pages/MyAccount";
 import Splash from "./screens/Splash";
 import Login from "./screens/Login";
 import Dashboard from "./screens/Dashboard";
@@ -54,6 +56,9 @@ export default function App() {
       </Route>
 
       <Route path="/store" element={<Store />} />
+      <Route element={<CustomerRoute />}>
+        <Route path="/my-account" element={<MyAccount />} />
+      </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

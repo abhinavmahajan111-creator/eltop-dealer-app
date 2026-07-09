@@ -969,10 +969,40 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
-  const { session, dealer, isDealer, isCustomer } = useApp();
+  const { session, dealer, isDealer, isCustomer, signOut } = useApp();
+  const [customerName, setCustomerName] = useState("");
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const savedCheckoutData = useRef(null);
+
+  // Fetch customer's display name from their most recent order
+  useEffect(() => {
+    if (!isCustomer || !session?.user?.email || !isSupabaseConfigured) return;
+    supabase
+      .from("orders")
+      .select("customer_name")
+      .ilike("customer_email", session.user.email)
+      .is("dealer_id", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.[0]?.customer_name) setCustomerName(data[0].customer_name.split(" ")[0]);
+      });
+  }, [isCustomer, session?.user?.email]);
+
+  // Close account dropdown on outside click
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    function handle(e) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [accountMenuOpen]);
 
   const getPrice = useCallback((p) => {
     if (isDealer) {
@@ -1332,12 +1362,42 @@ export default function Store() {
 
             {/* Actions */}
             <div className="store-header-actions">
-              <button className="btn-login-primary" onClick={() => navigate("/login")}>
-                👤 Login / Sign Up
-              </button>
-              <button className="btn-dealer-login" onClick={() => navigate("/login")}>
-                🤝 Dealer Login
-              </button>
+              {isCustomer ? (
+                <div ref={accountMenuRef} style={{ position: "relative" }}>
+                  <button
+                    onClick={() => setAccountMenuOpen(v => !v)}
+                    style={{ background: "#7B2D8B", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" }}
+                  >
+                    👤 Hi, {customerName || session?.user?.email?.split("@")[0] || "You"} ▾
+                  </button>
+                  {accountMenuOpen && (
+                    <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,.15)", minWidth: 160, zIndex: 200, overflow: "hidden" }}>
+                      <button
+                        onClick={() => { setAccountMenuOpen(false); navigate("/my-account"); }}
+                        style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}
+                      >
+                        📦 My Orders
+                      </button>
+                      <div style={{ height: 1, background: "#e2e8f0" }} />
+                      <button
+                        onClick={async () => { setAccountMenuOpen(false); await signOut(); }}
+                        style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, color: "#dc2626" }}
+                      >
+                        🚪 Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <button className="btn-login-primary" onClick={() => navigate("/login")}>
+                    👤 Login / Sign Up
+                  </button>
+                  <button className="btn-dealer-login" onClick={() => navigate("/login")}>
+                    🤝 Dealer Login
+                  </button>
+                </>
+              )}
               <button className="store-cart-btn" onClick={() => setCartOpen(true)}>
                 <span style={{ fontSize: 22 }}>🛒</span>
                 <span style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 700 }}>Cart</span>
