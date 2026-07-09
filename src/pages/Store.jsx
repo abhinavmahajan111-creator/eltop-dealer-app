@@ -977,20 +977,21 @@ export default function Store() {
   const [otpVerified, setOtpVerified] = useState(false);
   const savedCheckoutData = useRef(null);
 
-  // Fetch customer's display name from their most recent order
+  // Resolve display name: profiles.name > most-recent order > email
   useEffect(() => {
-    if (!isCustomer || !session?.user?.email || !isSupabaseConfigured) return;
-    supabase
-      .from("orders")
-      .select("customer_name")
-      .ilike("customer_email", session.user.email)
-      .is("dealer_id", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
-        if (data?.[0]?.customer_name) setCustomerName(data[0].customer_name.split(" ")[0]);
-      });
-  }, [isCustomer, session?.user?.email]);
+    if (!isCustomer || !isSupabaseConfigured) return;
+    const uid   = session?.user?.id;
+    const email = session?.user?.email;
+    Promise.all([
+      uid   ? supabase.from("profiles").select("name").eq("id", uid).maybeSingle() : Promise.resolve({ data: null }),
+      email ? supabase.from("orders").select("customer_name").ilike("customer_email", email).is("dealer_id", null).order("created_at", { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
+    ]).then(([profileRes, orderRes]) => {
+      const fromProfile = profileRes.data?.name?.trim();
+      const fromOrder   = orderRes.data?.[0]?.customer_name?.trim();
+      const first = (fromProfile || fromOrder || "").split(" ")[0];
+      if (first) setCustomerName(first);
+    });
+  }, [isCustomer, session?.user?.id, session?.user?.email]);
 
   // Close account dropdown on outside click
   useEffect(() => {

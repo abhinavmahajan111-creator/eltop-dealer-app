@@ -176,7 +176,7 @@ export default function MyAccount() {
     setAddresses(prev => prev.filter(a => a.id !== id));
   }
 
-  const customerName = orders[0]?.customer_name || email;
+  const customerName = profileName.trim() || orders[0]?.customer_name || email;
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
   const avgOrder = orders.length ? totalRevenue / orders.length : 0;
   const lastOrder = orders[0] ? fmtDateOnly(orders[0].created_at) : "Never";
