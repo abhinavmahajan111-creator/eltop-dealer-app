@@ -1163,7 +1163,9 @@ export default function Store() {
                   price: Math.round(item.effectivePrice * 100) / 100,
                 })),
               },
-            }).catch(err => console.error('Confirmation email failed (non-blocking):', err));
+            })
+            .then(res => console.log('[order-confirmation] invoke response:', res))
+            .catch(err => console.error('[order-confirmation] invoke failed:', JSON.stringify(err, Object.getOwnPropertyNames(err))));
           }
           alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
         },
