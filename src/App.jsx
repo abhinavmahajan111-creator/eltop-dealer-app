@@ -24,6 +24,7 @@ import SalesOrder from "./admin/SalesOrder";
 import DealerCRM from "./admin/DealerCRM";
 import GuestCRM from "./admin/GuestCRM";
 import CustomerCRM from "./admin/CustomerCRM";
+import TrackOrder from "./pages/TrackOrder";
 
 export default function App() {
   return (
@@ -58,6 +59,7 @@ export default function App() {
       </Route>
 
       <Route path="/store" element={<Store />} />
+      <Route path="/track" element={<TrackOrder />} />
       <Route element={<CustomerRoute />}>
         <Route path="/my-account" element={<MyAccount />} />
       </Route>
