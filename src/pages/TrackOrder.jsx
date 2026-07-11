@@ -76,15 +76,17 @@ export default function TrackOrder() {
       return;
     }
     // Fetch orders while session is active
+    const normalizedEmail = email.trim().toLowerCase();
     const { data, error: fetchErr } = await supabaseTrack
       .from("orders")
       .select("id, customer_name, total, created_at, status, delivery_address, payment_id, order_items(id, name, qty, price)")
-      .eq("customer_email", email.trim())
+      .eq("customer_email", normalizedEmail)
       .is("dealer_id", null)
       .order("created_at", { ascending: false });
     setBusy(false);
     if (fetchErr) { setError("Could not load orders: " + fetchErr.message); return; }
     setOrders(data || []);
+    setEmail(normalizedEmail);
     setStep("orders");
     // Sign out of the temporary track session immediately after fetching
     await supabaseTrack.auth.signOut();
