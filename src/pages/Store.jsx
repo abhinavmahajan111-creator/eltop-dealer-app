@@ -1427,8 +1427,8 @@ export default function Store() {
                   <button className="btn-login-primary" onClick={() => navigate("/login")}>
                     👤 Login / Sign Up
                   </button>
-                  <button className="btn-dealer-login" onClick={() => navigate("/login")}>
-                    🤝 Dealer Login
+                  <button className="btn-dealer-login" onClick={() => navigate("/track")}>
+                    📦 Track Your Order
                   </button>
                 </>
               )}
