@@ -11,12 +11,24 @@ function fmtDate(s) {
 function fmtDateOnly(s) {
   return new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
-function StatCard({ label, value, sub }) {
+function StatCard({ label, value, sub, onClick, active }) {
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", minWidth: 130 }}>
-      <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: "#DC2626" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{sub}</div>}
+    <div
+      onClick={onClick}
+      style={{
+        background: active ? "#7B2D8B" : "#fff",
+        borderRadius: 12,
+        padding: "16px 18px",
+        boxShadow: active ? "0 4px 16px rgba(123,45,139,.25)" : "0 2px 8px rgba(0,0,0,.06)",
+        minWidth: 130,
+        cursor: onClick ? "pointer" : "default",
+        border: active ? "2px solid #7B2D8B" : "2px solid transparent",
+        transition: "all 0.15s",
+      }}
+    >
+      <div style={{ fontSize: 11, color: active ? "rgba(255,255,255,0.75)" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: active ? "#fff" : "#DC2626" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: active ? "rgba(255,255,255,0.7)" : "#94a3b8", marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -36,6 +48,12 @@ export default function MyAccount() {
   const [loading, setLoading] = useState(true);
   const [expandedOrderId, setExpandedOrderId] = useState(null);
   const [orderItemsCache, setOrderItemsCache] = useState({});
+  const [periodFilter, setPeriodFilter] = useState("lifetime");
+  const [filterOrderId, setFilterOrderId] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterTotal, setFilterTotal] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
 
   // Profile state
   const [profileName, setProfileName] = useState("");
@@ -58,7 +76,7 @@ export default function MyAccount() {
     if (!isSupabaseConfigured || !email) { setLoading(false); return; }
     supabase
       .from("orders")
-      .select("id, customer_name, customer_phone, customer_email, total, created_at, status, delivery_address, email_verified")
+      .select("id, customer_name, customer_phone, customer_email, total, created_at, status, delivery_address, payment_id, email_verified")
       .ilike("customer_email", email)
       .is("dealer_id", null)
       .order("created_at", { ascending: false })
@@ -195,6 +213,23 @@ export default function MyAccount() {
 
   return (
     <div style={{ fontFamily: "inherit", minHeight: "100vh", background: "#f8f4f8", color: "#222" }}>
+      <style>{`
+        .ma-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+        .ma-filter-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 0; }
+        .ma-col-date { white-space: nowrap; }
+        @media (max-width: 639px) {
+          .ma-stat-grid { gap: 8px; }
+          .ma-stat-grid > div { padding: 10px 10px !important; min-width: 0 !important; }
+          .ma-stat-grid > div > div:first-child { font-size: 9px !important; }
+          .ma-stat-grid > div > div:nth-child(2) { font-size: 17px !important; }
+          .ma-stat-grid > div > div:nth-child(3) { font-size: 10px !important; }
+          .ma-filter-grid { grid-template-columns: 1fr 1fr; }
+          .ma-col-date { display: none; }
+        }
+        @media (max-width: 400px) {
+          .ma-filter-grid { grid-template-columns: 1fr; }
+        }
+      `}</style>
 
       {/* Header */}
       <div style={{ background: "#7B2D8B", color: "#fff", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16 }}>
@@ -233,95 +268,223 @@ export default function MyAccount() {
       <div style={{ padding: "20px 24px", maxWidth: 900, margin: "0 auto" }}>
 
         {/* TAB 0: MY ORDERS */}
-        {tab === 0 && (
-          <>
-            {(() => {
-              const now = new Date();
-              const thisMonth = orders.filter(o => {
-                const d = new Date(o.created_at);
-                return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-              });
-              const last3 = orders.filter(o => new Date(o.created_at) >= new Date(Date.now() - 90 * 24 * 3600 * 1000));
-              return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-                  <StatCard label="This Month"    value={thisMonth.length} sub={`₹${fmt(thisMonth.reduce((s, o) => s + Number(o.total), 0))}`} />
-                  <StatCard label="Last 3 Months" value={last3.length}     sub={`₹${fmt(last3.reduce((s, o) => s + Number(o.total), 0))}`} />
-                  <StatCard label="Lifetime"      value={orders.length}    sub={`₹${fmt(totalRevenue)}`} />
+        {tab === 0 && (() => {
+          const now = new Date();
+          const thisMonth = orders.filter(o => {
+            const d = new Date(o.created_at);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+          });
+          const last3 = orders.filter(o => new Date(o.created_at) >= new Date(Date.now() - 90 * 24 * 3600 * 1000));
+
+          // Date range takes precedence over period cards when active
+          const dateRangeActive = filterDateFrom || filterDateTo;
+          const periodBase = dateRangeActive
+            ? orders
+            : periodFilter === "this_month" ? thisMonth
+            : periodFilter === "last_3_months" ? last3
+            : orders;
+
+          // Apply all four filters with AND logic
+          const displayedOrders = periodBase.filter(o => {
+            if (filterOrderId && !o.id.toLowerCase().includes(filterOrderId.toLowerCase())) return false;
+            if (filterDateFrom && new Date(o.created_at) < new Date(filterDateFrom)) return false;
+            if (filterDateTo   && new Date(o.created_at) > new Date(filterDateTo + "T23:59:59")) return false;
+            if (filterTotal !== "" && Number(o.total) !== Number(filterTotal)) return false;
+            if (filterStatus && o.status !== filterStatus) return false;
+            return true;
+          });
+
+          const distinctStatuses = [...new Set(orders.map(o => o.status).filter(Boolean))].sort();
+
+          const anyFilterActive = filterOrderId || filterDateFrom || filterDateTo || filterTotal !== "" || filterStatus;
+
+          function clearAll() {
+            setFilterOrderId("");
+            setFilterDateFrom("");
+            setFilterDateTo("");
+            setFilterTotal("");
+            setFilterStatus("");
+            setPeriodFilter("lifetime");
+          }
+
+          const filterInp = {
+            padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8,
+            fontSize: 12, fontFamily: "inherit", boxSizing: "border-box", width: "100%",
+            outline: "none", background: "#fff",
+          };
+
+          return (
+            <>
+              {/* Summary cards */}
+              <div className="ma-stat-grid">
+                <StatCard label="This Month"    value={thisMonth.length} sub={`₹${fmt(thisMonth.reduce((s, o) => s + Number(o.total), 0))}`}
+                  onClick={() => { setPeriodFilter("this_month");    setFilterDateFrom(""); setFilterDateTo(""); }}
+                  active={!dateRangeActive && periodFilter === "this_month"} />
+                <StatCard label="Last 3 Months" value={last3.length}     sub={`₹${fmt(last3.reduce((s, o) => s + Number(o.total), 0))}`}
+                  onClick={() => { setPeriodFilter("last_3_months"); setFilterDateFrom(""); setFilterDateTo(""); }}
+                  active={!dateRangeActive && periodFilter === "last_3_months"} />
+                <StatCard label="Lifetime"      value={orders.length}    sub={`₹${fmt(totalRevenue)}`}
+                  onClick={() => { setPeriodFilter("lifetime");      setFilterDateFrom(""); setFilterDateTo(""); }}
+                  active={!dateRangeActive && periodFilter === "lifetime"} />
+              </div>
+
+              {/* Filter bar */}
+              <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 12 }}>
+                <div className="ma-filter-grid" style={{ marginBottom: anyFilterActive ? 10 : 0 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>Order ID</div>
+                    <input
+                      style={filterInp}
+                      placeholder="e.g. 616e…"
+                      value={filterOrderId}
+                      onChange={e => setFilterOrderId(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>Date From</div>
+                    <input
+                      style={filterInp}
+                      type="date"
+                      value={filterDateFrom}
+                      onChange={e => { setFilterDateFrom(e.target.value); if (e.target.value) setPeriodFilter("lifetime"); }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>Date To</div>
+                    <input
+                      style={filterInp}
+                      type="date"
+                      value={filterDateTo}
+                      onChange={e => { setFilterDateTo(e.target.value); if (e.target.value) setPeriodFilter("lifetime"); }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>Total (₹)</div>
+                    <input
+                      style={filterInp}
+                      type="number"
+                      placeholder="e.g. 1200"
+                      value={filterTotal}
+                      onChange={e => setFilterTotal(e.target.value)}
+                      min="0"
+                    />
+                  </div>
                 </div>
-              );
-            })()}
-            <div style={card}>
-              {orders.length === 0 ? (
-                <div style={{ color: "#94a3b8", textAlign: "center", padding: 32 }}>
-                  <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
-                  No orders yet.{" "}
-                  <button onClick={() => navigate("/store")} style={{ background: "none", border: "none", color: "#7B2D8B", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                    Shop now →
-                  </button>
-                </div>
-              ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
-                      {["", "Order ID", "Date", "Total", "Status"].map((h, i) => (
-                        <th key={i} style={{ textAlign: "left", padding: "6px 8px", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: "0 0 200px" }}>
+                    <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>Status</div>
+                    <select
+                      style={{ ...filterInp, appearance: "auto" }}
+                      value={filterStatus}
+                      onChange={e => setFilterStatus(e.target.value)}
+                    >
+                      <option value="">All statuses</option>
+                      {distinctStatuses.map(s => (
+                        <option key={s} value={s}>{s}</option>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map(o => [
-                      <tr key={o.id} onClick={() => toggleOrder(o.id)} style={{ borderBottom: "1px solid #e2e8f0", cursor: "pointer" }}>
-                        <td style={{ padding: "8px", color: "#94a3b8", fontSize: 11, width: 20 }}>{expandedOrderId === o.id ? "▼" : "▶"}</td>
-                        <td style={{ padding: "8px", fontFamily: "monospace", fontSize: 11 }}>{o.id.slice(0, 8)}…</td>
-                        <td style={{ padding: "8px", whiteSpace: "nowrap" }}>{fmtDate(o.created_at)}</td>
-                        <td style={{ padding: "8px", fontWeight: 600 }}>₹{fmt(o.total)}</td>
-                        <td style={{ padding: "8px" }}>
-                          <span style={{
-                            fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 8px",
-                            background: o.status === "delivered" ? "#eafaf1" : o.status === "pending" ? "#fef9e7" : "#f0f4ff",
-                            color:      o.status === "delivered" ? "#27ae60" : o.status === "pending" ? "#e67e22" : "#2563eb",
-                          }}>{o.status}</span>
-                        </td>
-                      </tr>,
-                      expandedOrderId === o.id && (
-                        <tr key={`${o.id}-d`}>
-                          <td colSpan={5} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
-                            {!orderItemsCache[o.id] ? (
-                              <div style={{ color: "#94a3b8" }}>Loading…</div>
-                            ) : orderItemsCache[o.id].length === 0 ? (
-                              <div style={{ color: "#94a3b8" }}>No items.</div>
-                            ) : (
-                              <table style={{ width: "100%", fontSize: 12 }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ textAlign: "left" }}>Product</th>
-                                    <th style={{ textAlign: "center" }}>Qty</th>
-                                    <th style={{ textAlign: "right" }}>Price</th>
-                                    <th style={{ textAlign: "right" }}>Subtotal</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {orderItemsCache[o.id].map(it => (
-                                    <tr key={it.id}>
-                                      <td style={{ padding: "4px 0" }}>{it.name}</td>
-                                      <td style={{ textAlign: "center" }}>{it.qty}</td>
-                                      <td style={{ textAlign: "right" }}>₹{fmt(it.price)}</td>
-                                      <td style={{ textAlign: "right" }}>₹{fmt(Number(it.price) * it.qty)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
+                    </select>
+                  </div>
+                  {anyFilterActive && (
+                    <div style={{ marginTop: 16 }}>
+                      <button
+                        onClick={clearAll}
+                        style={{ background: "none", border: "1px solid #cbd5e1", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", color: "#7B2D8B" }}
+                      >
+                        Clear filters ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Orders table */}
+              <div style={card}>
+                {displayedOrders.length === 0 ? (
+                  <div style={{ color: "#94a3b8", textAlign: "center", padding: 32 }}>
+                    <div style={{ fontSize: 32, marginBottom: 8 }}>📦</div>
+                    {orders.length === 0 ? (
+                      <>No orders yet.{" "}<button onClick={() => navigate("/store")} style={{ background: "none", border: "none", color: "#7B2D8B", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>Shop now →</button></>
+                    ) : (
+                      <>No orders match the current filters.{" "}<button onClick={clearAll} style={{ background: "none", border: "none", color: "#7B2D8B", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>Clear filters</button></>
+                    )}
+                  </div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e2e8f0" }}>
+                        {[["Order ID",""], ["Date","ma-col-date"], ["Total",""], ["Status",""]].map(([h, cls], i) => (
+                          <th key={i} className={cls} style={{ textAlign: "left", padding: "6px 8px", color: "#94a3b8", fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedOrders.map(o => [
+                        <tr key={o.id} onClick={() => toggleOrder(o.id)} style={{ borderBottom: "1px solid #e2e8f0", cursor: "pointer" }}>
+                          <td style={{ padding: "8px", fontFamily: "monospace", fontSize: 11 }}>
+                            <span style={{ marginRight: 6, color: "#94a3b8", fontSize: 10 }}>{expandedOrderId === o.id ? "▼" : "▶"}</span>
+                            {o.id.slice(0, 8)}…
                           </td>
-                        </tr>
-                      ),
-                    ])}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
+                          <td className="ma-col-date" style={{ padding: "8px", whiteSpace: "nowrap" }}>{fmtDate(o.created_at)}</td>
+                          <td style={{ padding: "8px", fontWeight: 600 }}>₹{fmt(o.total)}</td>
+                          <td style={{ padding: "8px" }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, borderRadius: 4, padding: "2px 8px",
+                              background: o.status === "delivered" ? "#eafaf1" : o.status === "pending" ? "#fef9e7" : "#f0f4ff",
+                              color:      o.status === "delivered" ? "#27ae60" : o.status === "pending" ? "#e67e22" : "#2563eb",
+                            }}>{o.status}</span>
+                          </td>
+                        </tr>,
+                        expandedOrderId === o.id && (
+                          <tr key={`${o.id}-d`}>
+                            <td colSpan={4} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
+                              {!orderItemsCache[o.id] ? (
+                                <div style={{ color: "#94a3b8" }}>Loading…</div>
+                              ) : orderItemsCache[o.id].length === 0 ? (
+                                <div style={{ color: "#94a3b8" }}>No items.</div>
+                              ) : (
+                                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                                  <thead>
+                                    <tr style={{ color: "#94a3b8", fontSize: 11, textTransform: "uppercase" }}>
+                                      <th style={{ textAlign: "left", paddingBottom: 6, fontWeight: 600 }}>Item</th>
+                                      <th style={{ textAlign: "center", paddingBottom: 6, fontWeight: 600 }}>Qty</th>
+                                      <th style={{ textAlign: "right", paddingBottom: 6, fontWeight: 600 }}>Price</th>
+                                      <th style={{ textAlign: "right", paddingBottom: 6, fontWeight: 600 }}>Subtotal</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {orderItemsCache[o.id].map(it => (
+                                      <tr key={it.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                                        <td style={{ padding: "6px 0", color: "#334155" }}>{it.name}</td>
+                                        <td style={{ textAlign: "center", color: "#64748b" }}>{it.qty}</td>
+                                        <td style={{ textAlign: "right" }}>₹{fmt(it.price)}</td>
+                                        <td style={{ textAlign: "right", fontWeight: 600 }}>₹{fmt(Number(it.price) * it.qty)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                              {o.payment_id && (
+                                <div style={{ marginTop: 12, padding: "10px 12px", background: "#f9f5fb", borderRadius: 6, fontSize: 12 }}>
+                                  <span style={{ color: "#64748b" }}>Payment ref: </span>
+                                  <span style={{ fontFamily: "monospace", color: "#7B2D8B", fontWeight: 700 }}>{o.payment_id}</span>
+                                </div>
+                              )}
+                              {o.delivery_address && (
+                                <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+                                  <span style={{ fontWeight: 600 }}>Delivery: </span>{o.delivery_address}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        ),
+                      ])}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         {/* TAB 1: OVERVIEW */}
         {tab === 1 && (

@@ -969,7 +969,7 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
-  const { session, dealer, isDealer, isCustomer, signOut } = useApp();
+  const { session, dealer, isDealer, isCustomer, signOut, dealerApplicationStatus } = useApp();
   const [customerName, setCustomerName] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
@@ -1271,6 +1271,9 @@ export default function Store() {
         .store-header { position: sticky; top: 0; z-index: 200; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
         .store-header-inner { max-width: 1400px; margin: 0 auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
         .store-row1 { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: space-between; }
+        .store-logo-wrap { display: flex; flex-direction: row; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; }
+        .store-logo-eltop  { height: auto; width: auto; max-width: 90px; }
+        .store-logo-embassy { height: auto; width: auto; max-width: 115px; }
         .store-row2 { display: flex; width: 100%; }
         .store-search-wrap { display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.2); flex: 1; min-width: 0; }
         .store-search-wrap input { flex: 1; padding: 9px 14px; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; width: 100%; }
@@ -1281,6 +1284,9 @@ export default function Store() {
           .store-row1 { flex: none; }
           .store-row2 { display: none; }
           .store-row1-search { display: flex; flex: 0 1 400px; max-width: 400px; min-width: 0; }
+          .store-logo-eltop  { max-width: unset; height: 38px; }
+          .store-logo-embassy { max-width: unset; height: 38px; }
+          .store-logo-wrap { gap: 12px; }
         }
 
         /* Header right buttons */
@@ -1288,9 +1294,13 @@ export default function Store() {
         .btn-login-primary { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-login { background: none; border: 1.5px solid #7B2D8B; border-radius: 8px; color: #7B2D8B; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: none; padding: 7px 12px; }
         .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
+        .btn-login-split { display: none; flex-direction: column; gap: 3px; flex-shrink: 0; }
+        .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .btn-login-split-signup { background: transparent; border: 1.5px solid #7B2D8B; border-radius: 6px; color: #7B2D8B; font-size: 10px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         @media (max-width: 639px) {
-          .btn-login-primary { font-size: 11px; padding: 7px 10px; }
+          .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
+          .btn-login-split   { display: flex; }
         }
 
         /* Hero banner */
@@ -1357,15 +1367,16 @@ export default function Store() {
           <div className="store-row1">
             {/* Dual logos */}
             <div
+              className="store-logo-wrap"
               onClick={() => { setSelectedProduct(null); setCategory(null); navigate('/store'); scrollToTop(); }}
               title="Go to Home"
-              style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: '16px', minWidth: '280px', flexShrink: 0, cursor: 'pointer' }}
             >
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'flex-start' }}>
                 <img
                   src="/assets/ELTOP%20LOGO.png"
                   alt="Eltop"
-                  style={{ height: '60px', width: 'auto', objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
+                  className="store-logo-eltop"
+                  style={{ width: 'auto', objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
                   onError={e => e.target.style.display = 'none'}
                 />
                 <span style={{ fontSize: '10px', color: '#FF0000', fontWeight: 'bold', lineHeight: 1 }}>®</span>
@@ -1373,7 +1384,8 @@ export default function Store() {
               <img
                 src="/assets/EMBASSY%20LOGO.png"
                 alt="Embassy"
-                style={{ height: '50px', width: 'auto', objectFit: 'contain', display: 'block', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
+                className="store-logo-embassy"
+                style={{ width: 'auto', objectFit: 'contain', filter: 'brightness(0) saturate(100%) invert(17%) sepia(100%) saturate(7000%) hue-rotate(0deg) brightness(100%) contrast(100%)' }}
                 onError={e => e.target.style.display = 'none'}
               />
             </div>
@@ -1424,6 +1436,12 @@ export default function Store() {
                 </div>
               ) : (
                 <>
+                  {/* Mobile: two stacked buttons */}
+                  <div className="btn-login-split">
+                    <button className="btn-login-split-login" onClick={() => navigate("/login")}>Login</button>
+                    <button className="btn-login-split-signup" onClick={() => navigate("/login")}>Sign up</button>
+                  </div>
+                  {/* Desktop: single button */}
                   <button className="btn-login-primary" onClick={() => navigate("/login")}>
                     👤 Login / Sign Up
                   </button>
@@ -1454,6 +1472,25 @@ export default function Store() {
           </div>
         </div>
       </header>
+
+      {/* ── Dealer application status banners ── */}
+      {isDealer && dealerApplicationStatus === 'pending_details' && (
+        <div style={{ background: '#FEF3C7', borderBottom: '2px solid #F59E0B', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
+            ⚠️ Your application is incomplete. Complete your application to unlock dealer discounts.
+          </span>
+          <button style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'not-allowed', whiteSpace: 'nowrap', flexShrink: 0, opacity: 0.8 }}>
+            Application form coming soon
+          </button>
+        </div>
+      )}
+      {isDealer && dealerApplicationStatus === 'under_review' && (
+        <div style={{ background: '#EFF6FF', borderBottom: '2px solid #3B82F6', padding: '12px 20px' }}>
+          <span style={{ fontSize: 13, color: '#1E40AF', fontWeight: 600 }}>
+            🕐 Your application is under review. Dealer discounts will be visible once approved. Our sales team will guide you through the onboarding process.
+          </span>
+        </div>
+      )}
 
       {/* ── Hero banner ── */}
       {!selectedProduct && (
