@@ -160,7 +160,7 @@ export default function TrackOrder() {
                 style={{ width: 42, height: 48, textAlign: "center", fontSize: 22, fontWeight: 700, borderRadius: 8, border: "1.5px solid #ddd", fontFamily: "inherit" }}
                 maxLength={1} value={d}
                 onChange={e => handleOtpChange(i, e.target.value)}
-                onKeyDown={e => handleOtpKey(i, e)}
+                onKeyDown={e => { handleOtpKey(i, e); if (e.key === "Enter") verifyOtp(); }}
               />
             ))}
           </div>
