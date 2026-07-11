@@ -66,6 +66,11 @@ serve(async (req) => {
         <div style="font-family:monospace;font-size:15px;font-weight:700;color:#7B2D8B;">${payment_id}</div>
         <div style="font-size:11px;color:#888;margin-top:4px;">Keep this ID for any queries or refund requests</div>
       </div>
+      <div style="text-align:center;margin-bottom:24px;">
+        <a href="https://www.eltopbyembassy.com/track" style="display:inline-block;background:#7B2D8B;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;">
+          Track Your Order →
+        </a>
+      </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;">
         <thead>
           <tr style="background:#f9f5fb;">

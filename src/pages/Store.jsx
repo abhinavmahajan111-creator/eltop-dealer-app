@@ -1167,7 +1167,7 @@ export default function Store() {
             .then(res => console.log('[order-confirmation] invoke response:', res))
             .catch(err => console.error('[order-confirmation] invoke failed:', JSON.stringify(err, Object.getOwnPropertyNames(err))));
           }
-          alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id);
+          alert('✅ Order Confirmed!\nPayment ID: ' + razorpay_payment_id + (confirmationEmail ? '\n\nTrack your order anytime at eltopbyembassy.com/track using this email.' : ''));
         },
         theme: { color: '#7B2D8B' },
         modal: {
@@ -1638,6 +1638,7 @@ export default function Store() {
             <a href="/login" style={{ color: '#ccc', textDecoration: 'none' }}>🤝 Dealer Login</a>
             <a href="/login" style={{ color: '#ccc', textDecoration: 'none' }}>👤 Sign Up</a>
             <a href="https://wa.me/919310159139" target="_blank" rel="noreferrer" style={{ color: '#ccc', textDecoration: 'none' }}>💬 WhatsApp Us</a>
+            <a href="/track" style={{ color: '#ccc', textDecoration: 'none' }}>📦 Track Your Order</a>
           </div>
         </div>
         {/* Column 3: Stay Connected */}
