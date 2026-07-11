@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -26,7 +27,8 @@ export default function Login() {
     }, 1000);
   }
 
-  const isGuest = role === "Guest";
+  const isGuest    = role === "Guest";
+  const isCustomer = role === "Customer / My Account";
 
   function handleRoleChange(e) {
     setRole(e.target.value);
@@ -44,7 +46,40 @@ export default function Login() {
   async function verify() {
     const otp = otpRefs.map(r => r.current?.value || "").join("");
     const ok  = await verifyOtp(otp);
-    if (ok) navigate(role === "Administrator" ? "/admin" : "/dashboard");
+    if (!ok) return;
+
+    if (isCustomer) {
+      // Navigate based on role selection — don't wait on AppContext's async profile fetch
+      if (isSupabaseConfigured) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // Ensure profile row exists with is_dealer = false
+          const { data: existing } = await supabase
+            .from("profiles")
+            .select("id, is_dealer")
+            .eq("id", user.id)
+            .maybeSingle();
+          if (existing) {
+            // Profile exists (trigger created it) — ensure is_dealer is false
+            if (existing.is_dealer !== false) {
+              await supabase.from("profiles").update({ is_dealer: false }).eq("id", user.id);
+            }
+          } else {
+            // Fallback: trigger didn't fire — create the row manually
+            await supabase.from("profiles").insert({
+              id:        user.id,
+              email:     user.email,
+              is_dealer: false,
+              name:      "",
+            });
+          }
+        }
+      }
+      navigate("/my-account");
+      return;
+    }
+
+    navigate(role === "Administrator" ? "/admin" : "/dashboard");
   }
 
   function handleOtpInput(e, i) {
@@ -67,8 +102,8 @@ export default function Login() {
     <div className="screen" id="screen-login">
       <div className="content">
         <div className="login-logo">ET</div>
-        <div className="login-title">Welcome, Dealer</div>
-        <div className="login-sub">Login to manage your orders</div>
+        <div className="login-title">{isCustomer ? "My Account" : "Welcome, Dealer"}</div>
+        <div className="login-sub">{isCustomer ? "Sign in or create your account" : "Login to manage your orders"}</div>
 
         {deactivatedAccount && (
           <div style={{ background: '#fdecea', border: '1px solid #e74c3c', borderRadius: 12, padding: '16px 18px', marginBottom: 20, fontSize: 14, color: '#7b241c', lineHeight: 1.5 }}>
@@ -95,6 +130,7 @@ export default function Login() {
           }}
         >
           <option value="Guest">Guest</option>
+          <option value="Customer / My Account">Customer / My Account</option>
           <option value="Channel Partner">Channel Partner</option>
           <option value="Sales Executive">Sales Executive</option>
           <option value="Logistics & Dispatch">Logistics &amp; Dispatch</option>
