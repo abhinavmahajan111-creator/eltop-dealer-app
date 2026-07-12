@@ -1547,11 +1547,15 @@ export default function Store() {
                       <stop offset="100%" stopColor="#FFF3B0" />
                     </linearGradient>
                   </defs>
-                  {/* 4-fold billowy cape: attaches right, trails left with wave-folds */}
+                  {/* Cape body: top edge droops left, 3 smooth S-curve folds tapering toward tip */}
                   <path
-                    d="M 235 25 C 200 22, 140 15, 68 30 C 44 36, 18 48, 33 62 C 48 76, 26 88, 8 98 C 5 108, 28 120, 42 130 C 56 140, 24 155, 50 162 C 90 168, 165 158, 235 138 Z"
+                    d="M 232 28 C 185 32, 120 36, 75 42 C 55 48, 44 54, 42 58 C 42 66, 10 70, 10 84 C 10 96, 30 100, 30 106 C 30 114, 8 118, 10 128 C 12 138, 36 140, 38 146 C 38 150, 22 152, 28 156 C 34 160, 58 160, 65 155 C 105 150, 158 146, 192 142 C 212 139, 226 135, 232 132 Z"
                     fill="url(#capeGrad)"
                   />
+                  {/* Fold-crease shadows — thin curved strokes on inner face of each fold */}
+                  <path d="M 40 68 C 24 76, 20 88, 24 100 C 28 108, 36 110, 36 114" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.45" strokeLinecap="round" />
+                  <path d="M 36 114 C 20 122, 18 132, 22 140 C 26 148, 38 148, 40 150" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.40" strokeLinecap="round" />
+                  <path d="M 40 150 C 28 154, 25 158, 32 160" fill="none" stroke="#B07000" strokeWidth="1.2" strokeOpacity="0.35" strokeLinecap="round" />
                 </svg>
                 {/* Fanman bounces on top (DOM order: img after SVG = img on top naturally) */}
                 <div className="dealer-hero-fanman" style={{ position: 'relative' }}>
