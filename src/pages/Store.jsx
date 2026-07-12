@@ -1519,8 +1519,14 @@ export default function Store() {
           {/* Text content */}
           <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0' }}>
             <div className="store-hero-title">Welcome to Eltop by Embassy</div>
-            <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
-            <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+            {isDealer ? (
+              <div className="store-hero-sub">Your trusted partner for premium electrical products.</div>
+            ) : (
+              <>
+                <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
+                <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+              </>
+            )}
           </div>
         </div>
       )}
