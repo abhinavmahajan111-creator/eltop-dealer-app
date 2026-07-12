@@ -1314,12 +1314,17 @@ export default function Store() {
           .store-hero-sub   { font-size: 12px; }
           .store-hero-btn   { font-size: 13px; padding: 9px 20px; }
         }
-        /* Dealer hero — Fanman bounce */
+        /* Dealer hero — Fanman bounce + cape flow */
         @keyframes fanman-bounce {
           0%, 100% { transform: translateY(0); }
           50%       { transform: translateY(-9px); }
         }
-        .dealer-hero-fanman { animation: fanman-bounce 1.3s ease-in-out infinite; }
+        @keyframes cape-flow {
+          0%, 100% { transform: translateX(0) skewY(-2deg); }
+          50%       { transform: translateX(-7px) skewY(3deg); }
+        }
+        .dealer-hero-fanman { animation: fanman-bounce 1.3s ease-in-out infinite; position: relative; }
+        .dealer-hero-cape   { animation: cape-flow 1.3s ease-in-out infinite; transform-origin: right center; }
 
         /* Category card grid */
         .cat-grid-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 16px 40px; }
@@ -1525,13 +1530,39 @@ export default function Store() {
           /* Dealer variant: lighter purple, Fanman mascot + text as centered group */
           <div style={{ background: 'linear-gradient(135deg, #8B3D9B 0%, #B06DC8 100%)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '22px 20px' : '20px 40px', minHeight: isMobile ? 150 : 175, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 10 : 26 }}>
-              <img
-                src="/assets/fan%20man%20eltop.png"
-                alt="Eltop Fanman"
-                className="dealer-hero-fanman"
-                style={{ height: isMobile ? 80 : 115, width: 'auto', flexShrink: 0 }}
-                onError={e => { e.target.style.display = 'none'; }}
-              />
+              {/* Outer wrapper: relative container so cape can extend left via absolute positioning */}
+              <div style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
+                {/* Cape SVG: billowy multi-fold cape trailing LEFT, right edge overlaps Fanman body */}
+                <svg
+                  className="dealer-hero-cape"
+                  width={isMobile ? 148 : 212}
+                  height={isMobile ? 105 : 150}
+                  viewBox="0 0 240 170"
+                  style={{ position: 'absolute', right: 'calc(100% - 35px)', top: isMobile ? 3 : 5, opacity: 0.92, pointerEvents: 'none' }}
+                >
+                  <defs>
+                    <linearGradient id="capeGrad" x1="240" y1="85" x2="0" y2="85" gradientUnits="userSpaceOnUse">
+                      <stop offset="0%" stopColor="#E8A800" />
+                      <stop offset="55%" stopColor="#FFC93C" />
+                      <stop offset="100%" stopColor="#FFF3B0" />
+                    </linearGradient>
+                  </defs>
+                  {/* 4-fold billowy cape: attaches right, trails left with wave-folds */}
+                  <path
+                    d="M 235 25 C 200 22, 140 15, 68 30 C 44 36, 18 48, 33 62 C 48 76, 26 88, 8 98 C 5 108, 28 120, 42 130 C 56 140, 24 155, 50 162 C 90 168, 165 158, 235 138 Z"
+                    fill="url(#capeGrad)"
+                  />
+                </svg>
+                {/* Fanman bounces on top (DOM order: img after SVG = img on top naturally) */}
+                <div className="dealer-hero-fanman" style={{ position: 'relative' }}>
+                  <img
+                    src="/assets/fan%20man%20eltop.png"
+                    alt="Eltop Fanman"
+                    style={{ height: isMobile ? 80 : 115, width: 'auto', display: 'block' }}
+                    onError={e => { e.target.parentElement.parentElement.style.display = 'none'; }}
+                  />
+                </div>
+              </div>
               <div style={{ textAlign: isMobile ? 'center' : 'left' }}>
                 <div className="store-hero-title">Welcome to Eltop by Embassy</div>
                 <div className="store-hero-sub" style={{ color: '#F0DFF5', marginBottom: 0 }}>Your trusted partner for premium electrical products.</div>
