@@ -11,13 +11,14 @@ const STAFF_ROLE_MAP = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated } = useApp();
+  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, refreshProfile } = useApp();
 
   const [role, setRole]             = useState("Guest");
   const [dealerMode, setDealerMode] = useState("existing"); // 'existing' | 'new'
   const [step, setStep]             = useState(1);
   const [emailInput, setEmailInput] = useState("");
   const [localError, setLocalError] = useState("");
+  const [localBusy, setLocalBusy] = useState(false);
   const [dealerMismatch, setDealerMismatch] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [showFanmanModal, setShowFanmanModal] = useState(false);
@@ -86,6 +87,10 @@ export default function Login() {
     const ok  = await verifyOtp(otp);
     if (!ok) return;
 
+    // Cover the insert → refreshProfile → navigate window with a spinner so the
+    // login screen never flashes stale state while async work is in progress.
+    setLocalBusy(true);
+
     // ── Customer ──
     if (isCustomer) {
       if (isSupabaseConfigured) {
@@ -115,6 +120,7 @@ export default function Login() {
         if (profErr && profErr.code !== "PGRST116") {
           setLocalError("Unable to verify your dealer account. Please try again.");
           await supabase.auth.signOut();
+          setLocalBusy(false);
           setStep(1);
           return;
         }
@@ -123,6 +129,7 @@ export default function Login() {
         } else {
           await supabase.auth.signOut();
           setDealerMismatch(true);
+          setLocalBusy(false);
           setStep(1);
         }
       } else {
@@ -143,19 +150,37 @@ export default function Login() {
             navigate("/dashboard");
           } else if (prof) {
             // Profile exists but not a dealer — upgrade it
-            await supabase.from("profiles")
+            const { error: updateErr } = await supabase.from("profiles")
               .update({ is_dealer: true, dealer_application_status: "pending_details" })
               .eq("id", user.id);
+            if (updateErr) {
+              console.error('[new-dealer-signup] update error:', updateErr);
+              setLocalError("Could not save your application. Please try again.");
+              await supabase.auth.signOut();
+              setLocalBusy(false);
+              setStep(1);
+              return;
+            }
+            await refreshProfile();
             navigate("/store");
           } else {
             // No profile yet — create one
-            await supabase.from("profiles").insert({
+            const { error: insertErr } = await supabase.from("profiles").insert({
               id:                        user.id,
               email:                     user.email,
               is_dealer:                 true,
               dealer_application_status: "pending_details",
               name:                      "",
             });
+            if (insertErr) {
+              console.error('[new-dealer-signup] insert error:', insertErr);
+              setLocalError("Could not create your account. Please try again.");
+              await supabase.auth.signOut();
+              setLocalBusy(false);
+              setStep(1);
+              return;
+            }
+            await refreshProfile();
             navigate("/store");
           }
         }
@@ -296,8 +321,8 @@ export default function Login() {
                 {(localError || authError) && (
                   <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
                 )}
-                <button className="btn" onClick={verify} disabled={authBusy}>
-                  {authBusy ? "Verifying..." : "Verify & Login"}
+                <button className="btn" onClick={verify} disabled={authBusy || localBusy}>
+                  {authBusy ? "Verifying..." : localBusy ? "Setting up account..." : "Verify & Login"}
                 </button>
                 {resendCooldown > 0
                   ? <div className="resend" style={{ opacity: 0.5, cursor: "default" }}>Resend OTP in {resendCooldown}s</div>

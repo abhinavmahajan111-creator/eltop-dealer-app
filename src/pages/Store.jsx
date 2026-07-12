@@ -969,7 +969,7 @@ export default function Store() {
   const productsRef = useRef(null);
   const containerRef = useRef(null);
   const cart = useCart();
-  const { session, dealer, isDealer, isCustomer, signOut, dealerApplicationStatus } = useApp();
+  const { session, dealer, isDealer, isCustomer, signOut, dealerApplicationStatus, profileLoaded, sessionChecked } = useApp();
   const [customerName, setCustomerName] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
@@ -1402,6 +1402,7 @@ export default function Store() {
             {/* Actions */}
             <div className="store-header-actions">
               {isCustomer ? (
+                // ── Logged-in customer: Hi, {name} dropdown ──
                 <div ref={accountMenuRef} style={{ position: "relative" }}>
                   <button
                     onClick={() => setAccountMenuOpen(v => !v)}
@@ -1434,7 +1435,24 @@ export default function Store() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : isDealer ? (
+                // ── Logged-in dealer browsing /store: Dashboard + Logout ──
+                <>
+                  <button
+                    className="btn-login-primary"
+                    onClick={() => navigate("/dashboard")}
+                  >
+                    🏪 Dealer Dashboard
+                  </button>
+                  <button
+                    onClick={async () => { await signOut(); navigate("/login"); }}
+                    style={{ background: "none", border: "1.5px solid #dc2626", borderRadius: 8, color: "#dc2626", fontWeight: 700, fontSize: 13, padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}
+                  >
+                    🚪 Logout
+                  </button>
+                </>
+              ) : sessionChecked && !session ? (
+                // ── Genuinely logged out ──
                 <>
                   {/* Mobile: two stacked buttons */}
                   <div className="btn-login-split">
@@ -1449,6 +1467,9 @@ export default function Store() {
                     📦 Track Your Order
                   </button>
                 </>
+              ) : (
+                // ── Session exists but role not loaded yet — show nothing to avoid flash ──
+                null
               )}
               <button className="store-cart-btn" onClick={() => setCartOpen(true)}>
                 <span style={{ fontSize: 22 }}>🛒</span>
@@ -1474,7 +1495,7 @@ export default function Store() {
       </header>
 
       {/* ── Dealer application status banners ── */}
-      {isDealer && dealerApplicationStatus === 'pending_details' && (
+      {isDealer && profileLoaded && dealerApplicationStatus === 'pending_details' && (
         <div style={{ background: '#FEF3C7', borderBottom: '2px solid #F59E0B', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
             ⚠️ Your application is incomplete. Complete your application to unlock dealer discounts.
@@ -1484,7 +1505,7 @@ export default function Store() {
           </button>
         </div>
       )}
-      {isDealer && dealerApplicationStatus === 'under_review' && (
+      {isDealer && profileLoaded && dealerApplicationStatus === 'under_review' && (
         <div style={{ background: '#EFF6FF', borderBottom: '2px solid #3B82F6', padding: '12px 20px' }}>
           <span style={{ fontSize: 13, color: '#1E40AF', fontWeight: 600 }}>
             🕐 Your application is under review. Dealer discounts will be visible once approved. Our sales team will guide you through the onboarding process.

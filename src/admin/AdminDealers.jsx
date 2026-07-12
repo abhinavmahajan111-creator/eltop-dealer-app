@@ -539,9 +539,11 @@ export default function AdminDealers() {
 
       // ── Customers export (separate file) ───────────────────────────────────
       setExportStatus("Fetching customers…");
-      const [custRes, addrRes] = await Promise.all([
+      const [custRes, addrRes, guestOrdersRes] = await Promise.all([
         supabase.from("profiles").select("id, name, phone, email, created_at").eq("is_dealer", false).is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("customer_addresses").select("*").order("created_at", { ascending: true }),
+        // Fetch guest orders (no dealer_id) sorted oldest-first so first-seen date is accurate
+        supabase.from("orders").select("customer_name, customer_phone, customer_email, created_at, delivery_address").is("dealer_id", null).not("customer_email", "is", null).order("created_at", { ascending: true }),
       ]);
       const customers = custRes.data || [];
       const addrMap   = {};
@@ -549,10 +551,34 @@ export default function AdminDealers() {
         if (!addrMap[a.profile_id]) addrMap[a.profile_id] = [];
         addrMap[a.profile_id].push(a);
       });
+
+      // Emails of registered customers — used to exclude guests who later registered
+      const profileEmailSet = new Set(customers.map(c => c.email?.toLowerCase()).filter(Boolean));
+
+      // Deduplicate guest orders by email; keep the earliest order's contact/address data.
+      // Orders are already sorted oldest-first, so first Map entry wins.
+      const guestMap = new Map();
+      (guestOrdersRes.data || []).forEach(o => {
+        const key = o.customer_email?.toLowerCase();
+        if (!key || profileEmailSet.has(key)) return; // skip if registered customer
+        if (!guestMap.has(key)) {
+          guestMap.set(key, {
+            name:    o.customer_name    || "",
+            phone:   o.customer_phone   || "",
+            email:   o.customer_email   || "",
+            firstAt: o.created_at,
+            address: o.delivery_address || "",
+          });
+        }
+      });
+
       const customerRows = [];
+
+      // Registered customers
       customers.forEach(c => {
         const addrs = addrMap[c.id] || [];
         const base = {
+          "Source":             "Registered Customer",
           "Profile ID":         c.id,
           "Account Name":       c.name  || "",
           "Account Phone":      c.phone || "",
@@ -577,6 +603,29 @@ export default function AdminDealers() {
           }));
         }
       });
+
+      // Guest checkout rows — one row per unique email, address from delivery_address text field
+      guestMap.forEach(g => {
+        customerRows.push({
+          "Source":             "Guest Checkout",
+          "Profile ID":         "",
+          "Account Name":       g.name,
+          "Account Phone":      g.phone,
+          "Account Email":      g.email,
+          "Account Created At": g.firstAt ? new Date(g.firstAt).toLocaleString("en-IN") : "",
+          "Contact Type":       "guest",
+          "Address Label":      "",
+          "Recipient Name":     g.name,
+          "Recipient Phone":    g.phone,
+          "Address Line 1":     g.address,
+          "Address Line 2":     "",
+          "City":               "",
+          "State":              "",
+          "Pincode":            "",
+          "Is Default":         "",
+        });
+      });
+
       const custWb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(custWb, XLSX.utils.json_to_sheet(customerRows.length ? customerRows : [{}]), "Customers");
       XLSX.writeFile(custWb, `customers-export-${dateSuffix}.xlsx`);

@@ -64,6 +64,58 @@ export function AppProvider({ children }) {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // Awaitable profile loader. Used by the session effect below and by Login.jsx
+  // post-signup so navigate only fires after AppContext state is actually updated.
+  // Uses maybeSingle() — returns {data:null,error:null} for 0 rows, avoiding HTTP 406.
+  const refreshProfile = useCallback(async () => {
+    if (!isSupabaseConfigured || !session?.user) return true;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", session.user.id)
+      .maybeSingle();
+
+    if (data && !error) {
+      if (data.deleted_at) {
+        const { data: existing } = await supabase
+          .from("restore_requests")
+          .select("id")
+          .eq("profile_id", data.id)
+          .eq("status", "pending")
+          .maybeSingle();
+        if (!existing) {
+          await supabase.from("restore_requests").insert({
+            profile_id: data.id,
+            contact_value: session.user.email,
+            status: "pending",
+          });
+        }
+        await supabase.auth.signOut();
+        setSession(null);
+        setDeactivatedAccount(true);
+        setIsDealer(false);
+        setProfileLoaded(true);
+        return true;
+      }
+      setProfile(data);
+      setIsDealer(data.is_dealer === true);
+      setProfileLoaded(true);
+      return true;
+    }
+
+    // maybeSingle: {data:null, error:null} = 0 rows = no profile row = customer
+    if (!error) {
+      setIsDealer(false);
+      setProfileLoaded(true);
+      return true;
+    }
+
+    // Genuine fetch error — let caller decide whether to retry
+    console.error('[AppContext] refreshProfile error:', error);
+    return false;
+  }, [session]);
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     if (!session?.user) {
@@ -72,62 +124,22 @@ export function AppProvider({ children }) {
       return;
     }
     setProfileLoaded(false);
+    let cancelled = false;
 
-    async function fetchProfile(isRetry = false) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", session.user.id)
-        .single();
-
-      if (!error && data) {
-        if (data.deleted_at) {
-          const { data: existing } = await supabase
-            .from("restore_requests")
-            .select("id")
-            .eq("profile_id", data.id)
-            .eq("status", "pending")
-            .maybeSingle();
-          if (!existing) {
-            await supabase.from("restore_requests").insert({
-              profile_id: data.id,
-              contact_value: session.user.email,
-              status: "pending",
-            });
-          }
-          await supabase.auth.signOut();
-          setSession(null);
-          setDeactivatedAccount(true);
-          setIsDealer(false);
-          setProfileLoaded(true);
-          return;
-        }
-        setProfile(data);
-        setIsDealer(data.is_dealer === true);
-        setProfileLoaded(true);
-        return;
-      }
-
-      // PGRST116 = "no rows returned" — confirmed customer (no profile row).
-      // Any other error code means the fetch itself failed (network/timeout/RLS)
-      // and we genuinely don't know the user's role yet.
-      if (error?.code === 'PGRST116') {
-        setIsDealer(false);
-        setProfileLoaded(true);
-        return;
-      }
-
-      if (!isRetry) {
-        setTimeout(() => fetchProfile(true), 1500);
-      } else {
-        console.error('[AppContext] Profile fetch failed after retry:', error);
-        setIsDealer(false);
+    async function load(isRetry = false) {
+      if (cancelled) return;
+      const ok = await refreshProfile();
+      if (!ok && !isRetry && !cancelled) {
+        setTimeout(() => load(true), 1500);
+      } else if (!ok && !cancelled) {
+        console.error('[AppContext] Profile fetch failed after retry');
         // profileLoaded stays false — treat as "still unknown," not confirmed customer
       }
     }
+    load();
 
-    fetchProfile();
-  }, [session]);
+    return () => { cancelled = true; };
+  }, [session, refreshProfile]);
 
   const sendOtp = useCallback(async (emailAddress) => {
     setEmail(emailAddress);
@@ -349,6 +361,7 @@ export function AppProvider({ children }) {
     sendOtp,
     verifyOtp,
     signOut,
+    refreshProfile,
     authBusy,
     authError,
     toastMsg,
