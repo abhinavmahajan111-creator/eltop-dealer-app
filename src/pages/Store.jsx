@@ -1314,6 +1314,12 @@ export default function Store() {
           .store-hero-sub   { font-size: 12px; }
           .store-hero-btn   { font-size: 13px; padding: 9px 20px; }
         }
+        /* Dealer hero — Fanman bounce */
+        @keyframes fanman-bounce {
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(-9px); }
+        }
+        .dealer-hero-fanman { animation: fanman-bounce 1.3s ease-in-out infinite; }
 
         /* Category card grid */
         .cat-grid-wrap { max-width: 1400px; margin: 0 auto; padding: 24px 16px 40px; }
@@ -1515,20 +1521,33 @@ export default function Store() {
 
       {/* ── Hero banner ── */}
       {!selectedProduct && (
-        <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '30px 20px' : '0 60px', minHeight: 200 }}>
-          {/* Text content */}
-          <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0' }}>
-            <div className="store-hero-title">Welcome to Eltop by Embassy</div>
-            {isDealer ? (
-              <div className="store-hero-sub">Your trusted partner for premium electrical products.</div>
-            ) : (
-              <>
-                <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
-                <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
-              </>
-            )}
+        isDealer ? (
+          /* Dealer variant: lighter purple, Fanman mascot + text as centered group */
+          <div style={{ background: 'linear-gradient(135deg, #8B3D9B 0%, #B06DC8 100%)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? '22px 20px' : '20px 40px', minHeight: isMobile ? 150 : 175, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 10 : 26 }}>
+              <img
+                src="/assets/fan%20man%20eltop.png"
+                alt="Eltop Fanman"
+                className="dealer-hero-fanman"
+                style={{ height: isMobile ? 80 : 115, width: 'auto', flexShrink: 0 }}
+                onError={e => { e.target.style.display = 'none'; }}
+              />
+              <div style={{ textAlign: isMobile ? 'center' : 'left' }}>
+                <div className="store-hero-title">Welcome to Eltop by Embassy</div>
+                <div className="store-hero-sub" style={{ color: '#F0DFF5', marginBottom: 0 }}>Your trusted partner for premium electrical products.</div>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          /* Non-dealer variant: unchanged */
+          <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '30px 20px' : '0 60px', minHeight: 200 }}>
+            <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0' }}>
+              <div className="store-hero-title">Welcome to Eltop by Embassy</div>
+              <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
+              <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+            </div>
+          </div>
+        )
       )}
 
       {/* ── Category landing grid ── */}
