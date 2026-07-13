@@ -1293,6 +1293,7 @@ export default function Store() {
         .store-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .btn-login-primary { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-login { background: none; border: 1.5px solid #7B2D8B; border-radius: 8px; color: #7B2D8B; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: none; padding: 7px 12px; }
+        .btn-dealer-logout { background: none; border: 1.5px solid #dc2626; border-radius: 8px; color: #dc2626; font-weight: 700; font-size: 13px; padding: 7px 12px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
         .btn-login-split { display: none; flex-direction: column; gap: 3px; flex-shrink: 0; }
         .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
@@ -1300,6 +1301,7 @@ export default function Store() {
         @media (max-width: 639px) {
           .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
+          .btn-dealer-logout { display: none; }
           .btn-login-split   { display: flex; }
         }
 
@@ -1449,16 +1451,16 @@ export default function Store() {
               ) : isDealer ? (
                 // ── Logged-in dealer browsing /store: Dashboard + Logout ──
                 <>
-                  <button
-                    className="btn-login-primary"
-                    onClick={() => navigate("/dashboard")}
-                  >
+                  {/* Mobile (<640px): stacked compact buttons via btn-login-split */}
+                  <div className="btn-login-split">
+                    <button className="btn-login-split-login" onClick={() => navigate("/dashboard")}>🏪 Dashboard</button>
+                    <button className="btn-login-split-signup" onClick={async () => { await signOut(); navigate("/login"); }}>🚪 Logout</button>
+                  </div>
+                  {/* Desktop (≥640px): full-width buttons */}
+                  <button className="btn-login-primary" onClick={() => navigate("/dashboard")}>
                     🏪 Dealer Dashboard
                   </button>
-                  <button
-                    onClick={async () => { await signOut(); navigate("/login"); }}
-                    style={{ background: "none", border: "1.5px solid #dc2626", borderRadius: 8, color: "#dc2626", fontWeight: 700, fontSize: 13, padding: "7px 12px", cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit" }}
-                  >
+                  <button className="btn-dealer-logout" onClick={async () => { await signOut(); navigate("/login"); }}>
                     🚪 Logout
                   </button>
                 </>
@@ -1535,8 +1537,8 @@ export default function Store() {
                 {/* Cape SVG: billowy multi-fold cape trailing LEFT, right edge overlaps Fanman body */}
                 <svg
                   className="dealer-hero-cape"
-                  width={isMobile ? 148 : 212}
-                  height={isMobile ? 105 : 150}
+                  width={isMobile ? 113 : 212}
+                  height={isMobile ? 80 : 150}
                   viewBox="0 0 240 170"
                   style={{ position: 'absolute', right: 'calc(100% - 35px)', top: isMobile ? 3 : 5, opacity: 0.92, pointerEvents: 'none' }}
                 >
