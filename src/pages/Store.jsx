@@ -973,6 +973,8 @@ export default function Store() {
   const [customerName, setCustomerName] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
+  const [dealerMenuOpen, setDealerMenuOpen] = useState(false);
+  const dealerMenuRef = useRef(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const savedCheckoutData = useRef(null);
@@ -1004,6 +1006,17 @@ export default function Store() {
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [accountMenuOpen]);
+
+  useEffect(() => {
+    if (!dealerMenuOpen) return;
+    function handle(e) {
+      if (dealerMenuRef.current && !dealerMenuRef.current.contains(e.target)) {
+        setDealerMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [dealerMenuOpen]);
 
   const getPrice = useCallback((p) => {
     if (isDealer) {
@@ -1301,7 +1314,7 @@ export default function Store() {
         @media (max-width: 639px) {
           .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
-          .btn-dealer-logout { display: none; }
+          .btn-dealer-logout { font-size: 11px; padding: 5px 8px; }
           .btn-login-split   { display: flex; }
         }
 
@@ -1449,17 +1462,49 @@ export default function Store() {
                   )}
                 </div>
               ) : isDealer ? (
-                // ── Logged-in dealer browsing /store: Dashboard + Logout ──
+                // ── Logged-in dealer browsing /store: dropdown + Logout ──
                 <>
-                  {/* Mobile (<640px): stacked compact buttons via btn-login-split */}
-                  <div className="btn-login-split">
-                    <button className="btn-login-split-login" onClick={() => navigate("/dashboard")}>🏪 Dashboard</button>
-                    <button className="btn-login-split-signup" onClick={async () => { await signOut(); navigate("/login"); }}>🚪 Logout</button>
+                  <div ref={dealerMenuRef} style={{ position: "relative" }}>
+                    <button
+                      onClick={() => setDealerMenuOpen(v => !v)}
+                      style={{ background: "#7B2D8B", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" }}
+                    >
+                      🏪 Hi, {dealer?.name || session?.user?.email?.split("@")[0] || "Partner"} ▾
+                    </button>
+                    {dealerMenuOpen && (
+                      <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", background: "#fff", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,.15)", minWidth: 190, zIndex: 200, overflow: "hidden" }}>
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/profile"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          👤 My Profile
+                        </button>
+                        <div style={{ height: 1, background: "#e2e8f0" }} />
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/tracking"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          📦 My Orders
+                        </button>
+                        <div style={{ height: 1, background: "#e2e8f0" }} />
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/ledger"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          📒 My Ledger
+                        </button>
+                        <div style={{ height: 1, background: "#e2e8f0" }} />
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/dashboard"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          🏪 Dealer Dashboard
+                        </button>
+                        <div style={{ height: 1, background: "#e2e8f0" }} />
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/schemes"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          🎁 Schemes &amp; Offers
+                        </button>
+                        <div style={{ height: 1, background: "#e2e8f0" }} />
+                        <button onClick={() => { setDealerMenuOpen(false); navigate("/support"); }}
+                          style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                          🛎️ Support
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {/* Desktop (≥640px): full-width buttons */}
-                  <button className="btn-login-primary" onClick={() => navigate("/dashboard")}>
-                    🏪 Dealer Dashboard
-                  </button>
                   <button className="btn-dealer-logout" onClick={async () => { await signOut(); navigate("/login"); }}>
                     🚪 Logout
                   </button>

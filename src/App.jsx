@@ -15,6 +15,8 @@ import OrderConfirm from "./screens/OrderConfirm";
 import OrderTracking from "./screens/OrderTracking";
 import Ledger from "./screens/Ledger";
 import Profile from "./screens/Profile";
+import Schemes from "./screens/Schemes";
+import Support from "./screens/Support";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
 import AdminOrders from "./admin/AdminOrders";
@@ -41,6 +43,8 @@ export default function App() {
           <Route path="/tracking" element={<OrderTracking />} />
           <Route path="/ledger" element={<Ledger />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/schemes" element={<Schemes />} />
+          <Route path="/support" element={<Support />} />
         </Route>
       </Route>
 
