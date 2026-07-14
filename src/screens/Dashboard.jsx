@@ -279,7 +279,7 @@ export default function Dashboard() {
           <>
             {/* ── Tier progress bar ── */}
             {tierProgress ? (
-              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", marginTop: 10, marginBottom: 12 }}>
+              <div style={{ background: "#fff", border: "1px solid #7B2D8B", borderRadius: 10, padding: "10px 14px", marginTop: 10, marginBottom: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b", marginBottom: 6 }}>
                   <span>{tier.emoji} {tier.name}</span>
                   <span style={{ color: "#7B2D8B", fontWeight: 600 }}>
@@ -330,16 +330,18 @@ export default function Dashboard() {
 
             {/* ── Achievements ── */}
             <div className="section-title" style={{ marginTop: 4 }}>Achievements</div>
-            {orderCount === 0 ? (
-              <div style={{ textAlign: "center", padding: "14px 16px", background: "#f8fafc", borderRadius: 10, marginBottom: 14, color: "#64748b", fontSize: 13 }}>
-                <div style={{ fontSize: 28, marginBottom: 6 }}>🎯</div>
-                Place your first order to start earning badges!
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, marginBottom: 14 }}>
-                {badges.map((b, i) => <BadgeCard key={i} {...b} />)}
-              </div>
-            )}
+            <div style={{ border: "1px solid #7B2D8B", borderRadius: 12, padding: 12, marginBottom: 14, background: "#fff" }}>
+              {orderCount === 0 ? (
+                <div style={{ textAlign: "center", padding: "6px 0", color: "#64748b", fontSize: 13 }}>
+                  <div style={{ fontSize: 28, marginBottom: 6 }}>🎯</div>
+                  Place your first order to start earning badges!
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+                  {badges.map((b, i) => <BadgeCard key={i} {...b} />)}
+                </div>
+              )}
+            </div>
 
             {/* ── Schemes banner ── */}
             <div className="banner" onClick={() => navigate("/schemes")}>

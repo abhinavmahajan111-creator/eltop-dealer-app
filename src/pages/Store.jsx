@@ -28,16 +28,27 @@ function useCart() {
 
 const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
 
-// Handle image_urls (array or JSON string) or image_url (string)
+// Handle image_urls (array or JSON string) or image_url (string).
+// When image_urls is present but resolves to an empty array (product has no
+// uploaded photos yet), fall back to image_url — same logic as Catalogue.
+// Products that already have real uploaded photos (non-empty image_urls) are
+// unaffected because the early return fires before the fallback.
 function getImages(p) {
-  let urls = p.image_urls ?? p.image_url ?? null;
-  if (!urls) return [];
-  if (typeof urls === "string") {
-    // Could be a JSON array string or a plain URL
-    try { urls = JSON.parse(urls); } catch { urls = [urls]; }
+  let urls = p.image_urls;
+  if (urls != null) {
+    if (typeof urls === "string") {
+      try { urls = JSON.parse(urls); } catch { urls = [urls]; }
+    }
+    if (Array.isArray(urls)) {
+      const filtered = urls.filter(Boolean);
+      if (filtered.length > 0) return filtered; // has real uploaded photos — use them
+      // empty array — fall through to image_url fallback below
+    } else if (urls) {
+      return [urls];
+    }
   }
-  if (Array.isArray(urls)) return urls.filter(Boolean);
-  return [urls].filter(Boolean);
+  // Fallback: single image_url field (e.g. the default red-poster image)
+  return p.image_url ? [p.image_url] : [];
 }
 function getFirstImage(p) { return getImages(p)[0] || null; }
 
