@@ -345,6 +345,13 @@ export function AppProvider({ children }) {
     clearCart();
   }, [session, profile, clearCart]);
 
+  // PREVIEW_OVERRIDE – remove before commit
+  const __dev = import.meta.env.DEV && (() => {
+    if (new URLSearchParams(window.location.search).get('devdealer') === '1') { sessionStorage.setItem('devdealer','1'); return true; }
+    return sessionStorage.getItem('devdealer') === '1';
+  })();
+  const __devProfile = { name:'Test Dealer',dealer_code:'DEV-001',gstin:'DEV-GSTIN',address:'Dev Address',outstanding:0,credit_limit:500000,discount1:0,discount2:0 };
+
   const value = {
     cart,
     addToCart,
@@ -354,16 +361,16 @@ export function AppProvider({ children }) {
     placeOrder,
     email,
     setEmail,
-    session,
-    isLoggedIn: isSupabaseConfigured ? Boolean(session) : null,
-    isDealer,
-    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
-    profileLoaded,
-    sessionChecked,
+    session: __dev ? { user: { id: 'dev-dealer', email: 'dev@test.com' } } : session,
+    isLoggedIn: __dev ? true : (isSupabaseConfigured ? Boolean(session) : null),
+    isDealer: __dev ? true : isDealer,
+    isCustomer: __dev ? false : (profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin),
+    profileLoaded: __dev ? true : profileLoaded,
+    sessionChecked: __dev ? true : sessionChecked,
     isAdmin,
-    adminChecked,
-    dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
-    dealer: profile,
+    adminChecked: __dev ? true : adminChecked,
+    dealerApplicationStatus: __dev ? 'pending_details' : (profile?.dealer_application_status ?? 'none'),
+    dealer: __dev ? __devProfile : profile,
     products,
     invoices,
     sendOtp,
