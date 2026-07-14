@@ -732,6 +732,16 @@ export default function AdminDealers() {
     setNewTerritory("");
   };
 
+  const handleChangeAppStatus = async (newStatus) => {
+    const { error } = await supabase.from('profiles')
+      .update({ dealer_application_status: newStatus })
+      .eq('id', selected.id);
+    if (error) { alert('Failed: ' + error.message); return; }
+    const updated = { ...selected, dealer_application_status: newStatus };
+    setSelected(updated);
+    setAllProfiles(prev => prev.map(p => p.id === selected.id ? updated : p));
+  };
+
   const handleToggleBlock = async () => {
     setSaving(true);
     const next = !selected.is_blocked;
@@ -1167,13 +1177,47 @@ export default function AdminDealers() {
                 {selected.dealer_code || "No Code"} · Member since {memberSince}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
               <TypeBadge type={isDeleted ? 'deleted' : 'dealer'} />
               {!isDeleted && (
                 <span className={`badge ${selected.is_blocked ? "pending" : "delivered"}`}>
                   {selected.is_blocked ? "Blocked" : "Active"}
                 </span>
               )}
+              {!isDeleted && (() => {
+                const appStatus = selected.dealer_application_status || 'pending_details';
+                const appStatusColors = {
+                  pending_details: { bg: '#fef3c7', color: '#92400e', border: '#fcd34d' },
+                  under_review:    { bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' },
+                  approved:        { bg: '#dcfce7', color: '#166534', border: '#86efac' },
+                  rejected:        { bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
+                };
+                const appStatusLabels = {
+                  pending_details: 'Pending',
+                  under_review:    'Under Review',
+                  approved:        'Approved',
+                  rejected:        'Rejected',
+                };
+                const c = appStatusColors[appStatus] || appStatusColors.pending_details;
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>App:</span>
+                    <select
+                      value={appStatus}
+                      onChange={e => handleChangeAppStatus(e.target.value)}
+                      style={{
+                        background: c.bg, color: c.color, border: `1.5px solid ${c.border}`,
+                        borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700,
+                        cursor: 'pointer', outline: 'none', appearance: 'auto',
+                      }}
+                    >
+                      {Object.entries(appStatusLabels).map(([val, label]) => (
+                        <option key={val} value={val}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -1686,6 +1730,7 @@ export default function AdminDealers() {
                   )}
                 </th>
                 <th>Name</th>
+                <th>App Status</th>
                 <th>Phone</th>
                 <th>Email</th>
                 <th style={{ textAlign: 'right' }}>Orders</th>
@@ -1713,6 +1758,15 @@ export default function AdminDealers() {
                     {row._type !== 'guest' && row.dealer_code && (
                       <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{row.dealer_code}</div>
                     )}
+                  </td>
+                  <td>
+                    {row._type === 'dealer' ? (() => {
+                      const s = row.dealer_application_status || 'pending_details';
+                      const appColors = { pending_details: { bg: '#fef3c7', color: '#92400e' }, under_review: { bg: '#dbeafe', color: '#1e40af' }, approved: { bg: '#dcfce7', color: '#166534' }, rejected: { bg: '#fee2e2', color: '#991b1b' } };
+                      const appLabels = { pending_details: 'Pending', under_review: 'Under Review', approved: 'Approved', rejected: 'Rejected' };
+                      const c = appColors[s] || appColors.pending_details;
+                      return <span style={{ background: c.bg, color: c.color, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>{appLabels[s] || s}</span>;
+                    })() : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={{ fontSize: 12 }}>{row._phone || '—'}</td>
                   <td style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._email || '—'}</td>
