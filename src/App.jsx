@@ -35,7 +35,6 @@ export default function App() {
         <Route path="/" element={<Splash />} />
         <Route path="/login" element={<Login />} />
         <Route element={<DealerRoute />}>
-          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/catalogue" element={<Catalogue />} />
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/cart" element={<Cart />} />
@@ -60,6 +59,11 @@ export default function App() {
         <Route path="/admin/crm/:dealerId" element={<DealerCRM />} />
         <Route path="/admin/crm/guest/:guestKey" element={<GuestCRM />} />
         <Route path="/admin/crm/customer/:profileId" element={<CustomerCRM />} />
+      </Route>
+
+      {/* Dashboard — full-width on desktop like /store, outside PhoneFrame */}
+      <Route element={<DealerRoute />}>
+        <Route path="/dashboard" element={<Dashboard />} />
       </Route>
 
       <Route path="/store" element={<Store />} />
