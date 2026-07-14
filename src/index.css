@@ -32,6 +32,7 @@
     box-shadow:0 0 0 10px #000, 0 20px 60px rgba(0,0,0,.6);
     overflow:hidden;
     position:relative;
+    border:2px solid #E8A800;
   }
   .screen{
     position:absolute;
@@ -49,7 +50,7 @@
       margin: 0 auto;
       height: auto;
       min-height: 100vh;
-      border-radius: 0;
+      border-radius: 10px;
       box-shadow: none;
       overflow-y: auto;
     }
@@ -58,6 +59,23 @@
       height: auto;
       min-height: 100vh;
     }
+  }
+
+  /* ── Gold content border — shared across all page types ── */
+  #phone,
+  .screen,
+  .store-root {
+    border: 2px solid #E8A800;
+  }
+  .screen,
+  .store-root {
+    border-radius: 10px;
+  }
+  /* Cancel inner border when .screen is directly inside #phone
+     (the phone frame already carries the gold border) */
+  #phone > .screen {
+    border: none;
+    border-radius: 0;
   }
   @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 
