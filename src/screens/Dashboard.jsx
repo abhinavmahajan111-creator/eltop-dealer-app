@@ -252,7 +252,12 @@ export default function Dashboard() {
       <div className="content">
         {/* ── Dealer name + tier badge ── */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 2 }}>
-          <div>
+          <img
+            src="/assets/fan%20man%20eltop.png"
+            alt="Fanman"
+            style={{ height: 64, width: "auto", objectFit: "contain", marginTop: 4, flexShrink: 0 }}
+          />
+          <div style={{ flex: 1, paddingLeft: 12 }}>
             <div className="welcome">Welcome back,</div>
             <div className="dealer-name" style={{ marginBottom: 6 }}>{dealer?.name || "Dealer"}</div>
             {!loading && (
@@ -266,11 +271,6 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-          <img
-            src="/assets/fan%20man%20eltop.png"
-            alt="Fanman"
-            style={{ height: 64, width: "auto", objectFit: "contain", marginTop: 4, flexShrink: 0 }}
-          />
         </div>
 
         {loading ? (
