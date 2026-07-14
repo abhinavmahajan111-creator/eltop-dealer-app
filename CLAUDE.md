@@ -108,6 +108,39 @@ Saying "should work on mobile" or "please verify on mobile" without supplying sc
 not acceptable. If the browser preview tool or computer use is unavailable, say so explicitly
 and explain why — do not silently skip this step.
 
+### Desktop content-width check — MANDATORY at 1280px
+
+A screenshot at 1280px is necessary but NOT sufficient. A page can technically render inside a
+1280px frame while the content is squeezed into a narrow left column with a large empty gray
+area — this looks "fine" in a screenshot because nothing is broken, just badly proportioned.
+
+**After taking the 1280px screenshot, ALSO run this `preview_eval` check:**
+
+```js
+(() => {
+  const el = document.querySelector('#phone') || document.querySelector('.screen') || document.body.firstElementChild;
+  const rect = el.getBoundingClientRect();
+  return { contentWidth: rect.width, viewportWidth: window.innerWidth, pct: Math.round(rect.width / window.innerWidth * 100) };
+})()
+```
+
+Report the result explicitly (e.g. "content is 390px / 1280px = 30% of viewport"). The content
+width must be **at least 60% of viewport width** for a centered or contained layout, OR must
+match the explicit design intent (e.g. a sidebar layout where a narrow column is correct).
+If it's under 60%, investigate why and fix — do not declare the desktop layout done.
+
+### Reuse existing container patterns when building new pages
+
+When building a new page that should match an existing page's responsive behaviour (e.g. a new
+dealer screen that should look like Dashboard or Store), read the EXISTING page's outermost
+wrapper/container JSX and CSS FIRST — before writing the new page — and reuse the same
+container pattern. Do not build a new wrapper from scratch that might diverge in width or
+alignment.
+
+Specifically: grep for the outermost element's className or id on the reference page, read how
+it's styled (inline or in index.css), and use the identical pattern. State in your summary
+which existing page/pattern you mirrored, e.g. "used same `.screen` wrapper as Dashboard.jsx".
+
 ---
 
 ## Still requires human testing (Claude Code cannot verify these itself)
