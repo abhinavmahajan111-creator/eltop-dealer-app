@@ -251,13 +251,13 @@ export default function Dashboard() {
 
       <div className="content">
         {/* ── Dealer name + tier badge ── */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 2 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 2, width: "100%" }}>
           <img
             src="/assets/fan%20man%20eltop.png"
             alt="Fanman"
             style={{ height: 64, width: "auto", objectFit: "contain", marginTop: 4, flexShrink: 0 }}
           />
-          <div style={{ flex: 1, paddingLeft: 12 }}>
+          <div style={{ paddingLeft: 12, textAlign: "right" }}>
             <div className="welcome">Welcome back,</div>
             <div className="dealer-name" style={{ marginBottom: 6 }}>{dealer?.name || "Dealer"}</div>
             {!loading && (
@@ -296,7 +296,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* ── Stat cards ── */}
+            {/* ── Stat cards — 2-col mobile, 3-col desktop ── */}
             <div className="stat-cards">
               <div className="stat-card">
                 <div className="stat-label">Outstanding</div>
@@ -319,14 +319,12 @@ export default function Dashboard() {
                   <div className="stat-value" style={{ fontSize: 13, color: "#94a3b8" }}>Not set</div>
                 )}
               </div>
-            </div>
-
-            {/* ── Turnover this year ── */}
-            <div className="stat-card" style={{ marginBottom: 12 }}>
-              <div className="stat-label">Turnover — {new Date().getFullYear()}</div>
-              <div className="stat-value" style={{ color: "#1e293b" }}>
-                Rs. {fmt(turnoverThis)}
-                {yoyEl}
+              <div className="stat-card stat-full">
+                <div className="stat-label">Turnover — {new Date().getFullYear()}</div>
+                <div className="stat-value" style={{ color: "#1e293b" }}>
+                  Rs. {fmt(turnoverThis)}
+                  {yoyEl}
+                </div>
               </div>
             </div>
 
@@ -338,7 +336,7 @@ export default function Dashboard() {
                 Place your first order to start earning badges!
               </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, marginBottom: 14 }}>
                 {badges.map((b, i) => <BadgeCard key={i} {...b} />)}
               </div>
             )}
