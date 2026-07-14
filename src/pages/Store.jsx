@@ -1311,11 +1311,13 @@ export default function Store() {
         .btn-login-split { display: none; flex-direction: column; gap: 3px; flex-shrink: 0; }
         .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-login-split-signup { background: transparent; border: 1.5px solid #7B2D8B; border-radius: 6px; color: #7B2D8B; font-size: 10px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .btn-dealer-trigger { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 7px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         @media (max-width: 639px) {
           .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
           .btn-dealer-logout { font-size: 11px; padding: 5px 8px; }
           .btn-login-split   { display: flex; }
+          .btn-dealer-trigger { font-size: 11px; padding: 5px 8px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
         }
 
         /* Hero banner */
@@ -1467,7 +1469,7 @@ export default function Store() {
                   <div ref={dealerMenuRef} style={{ position: "relative" }}>
                     <button
                       onClick={() => setDealerMenuOpen(v => !v)}
-                      style={{ background: "#7B2D8B", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" }}
+                      className="btn-dealer-trigger"
                     >
                       🏪 Hi, {dealer?.name || session?.user?.email?.split("@")[0] || "Partner"} ▾
                     </button>
