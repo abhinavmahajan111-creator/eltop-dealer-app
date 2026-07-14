@@ -1312,12 +1312,16 @@ export default function Store() {
         .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-login-split-signup { background: transparent; border: 1.5px solid #7B2D8B; border-radius: 6px; color: #7B2D8B; font-size: 10px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-trigger { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 7px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .dealer-logout-in-menu { display: none; }
         @media (max-width: 639px) {
           .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
-          .btn-dealer-logout { font-size: 11px; padding: 5px 8px; }
+          .btn-dealer-logout { display: none; }
           .btn-login-split   { display: flex; }
-          .btn-dealer-trigger { font-size: 11px; padding: 5px 8px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+          .btn-dealer-trigger { font-size: 11px; padding: 5px 8px; max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
+          .dealer-logout-in-menu { display: block; }
+          .store-logo-eltop  { max-width: 72px; }
+          .store-logo-embassy { max-width: 90px; }
         }
 
         /* Hero banner */
@@ -1504,6 +1508,14 @@ export default function Store() {
                           style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
                           🛎️ Support
                         </button>
+                        {/* Logout inside dropdown — only visible on mobile where the separate button is hidden */}
+                        <div className="dealer-logout-in-menu">
+                          <div style={{ height: 1, background: "#e2e8f0" }} />
+                          <button onClick={async () => { setDealerMenuOpen(false); await signOut(); navigate("/login"); }}
+                            style={{ display: "block", width: "100%", padding: "12px 16px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontSize: 14, color: "#dc2626" }}>
+                            🚪 Logout
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

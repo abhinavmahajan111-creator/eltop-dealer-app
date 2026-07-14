@@ -81,11 +81,39 @@ console (F12 → Console tab) for red errors — not just confirm the build was 
 
 ---
 
+## Responsive testing — MANDATORY for every UI change
+
+Before reporting any UI change as done, screenshot it at all three breakpoints yourself using
+the browser preview tool (or computer use). Do NOT ask the user to verify responsive behaviour
+manually — that is Claude Code's job.
+
+**Required breakpoints for every header/layout/component change:**
+- **375 px** — mobile (iPhone SE / most Android phones)
+- **768 px** — tablet / narrow desktop
+- **1280 px** — standard desktop
+
+**What to confirm at each breakpoint:**
+- No text overflow or clipping (elements stay inside their containers)
+- All interactive controls (buttons, dropdowns, nav items) are fully visible and tappable
+- Dropdown panels don't overflow off the right or bottom edge of the viewport
+- The change looks intentional, not broken
+
+**How to do it:**
+1. Start the preview server if not already running.
+2. Resize the preview pane (or use `preview_resize`) to each width in turn.
+3. Take a screenshot at each width with `preview_screenshot`.
+4. Include all three screenshots directly in your response before marking the task done.
+
+Saying "should work on mobile" or "please verify on mobile" without supplying screenshots is
+not acceptable. If the browser preview tool or computer use is unavailable, say so explicitly
+and explain why — do not silently skip this step.
+
+---
+
 ## Still requires human testing (Claude Code cannot verify these itself)
 
 Always end a non-trivial change with a short "please verify in browser" checklist covering:
-- Does it look right on mobile width, not just desktop?
-- Does a real end-to-end click-through work (not just "the code should do X")?
+- Does a real end-to-end click-through work on the LIVE site (not just local preview)?
 - For payment changes: a real small-amount transaction, including the cancel/abandon path
 
 ---
