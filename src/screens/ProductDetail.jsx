@@ -3,10 +3,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import ProductGallery from "../components/ProductGallery";
 
+const fmtINR = (n) => Number(n || 0).toLocaleString('en-IN');
+
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, addToCart } = useApp();
+  const { products, addToCart, dealer } = useApp();
   const [qty, setQty] = useState(1);
 
   const product = products.find((p) => p.id === Number(id));
@@ -17,6 +19,12 @@ export default function ProductDetail() {
       </div>
     );
   }
+
+  const d1 = Number(dealer?.discount1 || 0);
+  const d2 = Number(dealer?.discount2 || 0);
+  const dlp = Number(product.dlp ?? product.price ?? 0);
+  const net = Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
+  const pct = product.mrp && product.mrp > net ? Math.round((product.mrp - net) / product.mrp * 100) : 0;
 
   return (
     <div className="screen" id="screen-product">
@@ -29,15 +37,24 @@ export default function ProductDetail() {
 
         <div className="pd-title">{product.name}</div>
         <div className="pd-sku">SKU: {product.sku}</div>
-        <div className="pd-price-row">
-          <div className="pd-dealer-price">Rs. {product.price}</div>
-          {product.mrp && <div className="pd-mrp">Rs. {product.mrp}</div>}
-          {product.mrp && (
-            <div className="pd-save">
-              Save {Math.round((1 - product.price / product.mrp) * 100)}%
+
+        <div style={{ margin: "12px 0 16px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: "#7B2D8B" }}>₹{fmtINR(net)}</span>
+            {pct > 0 && (
+              <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{pct}% OFF</span>
+            )}
+          </div>
+          {(product.dlp || product.mrp) && (
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+              {product.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.dlp)}</span></span>}
+              {product.dlp && product.mrp && <span> · </span>}
+              {product.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span></span>}
             </div>
           )}
         </div>
+
         <div className="section-title">Warehouse Stock</div>
         <div className="wh-table">
           <div className="wh-row">

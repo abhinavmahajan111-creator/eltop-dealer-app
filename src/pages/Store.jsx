@@ -517,24 +517,29 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease,
           {p.hsn_code && <div style={{ fontSize: 10, color: "#94a3b8" }}>HSN <span style={{ color: "#64748b", fontWeight: 600 }}>{p.hsn_code}</span></div>}
         </div>
 
-        <div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-            {pricingMode === 'guest-verified' && (
-              <span style={{ fontSize: 9, color: "#94a3b8", textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span>
-            )}
-            <span style={{ fontSize: 16, fontWeight: 900, color: "#DC2626" }}>₹{fmt(effectivePrice)}</span>
-          </div>
-          {pricingMode === 'guest-verified' && (
-            <div style={{ fontSize: 10, color: "#16a34a", fontWeight: 700, marginTop: 1 }}>
-              15% off MRP
+        {(() => {
+          const discPct = p.mrp && effectivePrice < p.mrp ? Math.round((p.mrp - effectivePrice) / p.mrp * 100) : 0;
+          const showDlp = pricingMode === 'dealer' && p.dlp && effectivePrice < p.dlp;
+          const showMrp = p.mrp && effectivePrice < p.mrp;
+          return (
+            <div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 5, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 10, color: "#64748b" }}>Net price</span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
+                {discPct > 0 && (
+                  <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 20 }}>{discPct}% OFF</span>
+                )}
+              </div>
+              {(showDlp || showMrp) && (
+                <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 1 }}>
+                  {showDlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.dlp)}</span></span>}
+                  {showDlp && showMrp && <span> · </span>}
+                  {showMrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span></span>}
+                </div>
+              )}
             </div>
-          )}
-          {pricingMode === 'dealer' && (
-            <div style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 700, marginTop: 1 }}>
-              Your dealer price
-            </div>
-          )}
-        </div>
+          );
+        })()}
 
         {!qty ? (
           <button
@@ -677,23 +682,29 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
             {p.unit     && <div style={{ fontSize: 13, color: "#64748b" }}>Unit: <strong style={{ color: "#334155" }}>{p.unit}</strong></div>}
           </div>
 
-          <div style={{ background: "#fff7f7", border: "1px solid #fecaca", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
-              {pricingMode === 'dealer' ? 'Your Price (incl. all taxes)' : 'Price (incl. all taxes)'}
-            </div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontSize: 32, fontWeight: 900, color: "#DC2626" }}>₹{fmt(effectivePrice)}</span>
-              {pricingMode === 'guest-verified' && (
-                <>
-                  <span style={{ fontSize: 16, color: "#94a3b8", textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span>
-                  <span style={{ fontSize: 13, color: "#16a34a", fontWeight: 700 }}>15% off</span>
-                </>
-              )}
-              {pricingMode === 'full' && (
-                <span style={{ fontSize: 13, color: "#94a3b8" }}>MRP</span>
-              )}
-            </div>
-          </div>
+          {(() => {
+            const discPct = p.mrp && effectivePrice < p.mrp ? Math.round((p.mrp - effectivePrice) / p.mrp * 100) : 0;
+            const showDlp = pricingMode === 'dealer' && p.dlp && effectivePrice < p.dlp;
+            const showMrp = p.mrp && effectivePrice < p.mrp;
+            return (
+              <div style={{ background: "#faf7ff", border: "1px solid #e9d5f5", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
+                  <span style={{ fontSize: 32, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
+                  {discPct > 0 && (
+                    <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 13, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{discPct}% OFF</span>
+                  )}
+                </div>
+                {(showDlp || showMrp) && (
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                    {showDlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.dlp)}</span></span>}
+                    {showDlp && showMrp && <span> · </span>}
+                    {showMrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span></span>}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {!qty ? (
             <button
@@ -1219,7 +1230,7 @@ export default function Store() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     supabase
       .from("products")
-      .select("id, name, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details, standard_packing")
+      .select("id, name, price, dlp, mrp, unit, stock, hsn_code, category, image_urls, image_url, sku, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details, standard_packing")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error }) => {
