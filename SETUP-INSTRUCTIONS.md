@@ -1,64 +1,72 @@
-# Eltop Dealer App — Auto-Backup Setup
+# Eltop Dealer App - Auto Backup Setup
 
-Yeh 2 files hain:
+Ye 3 files is folder mein hone chahiye:
+`C:\Users\air\Downloads\ELTOP DEALER APP\eltop-dealer-app\`
 
-- **quick-push.bat** → Jab manually push karna ho, double-click karo. Yeh commit message poochega.
-- **auto-push.bat** → Windows Task Scheduler ke saath use karo. Yeh khud-ba-khud, bina kisi input ke, silently commit + push karti hai (agar kuch change hua ho toh).
+1. `quick-push.bat`
+2. `auto-push.bat`
+3. `SETUP-INSTRUCTIONS.md` (ye file)
 
 ---
 
-## STEP 1 — Files sahi jagah rakho
+## STEP 1 — Manual Push (jab bhi turant push karna ho)
 
-Dono `.bat` files copy karke us folder mein daalo jahan `.git` folder hai — yani:
+`quick-push.bat` par **double-click** karo. Ek black window khulegi, commit message
+poochegi — type karke Enter dabao. Ye khud `git add` + `git commit` + `git push`
+kar degi.
 
+Push ke baad Vercel par deploy karne ke liye alag se ye command chalao:
 ```
-Downloads\ELTOP DEALER APP\eltop-dealer-app\
+npx vercel --prod
 ```
 
-(Isi folder mein `package.json`, `src`, `.git` waghera hain.)
-
 ---
 
-## STEP 2 — Quick-push test karo (manual)
+## STEP 2 — Fully Automatic Setup (Windows Task Scheduler)
 
-`quick-push.bat` pe double-click karo. Ek black window khulegi, commit message poochegi, type karke Enter dabao. Yeh khud add + commit + push kar degi.
-
----
-
-## STEP 3 — Fully Automatic Setup (Windows Task Scheduler)
-
-Isse **din mein khud-ba-khud** (bina kisi ko yaad rakhne ki zaroorat) backup ho jayega.
+Isse har ghante khud-ba-khud check hoga aur agar kuch naya kaam hua hai to
+GitHub par push ho jayega — kisi ko kuch bhi yaad rakhne ki zaroorat nahi.
 
 1. Windows search mein type karo **"Task Scheduler"** aur kholo
-2. Right side mein **"Create Basic Task..."** pe click karo
+2. Right side mein **"Create Basic Task..."** par click karo
 3. Naam do: `Eltop Auto Backup` → Next
 4. Trigger: **Daily** select karo → Next
-5. Time set karo — suggest: **raat 11:00 PM** (jab din ka kaam khatam ho chuka ho) → Next
+5. Time set karo — suggest: **raat 11:00 PM** → Next
 6. Action: **"Start a program"** select karo → Next
-7. **"Browse"** pe click karo, jaake `auto-push.bat` file select karo (wahi jo `eltop-dealer-app` folder mein rakhi hai) → Next
-8. **Finish** pe click karo
+7. **"Browse"** par click karo, `auto-push.bat` file select karo (isi folder
+   se) → Next
+8. **Finish** par click karo
 
-Ab yeh roz raat 11 baje khud-ba-khud check karegi ki kuch naya kaam hua hai ya nahi — agar hua hai toh silently GitHub pe push kar degi. Kuch bhi popup nahi aayega, background mein chalega.
-
-### Agar din mein multiple baar chalwana ho (zyada safety):
-Step 5 mein "Daily" ki jagah, task banane ke baad:
-- Task Scheduler Library mein `Eltop Auto Backup` pe right-click → **Properties**
+### Har ghante chalwane ke liye (zyada safety):
+Task banane ke baad:
+- Task Scheduler Library mein `Eltop Auto Backup` par right-click →
+  **Properties**
 - **Triggers** tab → **Edit**
-- **"Repeat task every"** checkbox on karo → **1 hour** select karo, duration **"Indefinitely"**
+- **"Repeat task every"** checkbox on karo → **1 hour** select karo,
+  duration **"Indefinitely"**
 
-Isse har ghante check hoga (sirf tab push karega jab kuch actually badla ho).
+Ab har ghante check hoga (sirf tab push karega jab kuch actually badla ho).
 
 ---
 
-## STEP 4 — Verify karo yeh kaam kar raha hai
+## STEP 3 — Verify karo yeh kaam kar raha hai
 
-`eltop-dealer-app` folder ke andar ek **`auto-push-log.txt`** file ban jayegi jab pehli baar script chalegi. Usme dekh sakte ho kab-kab push hua ya "no changes" tha.
+Kuch der/kuch ghante baad, isi folder mein ek **`auto-push-log.txt`** file
+ban jayegi. Usme dekh sakte ho kab-kab push hua ya "No changes - skipping"
+tha.
+
+Agar ye file kabhi nahi bani, iska matlab Task Scheduler task ya to bana
+hi nahi, ya chala hi nahi — Task Scheduler mein wapas jaake check karo ki
+task "Eltop Auto Backup" list mein dikh raha hai ya nahi.
 
 ---
 
 ## Important Notes
 
-- Laptop **on hona chahiye** us time pe jab scheduled task chalna ho (agar laptop band hai ya sleep mein hai, toh woh time skip ho jayega — agla scheduled run pe cover ho jayega)
+- Laptop **on hona chahiye** us time par jab scheduled task chalna ho
+  (agar laptop band/sleep mein hai, to woh run skip ho jayega — agla
+  scheduled run mein cover ho jayega)
 - Internet connection zaroori hai push ke liye
-- Agar kabhi bada file (video/image) push karte waqt network error aaye, log file mein error dikhega — us case mein manually `quick-push.bat` chala ke dobara try kar sakte ho
-- Yeh sirf **is ek folder** (`eltop-dealer-app`) ko backup karta hai — agar koi doosra project folder hai, uske liye alag se setup karna hoga
+- Ye sirf **is ek folder** (`eltop-dealer-app`) ko backup karta hai
+- Ye sirf GitHub par code push karta hai — Supabase database ka alag se
+  backup nahi karta (wo Supabase apne aap manage karta hai)
