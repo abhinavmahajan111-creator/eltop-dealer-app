@@ -35,12 +35,10 @@ export default function App() {
         <Route path="/" element={<Splash />} />
         <Route path="/login" element={<Login />} />
         <Route element={<DealerRoute />}>
-          <Route path="/catalogue" element={<Catalogue />} />
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/confirm" element={<OrderConfirm />} />
           <Route path="/tracking" element={<OrderTracking />} />
-          <Route path="/ledger" element={<Ledger />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/schemes" element={<Schemes />} />
           <Route path="/support" element={<Support />} />
@@ -61,9 +59,11 @@ export default function App() {
         <Route path="/admin/crm/customer/:profileId" element={<CustomerCRM />} />
       </Route>
 
-      {/* Dashboard — full-width on desktop like /store, outside PhoneFrame */}
+      {/* Full-width dealer routes — outside PhoneFrame, like /store */}
       <Route element={<DealerRoute />}>
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/catalogue" element={<Catalogue />} />
+        <Route path="/ledger" element={<Ledger />} />
       </Route>
 
       <Route path="/store" element={<Store />} />

@@ -45,7 +45,7 @@
   @media (min-width: 640px) {
     body { background: var(--bg); align-items: flex-start; }
     #phone {
-      width: min(480px, 100%);
+      width: min(640px, 100%);
       margin: 0 auto;
       height: auto;
       min-height: 100vh;
@@ -155,7 +155,7 @@
   @keyframes spin{to{transform:rotate(360deg);}}
 
   /* Login */
-  #screen-login .content{display:flex;flex-direction:column;justify-content:center;height:100%;}
+  #screen-login .content{display:flex;flex-direction:column;justify-content:center;min-height:100vh;}
   .login-logo{
     width:70px;height:70px;border-radius:18px;background:var(--red);
     display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:22px;
@@ -242,6 +242,9 @@
   }
   .cat-chip.active{background:var(--red);color:#fff;border-color:var(--red);}
   .prod-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(min-width:640px){
+    .prod-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));}
+  }
   .prod-card{
     background:#fff;border-radius:14px;overflow:hidden;cursor:pointer;
     box-shadow:0 1px 4px rgba(0,0,0,.05);
