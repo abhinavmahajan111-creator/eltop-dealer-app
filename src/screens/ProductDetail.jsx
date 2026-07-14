@@ -8,7 +8,7 @@ const fmtINR = (n) => Number(n || 0).toLocaleString('en-IN');
 export default function ProductDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { products, addToCart, dealer } = useApp();
+  const { products, addToCart, dealer, dealerApplicationStatus } = useApp();
   const [qty, setQty] = useState(1);
 
   const product = products.find((p) => p.id === Number(id));
@@ -20,10 +20,13 @@ export default function ProductDetail() {
     );
   }
 
-  const d1 = Number(dealer?.discount1 || 0);
-  const d2 = Number(dealer?.discount2 || 0);
+  const isApprovedDealer = dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none';
+  const d1 = isApprovedDealer ? Number(dealer?.discount1 || 0) : 0;
+  const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
   const dlp = Number(product.dlp ?? product.price ?? 0);
-  const net = Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
+  const net = isApprovedDealer
+    ? Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100
+    : Math.round(Number(product.mrp || 0) * 0.85 * 100) / 100;
   const pct = product.mrp && product.mrp > net ? Math.round((product.mrp - net) / product.mrp * 100) : 0;
 
   return (
@@ -46,12 +49,20 @@ export default function ProductDetail() {
               <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{pct}% OFF</span>
             )}
           </div>
-          {(product.dlp || product.mrp) && (
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
-              {product.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.dlp)}</span></span>}
-              {product.dlp && product.mrp && <span> · </span>}
-              {product.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span></span>}
-            </div>
+          {isApprovedDealer ? (
+            (product.dlp || product.mrp) && (
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                {product.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.dlp)}</span></span>}
+                {product.dlp && product.mrp && <span> · </span>}
+                {product.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span></span>}
+              </div>
+            )
+          ) : (
+            product.mrp && (
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span>
+              </div>
+            )
           )}
         </div>
 

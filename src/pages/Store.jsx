@@ -992,6 +992,9 @@ export default function Store() {
   const containerRef = useRef(null);
   const cart = useCart();
   const { session, dealer, isDealer, isCustomer, signOut, dealerApplicationStatus, profileLoaded, sessionChecked } = useApp();
+  // Only fully-approved (or legacy 'none') dealers get dealer-rate pricing.
+  // pending_details / under_review dealers see 15% off MRP like a verified guest.
+  const isApprovedDealer = isDealer && (dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none');
   const [customerName, setCustomerName] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
@@ -1041,21 +1044,21 @@ export default function Store() {
   }, [dealerMenuOpen]);
 
   const getPrice = useCallback((p) => {
-    if (isDealer) {
+    if (isApprovedDealer) {
       const d1 = Number(dealer?.discount1 || 0);
       const d2 = Number(dealer?.discount2 || 0);
       return Math.round(Number((p.dlp ?? p.mrp) || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
     }
-    if (otpVerified || isCustomer) return Math.round(Number(p.mrp || 0) * 0.85);
+    if (otpVerified || isCustomer || isDealer) return Math.round(Number(p.mrp || 0) * 0.85);
     return Number(p.mrp || 0);
-  }, [isDealer, otpVerified, isCustomer, dealer]);
+  }, [isApprovedDealer, isDealer, otpVerified, isCustomer, dealer]);
 
   const effectiveTotal = useMemo(
     () => cart.items.reduce((s, i) => s + getPrice(i.product) * i.qty, 0),
     [cart.items, getPrice]
   );
 
-  const pricingMode = isDealer ? 'dealer' : (otpVerified || isCustomer) ? 'guest-verified' : 'full';
+  const pricingMode = isApprovedDealer ? 'dealer' : (otpVerified || isCustomer || isDealer) ? 'guest-verified' : 'full';
 
   const cartQty = Object.fromEntries(cart.items.map(i => [i.product.id, i.qty]));
 
@@ -1075,8 +1078,8 @@ export default function Store() {
       return;
     }
     // Snapshot pricing at call time — avoids stale closures in the async Razorpay handler
-    const d1 = isDealer ? Number(dealer?.discount1 || 0) : 0;
-    const d2 = isDealer ? Number(dealer?.discount2 || 0) : 0;
+    const d1 = isApprovedDealer ? Number(dealer?.discount1 || 0) : 0;
+    const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
     const capturedItems = cart.items.map(i => ({ ...i, effectivePrice: getPrice(i.product) }));
     const capturedTotal = capturedItems.reduce((s, i) => s + i.effectivePrice * i.qty, 0);
 

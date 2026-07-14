@@ -8,12 +8,13 @@ const fmtINR = (n) => Number(n || 0).toLocaleString('en-IN');
 
 export default function Catalogue() {
   const navigate = useNavigate();
-  const { products, dealer } = useApp();
+  const { products, dealer, dealerApplicationStatus } = useApp();
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState("all");
 
-  const d1 = Number(dealer?.discount1 || 0);
-  const d2 = Number(dealer?.discount2 || 0);
+  const isApprovedDealer = dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none';
+  const d1 = isApprovedDealer ? Number(dealer?.discount1 || 0) : 0;
+  const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
 
   const filtered = useMemo(() => {
     const term = search.toLowerCase();
@@ -53,7 +54,9 @@ export default function Catalogue() {
         <div className="prod-grid">
           {filtered.map((p) => {
             const dlp = Number(p.dlp ?? p.price ?? 0);
-            const net = Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
+            const net = isApprovedDealer
+              ? Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100
+              : Math.round(Number(p.mrp || 0) * 0.85 * 100) / 100;
             const pct = p.mrp && p.mrp > net ? Math.round((p.mrp - net) / p.mrp * 100) : 0;
             return (
               <div className="prod-card" key={p.id} onClick={() => navigate(`/product/${p.id}`)}>
@@ -73,12 +76,20 @@ export default function Catalogue() {
                         <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 20 }}>{pct}% OFF</span>
                       )}
                     </div>
-                    {(p.dlp || p.mrp) && (
-                      <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
-                        {p.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(p.dlp)}</span></span>}
-                        {p.dlp && p.mrp && <span> · </span>}
-                        {p.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(p.mrp)}</span></span>}
-                      </div>
+                    {isApprovedDealer ? (
+                      (p.dlp || p.mrp) && (
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                          {p.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(p.dlp)}</span></span>}
+                          {p.dlp && p.mrp && <span> · </span>}
+                          {p.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(p.mrp)}</span></span>}
+                        </div>
+                      )
+                    ) : (
+                      p.mrp && (
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                          MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(p.mrp)}</span>
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
