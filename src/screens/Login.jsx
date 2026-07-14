@@ -235,14 +235,20 @@ export default function Login() {
 
         {dealerMismatch && (
           <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Not registered as a dealer</div>
-            <b>{emailInput}</b> is not registered as an existing dealer. If you'd like to become a dealer, sign up below.
-            <div style={{ marginTop: 10 }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>No dealer account found</div>
+            No dealer account is linked to <b>{emailInput}</b>. Double-check for a typo — a single wrong character means a different inbox.
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => { setDealerMismatch(false); setEmailInput(""); setStep(1); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
+                style={{ background: "#fff", border: "1.5px solid #e74c3c", color: "#7b241c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+              >
+                ← Try a different email
+              </button>
               <button
                 onClick={() => { setDealerMismatch(false); setDealerMode("new"); setStep(1); }}
                 style={{ background: "#7B2D8B", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
               >
-                Register as New Dealer →
+                Register as new dealer →
               </button>
             </div>
           </div>
