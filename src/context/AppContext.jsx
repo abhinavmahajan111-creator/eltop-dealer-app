@@ -161,6 +161,14 @@ export function AppProvider({ children }) {
   const verifyOtp = useCallback(async (otp) => {
     setAuthError("");
     if (!isSupabaseConfigured) return true; // demo mode, any OTP passes
+    // Dev-only bypass: VITE_DEV_OTP_BYPASS_EMAIL + _CODE in .env.local (never committed).
+    // import.meta.env.DEV is false in production builds — Vite strips this at build time.
+    if (import.meta.env.DEV &&
+        import.meta.env.VITE_DEV_OTP_BYPASS_EMAIL &&
+        email === import.meta.env.VITE_DEV_OTP_BYPASS_EMAIL &&
+        otp === import.meta.env.VITE_DEV_OTP_BYPASS_CODE) {
+      return true;
+    }
     setAuthBusy(true);
     const { error } = await supabase.auth.verifyOtp({
       email,
