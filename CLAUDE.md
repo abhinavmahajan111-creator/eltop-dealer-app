@@ -142,6 +142,23 @@ width must be **at least 60% of viewport width** for a centered or contained lay
 match the explicit design intent (e.g. a sidebar layout where a narrow column is correct).
 If it's under 60%, investigate why and fix — do not declare the desktop layout done.
 
+### Mockup fidelity — MANDATORY when an approved mockup exists
+
+When the user has approved a visual mockup (screenshot, description with specific layout/color/size
+details, or an annotated design), that mockup is the specification. Meeting it is not optional.
+
+**"DOM presence" is not the same as "visually correct."** A component can exist in the DOM, be
+positioned at the right coordinates, and still be invisible, wrong-colored, clipped, or the wrong
+size. Before marking any UI task done:
+1. Take an actual screenshot and compare it against what was described/approved.
+2. Confirm each visual property that was specified (color, size, position, visibility, animation).
+3. If any property doesn't match, fix it — do not say "it should work" or ask the user to verify
+   something Claude Code could have verified itself with a screenshot.
+
+Saying "the element is in the DOM at position X" without a screenshot is not acceptable as
+evidence of visual correctness. This rule applies to every change that touches a component whose
+appearance was explicitly specified or approved by the user.
+
 ### Reuse existing container patterns when building new pages
 
 When building a new page that should match an existing page's responsive behaviour (e.g. a new

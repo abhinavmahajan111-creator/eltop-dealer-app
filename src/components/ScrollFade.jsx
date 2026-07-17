@@ -2,7 +2,6 @@ import { useRef, useEffect, useState, useCallback } from "react";
 
 const BADGE_BASE = {
   position: "absolute",
-  pointerEvents: "none",
   zIndex: 20,
   background: "rgba(0,0,0,0.45)",
   borderRadius: 6,
@@ -13,12 +12,14 @@ const BADGE_BASE = {
   lineHeight: 1,
   gap: 1,
   minWidth: 26,
+  cursor: "pointer",
+  userSelect: "none",
 };
 
 const CHEVRON  = { left: "‹", right: "›", top: "‹", bottom: "›" };
 const ROTATE   = { left: "", right: "", top: "rotate(-90deg)", bottom: "rotate(90deg)" };
 
-function ScrollBadge({ dir, top, left }) {
+function ScrollBadge({ dir, top, left, onPage }) {
   const pos =
     dir === "right"  ? { right:  6, top, transform: "translateY(-50%)" } :
     dir === "left"   ? { left:   6, top, transform: "translateY(-50%)" } :
@@ -29,7 +30,7 @@ function ScrollBadge({ dir, top, left }) {
   if (left == null && (dir === "top"  || dir === "bottom")) return null;
 
   return (
-    <div style={{ ...BADGE_BASE, ...pos }}>
+    <div style={{ ...BADGE_BASE, ...pos }} onClick={() => onPage(dir)}>
       <span style={{ color: "#fff", fontSize: 9, fontWeight: 600, letterSpacing: "0.3px" }}>pg</span>
       <span style={{ color: "#fff", fontSize: 15, display: "block", transform: ROTATE[dir] }}>
         {CHEVRON[dir]}
@@ -50,6 +51,19 @@ function ScrollBadge({ dir, top, left }) {
  *   bg          — accepted but unused (kept for call-site compatibility)
  *   children    — scrollable content
  */
+function scrollPage(el, dir) {
+  if (!el) return;
+  if (dir === "right" || dir === "left") {
+    const delta = dir === "right" ? el.clientWidth : -el.clientWidth;
+    const target = Math.min(Math.max(el.scrollLeft + delta, 0), el.scrollWidth - el.clientWidth);
+    el.scrollTo({ left: target, behavior: "smooth" });
+  } else {
+    const delta = dir === "bottom" ? el.clientHeight : -el.clientHeight;
+    const target = Math.min(Math.max(el.scrollTop + delta, 0), el.scrollHeight - el.clientHeight);
+    el.scrollTo({ top: target, behavior: "smooth" });
+  }
+}
+
 export default function ScrollFade({ children, className, style, innerStyle, bg }) {
   const outerRef = useRef(null);
   const innerRef = useRef(null);
@@ -112,10 +126,10 @@ export default function ScrollFade({ children, className, style, innerStyle, bg 
       <div ref={innerRef} style={{ overflow: "auto", ...innerStyle }}>
         {children}
       </div>
-      {edges.right  && <ScrollBadge dir="right"  top={badgeTop}  />}
-      {edges.left   && <ScrollBadge dir="left"   top={badgeTop}  />}
-      {edges.top    && <ScrollBadge dir="top"    left={badgeLeft}/>}
-      {edges.bottom && <ScrollBadge dir="bottom" left={badgeLeft}/>}
+      {edges.right  && <ScrollBadge dir="right"  top={badgeTop}   onPage={d => scrollPage(innerRef.current, d)} />}
+      {edges.left   && <ScrollBadge dir="left"   top={badgeTop}   onPage={d => scrollPage(innerRef.current, d)} />}
+      {edges.top    && <ScrollBadge dir="top"    left={badgeLeft} onPage={d => scrollPage(innerRef.current, d)} />}
+      {edges.bottom && <ScrollBadge dir="bottom" left={badgeLeft} onPage={d => scrollPage(innerRef.current, d)} />}
     </div>
   );
 }
