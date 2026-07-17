@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import ScrollFade from "../components/ScrollFade";
 
 const EMPTY_FORM = {
   id: null, name: "", mrp: "", dlp: "", price: "", unit: "pc", stock: "",
@@ -285,7 +286,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         </div>
 
         {/* Scrollable table */}
-        <div style={{ overflowY: "auto", overflowX: "auto", flex: 1 }}>
+        <ScrollFade bg="#fff" style={{ flex: 1, minHeight: 0 }} innerStyle={{ height: "100%" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
@@ -328,7 +329,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
 
         {/* Footer */}
         <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
@@ -895,7 +896,7 @@ export default function AdminProducts() {
       ) : grouped.length === 0 ? (
         <div className="admin-empty">No products match "{search}".</div>
       ) : (
-        <div className="admin-table-wrap">
+        <ScrollFade className="admin-table-wrap" bg="#fff">
           <table className="admin-table">
             <thead>
               <tr>
@@ -1003,7 +1004,7 @@ export default function AdminProducts() {
               })}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
       ))}
 
       {/* ── Floating bulk-edit button (shown when products are selected, not in single-edit mode) ── */}

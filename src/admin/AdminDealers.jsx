@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import ScrollFade from "../components/ScrollFade";
 
 const BUCKET = "dealer-media";
 
@@ -1045,7 +1046,7 @@ export default function AdminDealers() {
             {gOrders.length === 0 ? (
               <div style={{ color: "var(--muted)", fontSize: 13 }}>No orders.</div>
             ) : (
-              <div className="admin-table-wrap">
+              <ScrollFade className="admin-table-wrap" bg="#fff">
                 <table className="admin-table">
                   <thead>
                     <tr>
@@ -1068,7 +1069,7 @@ export default function AdminDealers() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollFade>
             )}
           </div>
         </div>
@@ -1673,7 +1674,7 @@ export default function AdminDealers() {
           {searchQuery || typeFilter !== 'all' ? 'No results match your filter.' : 'No dealers or customers yet.'}
         </div>
       ) : (
-        <div className="admin-table-wrap">
+        <ScrollFade className="admin-table-wrap" bg="#fff">
           <table className="admin-table">
             <thead>
               <tr>
@@ -1794,7 +1795,7 @@ export default function AdminDealers() {
               ))}
             </tbody>
           </table>
-        </div>
+        </ScrollFade>
       )}
     </div>
   );

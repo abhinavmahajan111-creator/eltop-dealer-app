@@ -108,6 +108,19 @@ Saying "should work on mobile" or "please verify on mobile" without supplying sc
 not acceptable. If the browser preview tool or computer use is unavailable, say so explicitly
 and explain why — do not silently skip this step.
 
+### Orientation testing — MANDATORY for every mobile-facing change
+
+MANDATORY — test both portrait AND landscape orientation for every mobile-facing change, not just
+the standard width-only breakpoints. A width-only CSS breakpoint (e.g. `max-width: 639px`) is NOT
+sufficient on its own — a phone rotated to landscape can exceed that width and incorrectly fall into
+desktop-style/tablet-style layout, even though it's still a phone. For any layout, sidebar,
+navigation, or responsive change: explicitly capture and verify screenshots in BOTH portrait AND
+landscape orientation before reporting the work as done. Do not assume orientation-safety just
+because standard width breakpoints were checked.
+
+Landscape phone dimensions to test: width ~812px, height ~375px (e.g. `preview_resize` with
+`width:812, height:375`).
+
 ### Desktop content-width check — MANDATORY at 1280px
 
 A screenshot at 1280px is necessary but NOT sufficient. A page can technically render inside a

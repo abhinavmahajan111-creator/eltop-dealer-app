@@ -419,7 +419,7 @@
   .admin-hamburger{display:none;}
   .admin-sidebar-close{display:none;}
 
-  @media(max-width:639px){
+  @media(max-width:639px),(max-height:480px) and (max-width:960px){
     .admin-hamburger{
       display:flex;align-items:center;justify-content:center;
       position:fixed;top:12px;left:12px;z-index:1200;

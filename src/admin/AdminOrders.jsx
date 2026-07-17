@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import ScrollFade from "../components/ScrollFade";
 
 const STATUSES = ["pending", "confirmed", "dispatched", "delivered"];
 
@@ -151,7 +152,7 @@ export default function AdminOrders() {
       ) : orders.length === 0 ? (
         <div className="admin-empty">No orders yet.</div>
       ) : (
-        <div className="admin-table-wrap">
+        <ScrollFade className="admin-table-wrap" bg="#fff">
           <table className="admin-table">
             <thead>
               <tr style={{ verticalAlign: "top" }}>
@@ -423,7 +424,7 @@ export default function AdminOrders() {
               );
             })()}
           </table>
-        </div>
+        </ScrollFade>
       )}
     </div>
   );
