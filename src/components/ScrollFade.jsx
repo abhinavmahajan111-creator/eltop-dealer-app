@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 
-const BADGE = {
+const BADGE_BASE = {
   position: "absolute",
   pointerEvents: "none",
   zIndex: 20,
@@ -15,21 +15,23 @@ const BADGE = {
   minWidth: 26,
 };
 
-const CHEVRON = { left: "‹", right: "›", top: "‹", bottom: "›" };
-const CHEVRON_ROTATE = { left: "", right: "", top: "rotate(-90deg)", bottom: "rotate(90deg)" };
+const CHEVRON  = { left: "‹", right: "›", top: "‹", bottom: "›" };
+const ROTATE   = { left: "", right: "", top: "rotate(-90deg)", bottom: "rotate(90deg)" };
 
-const BADGE_POS = {
-  right:  { right:  6, top: "50%", transform: "translateY(-50%)" },
-  left:   { left:   6, top: "50%", transform: "translateY(-50%)" },
-  top:    { top:    6, left: "50%", transform: "translateX(-50%)" },
-  bottom: { bottom: 6, left: "50%", transform: "translateX(-50%)" },
-};
+function ScrollBadge({ dir, top, left }) {
+  const pos =
+    dir === "right"  ? { right:  6, top, transform: "translateY(-50%)" } :
+    dir === "left"   ? { left:   6, top, transform: "translateY(-50%)" } :
+    dir === "top"    ? { top:    6, left, transform: "translateX(-50%)" } :
+                       { bottom: 6, left, transform: "translateX(-50%)" };
 
-function ScrollBadge({ dir }) {
+  if (top == null && (dir === "right" || dir === "left")) return null;
+  if (left == null && (dir === "top"  || dir === "bottom")) return null;
+
   return (
-    <div style={{ ...BADGE, ...BADGE_POS[dir] }}>
+    <div style={{ ...BADGE_BASE, ...pos }}>
       <span style={{ color: "#fff", fontSize: 9, fontWeight: 600, letterSpacing: "0.3px" }}>pg</span>
-      <span style={{ color: "#fff", fontSize: 15, transform: CHEVRON_ROTATE[dir], display: "block" }}>
+      <span style={{ color: "#fff", fontSize: 15, display: "block", transform: ROTATE[dir] }}>
         {CHEVRON[dir]}
       </span>
     </div>
@@ -37,8 +39,9 @@ function ScrollBadge({ dir }) {
 }
 
 /**
- * Drop-in wrapper that shows a single floating scroll-hint badge per edge.
- * One centered badge per direction — not repeated per row.
+ * Drop-in wrapper that shows a single floating scroll-hint badge per edge,
+ * vertically centered in the VISIBLE portion of the container (not the full
+ * content height), so it stays on-screen even for tall tables.
  *
  * Props:
  *   className   — applied to the outer div (for visual CSS)
@@ -48,12 +51,18 @@ function ScrollBadge({ dir }) {
  *   children    — scrollable content
  */
 export default function ScrollFade({ children, className, style, innerStyle, bg }) {
+  const outerRef = useRef(null);
   const innerRef = useRef(null);
-  const [edges, setEdges] = useState({ left: false, right: false, top: false, bottom: false });
+  const [edges,    setEdges]    = useState({ left: false, right: false, top: false, bottom: false });
+  const [badgeTop, setBadgeTop] = useState(null);  // px offset within outer div, for H badges
+  const [badgeLeft, setBadgeLeft] = useState(null); // px offset within outer div, for V badges
 
   const check = useCallback(() => {
-    const el = innerRef.current;
+    const el    = innerRef.current;
+    const outer = outerRef.current;
     if (!el) return;
+
+    // Overflow detection (unchanged)
     const eps = 2;
     setEdges({
       left:   el.scrollLeft > eps,
@@ -61,6 +70,21 @@ export default function ScrollFade({ children, className, style, innerStyle, bg 
       top:    el.scrollTop  > eps,
       bottom: el.scrollTop  < el.scrollHeight - el.clientHeight - eps,
     });
+
+    // Badge position: center of visible portion of outer div
+    if (outer) {
+      const rect = outer.getBoundingClientRect();
+
+      // Vertical center of whatever part of the container is currently on-screen
+      const visTop    = Math.max(rect.top,    0);
+      const visBottom = Math.min(rect.bottom,  window.innerHeight);
+      setBadgeTop(visBottom > visTop ? (visTop + visBottom) / 2 - rect.top : null);
+
+      // Horizontal center (for top/bottom badges)
+      const visLeft  = Math.max(rect.left,  0);
+      const visRight = Math.min(rect.right, window.innerWidth);
+      setBadgeLeft(visRight > visLeft ? (visLeft + visRight) / 2 - rect.left : null);
+    }
   }, []);
 
   useEffect(() => {
@@ -68,23 +92,30 @@ export default function ScrollFade({ children, className, style, innerStyle, bg 
     if (!el) return;
     check();
     el.addEventListener("scroll", check, { passive: true });
+    // Page-level scroll updates the visible-center calculation
+    window.addEventListener("scroll", check, { passive: true, capture: true });
     const ro = new ResizeObserver(check);
     ro.observe(el);
-    return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
+    return () => {
+      el.removeEventListener("scroll", check);
+      window.removeEventListener("scroll", check, { capture: true });
+      ro.disconnect();
+    };
   }, [check]);
 
   return (
     <div
+      ref={outerRef}
       className={className}
       style={{ position: "relative", overflow: "hidden", ...style }}
     >
       <div ref={innerRef} style={{ overflow: "auto", ...innerStyle }}>
         {children}
       </div>
-      {edges.right  && <ScrollBadge dir="right"  />}
-      {edges.left   && <ScrollBadge dir="left"   />}
-      {edges.top    && <ScrollBadge dir="top"    />}
-      {edges.bottom && <ScrollBadge dir="bottom" />}
+      {edges.right  && <ScrollBadge dir="right"  top={badgeTop}  />}
+      {edges.left   && <ScrollBadge dir="left"   top={badgeTop}  />}
+      {edges.top    && <ScrollBadge dir="top"    left={badgeLeft}/>}
+      {edges.bottom && <ScrollBadge dir="bottom" left={badgeLeft}/>}
     </div>
   );
 }
