@@ -414,6 +414,37 @@
   }
   .admin-logout:hover{background:rgba(255,255,255,.1);}
   .admin-main{flex:1;overflow-y:auto;padding:32px 36px;}
+
+  /* Hamburger + close button: hidden on desktop, shown on mobile */
+  .admin-hamburger{display:none;}
+  .admin-sidebar-close{display:none;}
+
+  @media(max-width:639px){
+    .admin-hamburger{
+      display:flex;align-items:center;justify-content:center;
+      position:fixed;top:12px;left:12px;z-index:1200;
+      width:40px;height:40px;border-radius:8px;border:none;cursor:pointer;
+      background:var(--red-dark);color:#fff;font-size:20px;line-height:1;
+    }
+    .admin-sidebar{
+      position:fixed;top:0;left:0;bottom:0;z-index:1100;
+      width:240px;overflow-y:auto;
+      transform:translateX(-100%);transition:transform .25s ease;
+    }
+    .admin-sidebar.open{transform:translateX(0);}
+    .admin-sidebar-close{
+      display:flex;align-items:center;justify-content:center;
+      position:absolute;top:10px;right:10px;
+      width:30px;height:30px;border-radius:6px;border:none;cursor:pointer;
+      background:rgba(255,255,255,.15);color:#fff;font-size:16px;
+    }
+    .admin-sidebar-close:hover{background:rgba(255,255,255,.25);}
+    .admin-sidebar-overlay{
+      position:fixed;inset:0;z-index:1050;background:rgba(0,0,0,.45);
+    }
+    .admin-main{padding:16px;padding-top:56px;}
+  }
+
   .admin-title{font-size:22px;font-weight:700;margin:0 0 20px;color:var(--text);}
   .admin-loading,.admin-empty{color:var(--muted);font-size:14px;padding:20px 0;}
 
