@@ -1,29 +1,35 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 
-const DIRS = ["left", "right", "top", "bottom"];
-
-const GRADIENT = {
-  left:   (bg) => `linear-gradient(to right, ${bg}, transparent)`,
-  right:  (bg) => `linear-gradient(to left,  ${bg}, transparent)`,
-  top:    (bg) => `linear-gradient(to bottom, ${bg}, transparent)`,
-  bottom: (bg) => `linear-gradient(to top,   ${bg}, transparent)`,
+const BADGE = {
+  position: "absolute",
+  pointerEvents: "none",
+  zIndex: 20,
+  background: "rgba(0,0,0,0.45)",
+  borderRadius: 6,
+  padding: "3px 5px",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  lineHeight: 1,
+  gap: 1,
+  minWidth: 26,
 };
 
-const CHEVRON = { left: "‹", right: "›", top: "›", bottom: "›" };
-const ROTATE  = { left: "", right: "", top: "rotate(-90deg)", bottom: "rotate(90deg)" };
+const CHEVRON = { left: "‹", right: "›", top: "‹", bottom: "›" };
+const CHEVRON_ROTATE = { left: "", right: "", top: "rotate(-90deg)", bottom: "rotate(90deg)" };
 
-const OVERLAY_BASE = { position: "absolute", pointerEvents: "none", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "center" };
-const OVERLAY_POS = {
-  left:   { top: 0, bottom: 0, left:   0, width:  28 },
-  right:  { top: 0, bottom: 0, right:  0, width:  28 },
-  top:    { left: 0, right: 0, top:    0, height: 28 },
-  bottom: { left: 0, right: 0, bottom: 0, height: 28 },
+const BADGE_POS = {
+  right:  { right:  6, top: "50%", transform: "translateY(-50%)" },
+  left:   { left:   6, top: "50%", transform: "translateY(-50%)" },
+  top:    { top:    6, left: "50%", transform: "translateX(-50%)" },
+  bottom: { bottom: 6, left: "50%", transform: "translateX(-50%)" },
 };
 
-function FadeEdge({ dir, bg }) {
+function ScrollBadge({ dir }) {
   return (
-    <div style={{ ...OVERLAY_BASE, ...OVERLAY_POS[dir], background: GRADIENT[dir](bg) }}>
-      <span style={{ color: "#999", fontSize: 13, lineHeight: 1, opacity: 0.65, display: "block", transform: ROTATE[dir] }}>
+    <div style={{ ...BADGE, ...BADGE_POS[dir] }}>
+      <span style={{ color: "#fff", fontSize: 9, fontWeight: 600, letterSpacing: "0.3px" }}>pg</span>
+      <span style={{ color: "#fff", fontSize: 15, transform: CHEVRON_ROTATE[dir], display: "block" }}>
         {CHEVRON[dir]}
       </span>
     </div>
@@ -31,16 +37,17 @@ function FadeEdge({ dir, bg }) {
 }
 
 /**
- * Drop-in wrapper that adds faded scroll-edge indicators on any axis.
+ * Drop-in wrapper that shows a single floating scroll-hint badge per edge.
+ * One centered badge per direction — not repeated per row.
  *
  * Props:
- *   className   — applied to the outer div (for visual CSS like border-radius, shadow)
+ *   className   — applied to the outer div (for visual CSS)
  *   style       — extra inline styles for the outer div
- *   innerStyle  — inline styles for the inner scrollable div (e.g. maxHeight, flex)
- *   bg          — background color string used for the gradient fade (default "#fff")
+ *   innerStyle  — inline styles for the inner scrollable div
+ *   bg          — accepted but unused (kept for call-site compatibility)
  *   children    — scrollable content
  */
-export default function ScrollFade({ children, className, style, innerStyle, bg = "#fff" }) {
+export default function ScrollFade({ children, className, style, innerStyle, bg }) {
   const innerRef = useRef(null);
   const [edges, setEdges] = useState({ left: false, right: false, top: false, bottom: false });
 
@@ -74,7 +81,10 @@ export default function ScrollFade({ children, className, style, innerStyle, bg 
       <div ref={innerRef} style={{ overflow: "auto", ...innerStyle }}>
         {children}
       </div>
-      {DIRS.map(d => edges[d] && <FadeEdge key={d} dir={d} bg={bg} />)}
+      {edges.right  && <ScrollBadge dir="right"  />}
+      {edges.left   && <ScrollBadge dir="left"   />}
+      {edges.top    && <ScrollBadge dir="top"    />}
+      {edges.bottom && <ScrollBadge dir="bottom" />}
     </div>
   );
 }
