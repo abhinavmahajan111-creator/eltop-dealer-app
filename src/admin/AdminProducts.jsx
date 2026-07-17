@@ -285,7 +285,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         </div>
 
         {/* Scrollable table */}
-        <div style={{ overflowY: "auto", flex: 1 }}>
+        <div style={{ overflowY: "auto", overflowX: "auto", flex: 1 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
