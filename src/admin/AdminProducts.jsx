@@ -131,6 +131,231 @@ function SpecsEditor({ data, onChange }) {
   );
 }
 
+// ── Bulk edit columns definition ──────────────────────────────────────────────
+const BULK_COLS = [
+  { key: "name",             label: "Name",      type: "text"   },
+  { key: "dlp",              label: "DLP (₹)",   type: "number" },
+  { key: "mrp",              label: "MRP (₹)",   type: "number" },
+  { key: "stock",            label: "Stock",     type: "number" },
+  { key: "standard_packing", label: "Packing",   type: "number" },
+];
+
+// ── Bulk edit modal ───────────────────────────────────────────────────────────
+function BulkEditModal({ rows, onClose, onSaved }) {
+  const [drafts, setDrafts] = useState(() =>
+    Object.fromEntries(rows.map(p => [p.id, {
+      name:             p.name             ?? "",
+      dlp:              p.dlp              ?? "",
+      mrp:              p.mrp              ?? "",
+      stock:            p.stock            ?? 0,
+      standard_packing: p.standard_packing ?? "",
+    }]))
+  );
+  const [cellErrors, setCellErrors] = useState({});
+  const [saving,    setSaving]    = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const inputRefs    = useRef({});
+  const saveButtonRef = useRef(null);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const setField = (id, field, value) => {
+    setDrafts(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+    // Clear the specific cell error as the user types
+    if (cellErrors[id]?.[field]) {
+      setCellErrors(prev => {
+        const next = { ...prev };
+        if (next[id]) { next[id] = { ...next[id] }; delete next[id][field]; }
+        return next;
+      });
+    }
+  };
+
+  const validate = () => {
+    const errors = {};
+    let hasError = false;
+    for (const p of rows) {
+      const d = drafts[p.id] || {};
+      const rowErrors = {};
+      if (!String(d.name || "").trim()) {
+        rowErrors.name = "Required";
+        hasError = true;
+      }
+      ["dlp", "mrp", "stock", "standard_packing"].forEach(f => {
+        const v = d[f];
+        if (v !== "" && v != null && (isNaN(Number(v)) || Number(v) < 0)) {
+          rowErrors[f] = "Must be ≥ 0";
+          hasError = true;
+        }
+      });
+      if (Object.keys(rowErrors).length) errors[p.id] = rowErrors;
+    }
+    return hasError ? errors : null;
+  };
+
+  const handleSave = async () => {
+    const errors = validate();
+    if (errors) { setCellErrors(errors); return; }
+    setSaving(true);
+    setSaveError("");
+
+    const CHUNK = 20;
+    const failedNames = [];
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const results = await Promise.allSettled(chunk.map(p => {
+        const d = drafts[p.id];
+        return supabase.from("products").update({
+          name:             String(d.name).trim(),
+          dlp:              d.dlp !== "" && d.dlp != null ? Number(d.dlp) : null,
+          mrp:              d.mrp !== "" && d.mrp != null ? Number(d.mrp) : null,
+          stock:            Number(d.stock) || 0,
+          standard_packing: d.standard_packing !== "" && d.standard_packing != null ? Number(d.standard_packing) : null,
+        }).eq("id", p.id);
+        // If a product was deleted between selection and save, .update().eq('id', ...) is a no-op
+        // (0 rows matched, no error) — it's silently skipped and won't appear in the refreshed table.
+      }));
+
+      results.forEach((res, idx) => {
+        if (res.status === "rejected" || res.value?.error) {
+          failedNames.push(chunk[idx].name);
+        }
+      });
+    }
+
+    setSaving(false);
+    if (failedNames.length > 0) {
+      setSaveError(`Failed to save: ${failedNames.slice(0, 3).join(", ")}${failedNames.length > 3 ? ` (+${failedNames.length - 3} more)` : ""}. Please try again.`);
+      return;
+    }
+    onSaved();
+  };
+
+  // Enter moves focus to the same column, next row; on last row goes to Save button.
+  const handleKeyDown = (e, rowIdx, colKey) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (rowIdx + 1 < rows.length) {
+      const nextInput = inputRefs.current[`${rows[rowIdx + 1].id}-${colKey}`];
+      if (nextInput) { nextInput.focus(); nextInput.select(); }
+    } else {
+      saveButtonRef.current?.focus();
+    }
+  };
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,.5)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: 16,
+          width: "100%", maxWidth: 860,
+          maxHeight: "90vh", display: "flex", flexDirection: "column",
+          boxShadow: "0 8px 40px rgba(0,0,0,.2)",
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
+              Bulk Edit — {rows.length} product{rows.length !== 1 ? "s" : ""}
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 3 }}>
+              Values are pre-filled with current data. Enter moves down the same column. Changes are saved as absolute values.
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#94a3b8", lineHeight: 1, padding: "0 4px", flexShrink: 0 }}>✕</button>
+        </div>
+
+        {/* Scrollable table */}
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+            <thead>
+              <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
+                {BULK_COLS.map(({ key, label }) => (
+                  <th key={key} style={{ padding: "10px 10px 10px 12px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((p, rowIdx) => {
+                const d = drafts[p.id] || {};
+                const errs = cellErrors[p.id] || {};
+                return (
+                  <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    {BULK_COLS.map(({ key, type }) => (
+                      <td key={key} style={{ padding: "5px 6px 5px 10px", verticalAlign: "top" }}>
+                        <input
+                          ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
+                          type={type}
+                          value={d[key] ?? ""}
+                          onChange={e => setField(p.id, key, e.target.value)}
+                          onFocus={e => e.target.select()}
+                          onKeyDown={e => handleKeyDown(e, rowIdx, key)}
+                          style={{
+                            width: "100%", marginBottom: 0, fontSize: 13,
+                            border: errs[key] ? "1.5px solid #e74c3c" : "1.5px solid #e2e8f0",
+                            borderRadius: 6, padding: "5px 8px", boxSizing: "border-box",
+                            minWidth: key === "name" ? 160 : 80,
+                          }}
+                        />
+                        {errs[key] && (
+                          <div style={{ fontSize: 10, color: "#e74c3c", marginTop: 2, paddingLeft: 2 }}>{errs[key]}</div>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
+          {saveError && (
+            <div style={{ marginBottom: 10, fontSize: 13, color: "#c0392b", background: "#fdecea", padding: "8px 12px", borderRadius: 8 }}>
+              {saveError}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button className="btn small outline" type="button" onClick={onClose}>Cancel</button>
+            <button
+              ref={saveButtonRef}
+              className="btn small"
+              type="button"
+              disabled={saving}
+              onClick={handleSave}
+              style={{ minWidth: 100, background: "#7B2D8B", color: "#fff", border: "none" }}
+            >
+              {saving ? "Saving…" : "Save All"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -151,6 +376,10 @@ export default function AdminProducts() {
     room_type: true, special_features: true, recommended_use: true,
   });
   const fileInputRef = useRef(null);
+
+  // ── Bulk-edit state ───────────────────────────────────────────────────────
+  const [selected, setSelected] = useState(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const toggleItemDetailVisibility = (key) =>
     setItemDetailsVisibility(prev => ({ ...prev, [key]: !prev[key] }));
@@ -364,6 +593,41 @@ export default function AdminProducts() {
     });
     return Array.from(map.entries());
   }, [products, search]);
+
+  // ── Selection helpers ─────────────────────────────────────────────────────
+  const allVisibleIds = useMemo(() => grouped.flatMap(([, rows]) => rows.map(p => p.id)), [grouped]);
+  const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selected.has(id));
+  const someVisibleSelected = allVisibleIds.some(id => selected.has(id));
+
+  const toggleAll = () => {
+    setSelected(prev => {
+      const s = new Set(prev);
+      if (allVisibleSelected) allVisibleIds.forEach(id => s.delete(id));
+      else allVisibleIds.forEach(id => s.add(id));
+      return s;
+    });
+  };
+
+  const toggleCat = (catIds) => {
+    const allIn = catIds.every(id => selected.has(id));
+    setSelected(prev => {
+      const s = new Set(prev);
+      if (allIn) catIds.forEach(id => s.delete(id));
+      else catIds.forEach(id => s.add(id));
+      return s;
+    });
+  };
+
+  const toggleOne = (id) => {
+    setSelected(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      return s;
+    });
+  };
+
+  // ── Table column count: [checkbox, Img, Name, MRP, DLP, Unit, Packing, Stock, Edit] = 9
+  const TABLE_COLS = 9;
 
   return (
     <div className="admin-page">
@@ -635,6 +899,16 @@ export default function AdminProducts() {
           <table className="admin-table">
             <thead>
               <tr>
+                <th style={{ width: 36, textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                    onChange={toggleAll}
+                    title="Select all visible products"
+                    style={{ cursor: "pointer", width: 15, height: 15 }}
+                  />
+                </th>
                 <th>Img</th>
                 <th>Name</th>
                 <th>MRP</th>
@@ -646,67 +920,127 @@ export default function AdminProducts() {
               </tr>
             </thead>
             <tbody>
-              {grouped.map(([cat, rows]) => [
-                <tr key={`cat-${cat}`}>
-                  <td colSpan={7} style={{
-                    background: "var(--red-dark)", color: "#fff",
-                    fontWeight: 700, fontSize: 12, padding: "5px 10px",
-                    letterSpacing: "0.5px", textTransform: "uppercase",
-                  }}>
-                    {editingCategory === cat ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <input
-                          value={categoryNewName}
-                          onChange={e => setCategoryNewName(e.target.value)}
-                          onKeyDown={e => { if (e.key === "Enter") handleCategoryRename(cat, categoryNewName); if (e.key === "Escape") setEditingCategory(null); }}
-                          autoFocus
-                          style={{ fontWeight: 700, fontSize: 12, background: "transparent", border: "1px solid rgba(255,255,255,.7)", color: "#fff", padding: "2px 6px", borderRadius: 4, outline: "none", letterSpacing: "0.5px", textTransform: "uppercase", width: 180 }}
-                        />
-                        <button onClick={() => handleCategoryRename(cat, categoryNewName)} style={{ background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>✓</button>
-                        <button onClick={() => setEditingCategory(null)} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 13 }}>✗</button>
-                      </span>
-                    ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        {cat}
-                        <span
-                          onClick={() => { setEditingCategory(cat); setCategoryNewName(cat); }}
-                          title="Rename category"
-                          style={{ marginLeft: 4, cursor: "pointer", fontSize: 12, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}
-                        >✏️</span>
-                      </span>
-                    )}
-                  </td>
-                </tr>,
-                ...rows.map((p) => (
-                  <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : {}}>
-                    <td>
-                      {p.image_urls?.[0] ? (
-                        <span className="admin-img-hover-wrap">
-                          <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
-                          <span className="admin-img-hover-preview">
-                            <img src={p.image_urls[0]} alt="" />
-                          </span>
+              {grouped.map(([cat, rows]) => {
+                const catIds = rows.map(p => p.id);
+                const catAllSelected = catIds.every(id => selected.has(id));
+                const catSomeSelected = catIds.some(id => selected.has(id));
+                return [
+                  <tr key={`cat-${cat}`}>
+                    {/* Per-category select-all checkbox in the checkbox column */}
+                    <td style={{ background: "var(--red-dark)", textAlign: "center", padding: "5px 8px" }}>
+                      <input
+                        type="checkbox"
+                        checked={catAllSelected}
+                        ref={el => { if (el) el.indeterminate = catSomeSelected && !catAllSelected; }}
+                        onChange={() => toggleCat(catIds)}
+                        title={`Select all in ${cat}`}
+                        style={{ cursor: "pointer", width: 15, height: 15 }}
+                      />
+                    </td>
+                    <td colSpan={TABLE_COLS - 1} style={{
+                      background: "var(--red-dark)", color: "#fff",
+                      fontWeight: 700, fontSize: 12, padding: "5px 10px",
+                      letterSpacing: "0.5px", textTransform: "uppercase",
+                    }}>
+                      {editingCategory === cat ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            value={categoryNewName}
+                            onChange={e => setCategoryNewName(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") handleCategoryRename(cat, categoryNewName); if (e.key === "Escape") setEditingCategory(null); }}
+                            autoFocus
+                            style={{ fontWeight: 700, fontSize: 12, background: "transparent", border: "1px solid rgba(255,255,255,.7)", color: "#fff", padding: "2px 6px", borderRadius: 4, outline: "none", letterSpacing: "0.5px", textTransform: "uppercase", width: 180 }}
+                          />
+                          <button onClick={() => handleCategoryRename(cat, categoryNewName)} style={{ background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>✓</button>
+                          <button onClick={() => setEditingCategory(null)} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 13 }}>✗</button>
                         </span>
                       ) : (
-                        <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {cat}
+                          <span
+                            onClick={() => { setEditingCategory(cat); setCategoryNewName(cat); }}
+                            title="Rename category"
+                            style={{ marginLeft: 4, cursor: "pointer", fontSize: 12, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}
+                          >✏️</span>
+                        </span>
                       )}
                     </td>
-                    <td>{p.name}</td>
-                    <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
-                    <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
-                    <td>{p.unit || "pc"}</td>
-                    <td>{p.standard_packing ? `${p.standard_packing} pcs` : "—"}</td>
-                    <td>{p.stock}</td>
-                    <td className="admin-row-actions">
-                      <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
-                    </td>
-                  </tr>
-                )),
-              ])}
+                  </tr>,
+                  ...rows.map((p) => (
+                    <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : selected.has(p.id) ? { background: "#faf7ff" } : {}}>
+                      <td style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(p.id)}
+                          onChange={() => toggleOne(p.id)}
+                          style={{ cursor: "pointer", width: 15, height: 15 }}
+                        />
+                      </td>
+                      <td>
+                        {p.image_urls?.[0] ? (
+                          <span className="admin-img-hover-wrap">
+                            <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                            <span className="admin-img-hover-preview">
+                              <img src={p.image_urls[0]} alt="" />
+                            </span>
+                          </span>
+                        ) : (
+                          <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
+                        )}
+                      </td>
+                      <td>{p.name}</td>
+                      <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
+                      <td>{p.dlp != null ? `₹${Number(p.dlp).toLocaleString()}` : "—"}</td>
+                      <td>{p.unit || "pc"}</td>
+                      <td>{p.standard_packing ? `${p.standard_packing} pcs` : "—"}</td>
+                      <td>{p.stock}</td>
+                      <td className="admin-row-actions">
+                        <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
+                      </td>
+                    </tr>
+                  )),
+                ];
+              })}
             </tbody>
           </table>
         </div>
       ))}
+
+      {/* ── Floating bulk-edit button (shown when products are selected, not in single-edit mode) ── */}
+      {!form.id && selected.size > 0 && (
+        <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 100, display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={() => setBulkOpen(true)}
+            style={{
+              background: "#7B2D8B", color: "#fff", border: "none",
+              borderRadius: 10, padding: "12px 20px", cursor: "pointer",
+              fontWeight: 700, fontSize: 14,
+              boxShadow: "0 4px 20px rgba(123,45,139,.4)",
+            }}
+          >
+            ✏️ Edit Selected ({selected.size})
+          </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            title="Clear selection"
+            style={{
+              background: "#fff", border: "1px solid #e2e8f0",
+              borderRadius: 10, padding: "12px 14px", cursor: "pointer",
+              color: "#64748b", fontSize: 16, lineHeight: 1,
+              boxShadow: "0 2px 8px rgba(0,0,0,.08)",
+            }}
+          >✕</button>
+        </div>
+      )}
+
+      {/* ── Bulk edit modal ── */}
+      {bulkOpen && (
+        <BulkEditModal
+          rows={products.filter(p => selected.has(p.id))}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => { setBulkOpen(false); setSelected(new Set()); loadProducts(); }}
+        />
+      )}
     </div>
   );
 }
