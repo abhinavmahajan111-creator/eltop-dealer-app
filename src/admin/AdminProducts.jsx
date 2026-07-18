@@ -305,9 +305,10 @@ function BulkEditModal({ rows, onClose, onSaved }) {
 
         {/* Scrollable table */}
         <ScrollFade bg="#fff" style={{ flex: 1, minHeight: 0 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
+                <th style={{ padding: "10px 6px 10px 12px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 40 }}>IMG</th>
                 {BULK_COLS.map(({ key, label }) => (
                   <th key={key} style={{ padding: "10px 10px 10px 12px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
                     {label}
@@ -319,8 +320,12 @@ function BulkEditModal({ rows, onClose, onSaved }) {
               {rows.map((p, rowIdx) => {
                 const d = drafts[p.id] || {};
                 const errs = cellErrors[p.id] || {};
+                const thumb = getFirstImage(p);
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "5px 6px 5px 10px", verticalAlign: "middle", width: 40 }}>
+                      {thumb && <img src={thumb} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 4, display: "block" }} />}
+                    </td>
                     {BULK_COLS.map(({ key, type }) => (
                       <td key={key} style={{ padding: "5px 6px 5px 10px", verticalAlign: "top" }}>
                         {key === "name" ? (
