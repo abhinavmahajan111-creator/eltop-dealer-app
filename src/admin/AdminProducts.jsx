@@ -161,7 +161,9 @@ function autoResize(el) {
 
 // ── Bulk edit modal ───────────────────────────────────────────────────────────
 function BulkEditModal({ rows, onClose, onSaved }) {
-  const [drafts, setDrafts] = useState(() =>
+  // Uncontrolled inputs: initial values stored in a ref (not state) so
+  // keystrokes don't trigger React re-renders of all N rows.
+  const initialDrafts = useRef(
     Object.fromEntries(rows.map(p => [p.id, {
       name:             p.name             ?? "",
       dlp:              p.dlp              ?? "",
@@ -170,12 +172,18 @@ function BulkEditModal({ rows, onClose, onSaved }) {
       standard_packing: p.standard_packing ?? "",
     }]))
   );
+
   const [cellErrors, setCellErrors] = useState({});
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState("");
 
   const inputRefs    = useRef({});
   const saveButtonRef = useRef(null);
+
+  // Size all name textareas once after mount (batched, not per-ref-callback)
+  useEffect(() => {
+    rows.forEach(p => autoResize(inputRefs.current[`${p.id}-name`]));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close on Escape
   useEffect(() => {
@@ -184,31 +192,21 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const setField = (id, field, value) => {
-    setDrafts(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
-    // Clear the specific cell error as the user types
-    if (cellErrors[id]?.[field]) {
-      setCellErrors(prev => {
-        const next = { ...prev };
-        if (next[id]) { next[id] = { ...next[id] }; delete next[id][field]; }
-        return next;
-      });
-    }
-  };
+  // Read live value from DOM (used by validate + handleSave)
+  const getValue = (id, field) => inputRefs.current[`${id}-${field}`]?.value ?? "";
 
   const validate = () => {
     const errors = {};
     let hasError = false;
     for (const p of rows) {
-      const d = drafts[p.id] || {};
       const rowErrors = {};
-      if (!String(d.name || "").trim()) {
+      if (!String(getValue(p.id, "name") || "").trim()) {
         rowErrors.name = "Required";
         hasError = true;
       }
       ["dlp", "mrp", "stock", "standard_packing"].forEach(f => {
-        const v = d[f];
-        if (v !== "" && v != null && (isNaN(Number(v)) || Number(v) < 0)) {
+        const v = getValue(p.id, f);
+        if (v !== "" && (isNaN(Number(v)) || Number(v) < 0)) {
           rowErrors[f] = "Must be ≥ 0";
           hasError = true;
         }
@@ -219,6 +217,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
   };
 
   const handleSave = async () => {
+    setCellErrors({});
     const errors = validate();
     if (errors) { setCellErrors(errors); return; }
     setSaving(true);
@@ -230,13 +229,15 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
       const results = await Promise.allSettled(chunk.map(p => {
-        const d = drafts[p.id];
+        const dlp = getValue(p.id, "dlp");
+        const mrp = getValue(p.id, "mrp");
+        const sp  = getValue(p.id, "standard_packing");
         return supabase.from("products").update({
-          name:             String(d.name).trim(),
-          dlp:              d.dlp !== "" && d.dlp != null ? Number(d.dlp) : null,
-          mrp:              d.mrp !== "" && d.mrp != null ? Number(d.mrp) : null,
-          stock:            Number(d.stock) || 0,
-          standard_packing: d.standard_packing !== "" && d.standard_packing != null ? Number(d.standard_packing) : null,
+          name:             String(getValue(p.id, "name")).trim(),
+          dlp:              dlp !== "" ? Number(dlp) : null,
+          mrp:              mrp !== "" ? Number(mrp) : null,
+          stock:            Number(getValue(p.id, "stock")) || 0,
+          standard_packing: sp  !== "" ? Number(sp)  : null,
         }).eq("id", p.id);
         // If a product was deleted between selection and save, .update().eq('id', ...) is a no-op
         // (0 rows matched, no error) — it's silently skipped and won't appear in the refreshed table.
@@ -318,7 +319,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
             </thead>
             <tbody>
               {rows.map((p, rowIdx) => {
-                const d = drafts[p.id] || {};
+                const init = initialDrafts.current[p.id];
                 const errs = cellErrors[p.id] || {};
                 const thumb = getFirstImage(p);
                 return (
@@ -330,9 +331,9 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                       <td key={key} style={{ padding: "5px 6px 5px 10px", verticalAlign: "top" }}>
                         {key === "name" ? (
                           <textarea
-                            ref={el => { inputRefs.current[`${p.id}-${key}`] = el; autoResize(el); }}
-                            value={d[key] ?? ""}
-                            onChange={e => { setField(p.id, key, e.target.value); autoResize(e.target); }}
+                            ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
+                            defaultValue={init.name}
+                            onChange={e => autoResize(e.target)}
                             onFocus={e => e.target.select()}
                             onKeyDown={e => handleKeyDown(e, rowIdx, key)}
                             rows={1}
@@ -347,8 +348,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                           <input
                             ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
                             type={type}
-                            value={d[key] ?? ""}
-                            onChange={e => setField(p.id, key, e.target.value)}
+                            defaultValue={init[key]}
                             onFocus={e => e.target.select()}
                             onKeyDown={e => handleKeyDown(e, rowIdx, key)}
                             style={{
