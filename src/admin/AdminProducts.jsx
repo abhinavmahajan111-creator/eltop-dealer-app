@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
 
@@ -176,6 +177,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
   const [cellErrors, setCellErrors] = useState({});
   const [saving,    setSaving]    = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [bigImg,    setBigImg]    = useState(null);
 
   const inputRefs    = useRef({});
   const saveButtonRef = useRef(null);
@@ -185,9 +187,16 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     rows.forEach(p => autoResize(inputRefs.current[`${p.id}-name`]));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close on Escape
+  // Close on Escape — dismiss enlarged image first, then close modal
+  const bigImgRef = useRef(null);
+  useEffect(() => { bigImgRef.current = bigImg; }, [bigImg]);
   useEffect(() => {
-    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    const handler = (e) => {
+      if (e.key === "Escape") {
+        if (bigImgRef.current) setBigImg(null);
+        else onClose();
+      }
+    };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
@@ -324,7 +333,10 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                 const thumb = getFirstImage(p);
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "5px 6px 5px 10px", verticalAlign: "middle", width: 40 }}>
+                    <td
+                      style={{ padding: "5px 6px 5px 10px", verticalAlign: "middle", width: 40, cursor: thumb ? "pointer" : "default" }}
+                      onClick={() => { if (thumb) setBigImg(thumb); }}
+                    >
                       {thumb && <img src={thumb} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 4, display: "block" }} />}
                     </td>
                     {BULK_COLS.map(({ key, type }) => (
@@ -371,6 +383,29 @@ function BulkEditModal({ rows, onClose, onSaved }) {
           </table>
         </ScrollFade>
 
+        {/* Enlarged image lightbox */}
+        {bigImg && (
+          <div
+            onClick={() => setBigImg(null)}
+            style={{
+              position: "fixed", inset: 0, zIndex: 1100,
+              background: "rgba(0,0,0,0.75)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <img
+              src={bigImg}
+              alt=""
+              onClick={e => e.stopPropagation()}
+              style={{
+                maxWidth: "min(300px, 90vw)", maxHeight: "80vh",
+                borderRadius: 12, objectFit: "contain",
+                boxShadow: "0 8px 40px rgba(0,0,0,.5)",
+              }}
+            />
+          </div>
+        )}
+
         {/* Footer */}
         <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
           {saveError && (
@@ -398,6 +433,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
 }
 
 export default function AdminProducts() {
+  const location = useLocation();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -422,6 +458,9 @@ export default function AdminProducts() {
   const [selected, setSelected] = useState(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
 
+  // ── Form thumbnail lightbox (tap-to-enlarge on mobile) ───────────────────
+  const [formBigImg, setFormBigImg] = useState(null);
+
   const toggleItemDetailVisibility = (key) =>
     setItemDetailsVisibility(prev => ({ ...prev, [key]: !prev[key] }));
 
@@ -445,6 +484,20 @@ export default function AdminProducts() {
   };
 
   useEffect(() => { loadProducts(); }, []);
+
+  // Sidebar "Products" link sends resetAt in location.state — mirror AdminDealers pattern
+  useEffect(() => {
+    if (!location.state?.resetAt) return;
+    resetForm();
+    setBulkOpen(false);
+  }, [location.state?.resetAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape dismisses the form thumbnail lightbox
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") setFormBigImg(null); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const resetForm = () => {
     setForm(EMPTY_FORM); setError(""); setFormOpen(false);
@@ -544,7 +597,10 @@ export default function AdminProducts() {
       : await supabase.from("products").insert(payload).select().single();
     setSaving(false);
     if (err) { setError(err.message); return; }
-    if (!form.id && saved) {
+    if (form.id) {
+      // Update succeeded — return to list view
+      resetForm();
+    } else if (saved) {
       setForm((prev) => ({ ...prev, id: saved.id }));
       setFormOpen(false);
     }
@@ -684,6 +740,18 @@ export default function AdminProducts() {
       {/* ── Basic info form (new product or editing existing) ── */}
       {(formOpen || form.id) && (
         <form className="admin-form" onSubmit={handleSubmit}>
+          {form.id && (() => {
+            const p = products.find(x => x.id === form.id);
+            const img = p ? getFirstImage(p) : null;
+            return img ? (
+              <div style={{ display: "flex", alignItems: "flex-start", paddingTop: 2 }}>
+                <span className="admin-img-hover-wrap" onClick={() => setFormBigImg(img)} style={{ cursor: "zoom-in" }}>
+                  <img src={img} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, display: "block" }} />
+                  <span className="admin-img-hover-preview"><img src={img} alt="" /></span>
+                </span>
+              </div>
+            ) : null;
+          })()}
           <div>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 3 }}>Product Name</label>
             <input
@@ -1079,6 +1147,29 @@ export default function AdminProducts() {
           onClose={() => setBulkOpen(false)}
           onSaved={() => { setBulkOpen(false); setSelected(new Set()); loadProducts(); }}
         />
+      )}
+
+      {/* Form thumbnail lightbox — tap-to-enlarge for mobile */}
+      {formBigImg && (
+        <div
+          onClick={() => setFormBigImg(null)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 1100,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <img
+            src={formBigImg}
+            alt=""
+            onClick={e => e.stopPropagation()}
+            style={{
+              maxWidth: "min(300px, 90vw)", maxHeight: "80vh",
+              borderRadius: 12, objectFit: "contain",
+              boxShadow: "0 8px 40px rgba(0,0,0,.5)",
+            }}
+          />
+        </div>
       )}
     </div>
   );

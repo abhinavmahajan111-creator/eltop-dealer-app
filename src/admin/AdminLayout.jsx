@@ -60,7 +60,7 @@ export default function AdminLayout() {
                 "admin-navitem" + (isActive ? " active" : "")
               }
               onClick={(e) => {
-                if (item.to === "/admin/dealers") {
+                if (item.to === "/admin/dealers" || item.to === "/admin/products") {
                   e.preventDefault();
                   navigate(item.to, { state: { resetAt: Date.now() } });
                 }

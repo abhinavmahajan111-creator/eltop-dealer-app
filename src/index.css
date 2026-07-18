@@ -525,7 +525,7 @@
     box-shadow:0 8px 32px rgba(0,0,0,.2);padding:4px;
     pointer-events:none;top:50%;left:50%;transform:translate(-50%,-50%);
   }
-  .admin-img-hover-preview img{width:220px;height:220px;object-fit:contain;display:block;border-radius:6px;}
+  .admin-img-hover-preview img{width:400px;height:400px;object-fit:contain;display:block;border-radius:6px;}
   .admin-img-hover-wrap:hover .admin-img-hover-preview{display:block;}
   .admin-img-grid{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;}
   .admin-img-thumb{
