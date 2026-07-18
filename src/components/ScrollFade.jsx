@@ -121,9 +121,9 @@ export default function ScrollFade({ children, className, style, innerStyle, bg 
     <div
       ref={outerRef}
       className={className}
-      style={{ position: "relative", overflow: "hidden", ...style }}
+      style={{ position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", ...style }}
     >
-      <div ref={innerRef} style={{ overflow: "auto", ...innerStyle }}>
+      <div ref={innerRef} style={{ overflow: "auto", flex: 1, minHeight: 0, ...innerStyle }}>
         {children}
       </div>
       {edges.right  && <ScrollBadge dir="right"  top={badgeTop}   onPage={d => scrollPage(innerRef.current, d)} />}

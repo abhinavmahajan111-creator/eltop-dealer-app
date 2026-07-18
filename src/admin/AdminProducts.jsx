@@ -268,7 +268,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         style={{
           background: "#fff", borderRadius: 16,
           width: "100%", maxWidth: 860,
-          maxHeight: "90vh", display: "flex", flexDirection: "column",
+          maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column",
           boxShadow: "0 8px 40px rgba(0,0,0,.2)",
         }}
       >
@@ -286,7 +286,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         </div>
 
         {/* Scrollable table */}
-        <ScrollFade bg="#fff" style={{ flex: 1, minHeight: 0 }} innerStyle={{ height: "100%" }}>
+        <ScrollFade bg="#fff" style={{ flex: 1, minHeight: 0 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
