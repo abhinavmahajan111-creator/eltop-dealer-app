@@ -2,6 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
 
+// Same fallback logic as Store.jsx: prefer image_urls, fall back to image_url
+function getImages(p) {
+  let urls = p.image_urls;
+  if (urls != null) {
+    if (typeof urls === "string") { try { urls = JSON.parse(urls); } catch { urls = [urls]; } }
+    if (Array.isArray(urls)) { const f = urls.filter(Boolean); if (f.length > 0) return f; }
+    else if (urls) return [urls];
+  }
+  return p.image_url ? [p.image_url] : [];
+}
+function getFirstImage(p) { return getImages(p)[0] || null; }
+
 const EMPTY_FORM = {
   id: null, name: "", mrp: "", dlp: "", price: "", unit: "pc", stock: "",
   hsn_code: "", category: "", standard_packing: "", video_url: "", image_urls: [],
@@ -140,6 +152,12 @@ const BULK_COLS = [
   { key: "stock",            label: "Stock",     type: "number" },
   { key: "standard_packing", label: "Packing",   type: "number" },
 ];
+
+function autoResize(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
 
 // ── Bulk edit modal ───────────────────────────────────────────────────────────
 function BulkEditModal({ rows, onClose, onSaved }) {
@@ -305,20 +323,37 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                     {BULK_COLS.map(({ key, type }) => (
                       <td key={key} style={{ padding: "5px 6px 5px 10px", verticalAlign: "top" }}>
-                        <input
-                          ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
-                          type={type}
-                          value={d[key] ?? ""}
-                          onChange={e => setField(p.id, key, e.target.value)}
-                          onFocus={e => e.target.select()}
-                          onKeyDown={e => handleKeyDown(e, rowIdx, key)}
-                          style={{
-                            width: "100%", marginBottom: 0, fontSize: 13,
-                            border: errs[key] ? "1.5px solid #e74c3c" : "1.5px solid #e2e8f0",
-                            borderRadius: 6, padding: "5px 8px", boxSizing: "border-box",
-                            minWidth: key === "name" ? 160 : 80,
-                          }}
-                        />
+                        {key === "name" ? (
+                          <textarea
+                            ref={el => { inputRefs.current[`${p.id}-${key}`] = el; autoResize(el); }}
+                            value={d[key] ?? ""}
+                            onChange={e => { setField(p.id, key, e.target.value); autoResize(e.target); }}
+                            onFocus={e => e.target.select()}
+                            onKeyDown={e => handleKeyDown(e, rowIdx, key)}
+                            rows={1}
+                            style={{
+                              width: "100%", fontSize: 13, resize: "none", overflow: "hidden",
+                              border: errs[key] ? "1.5px solid #e74c3c" : "1.5px solid #e2e8f0",
+                              borderRadius: 6, padding: "5px 8px", boxSizing: "border-box",
+                              minWidth: 160, fontFamily: "inherit", display: "block", lineHeight: 1.4,
+                            }}
+                          />
+                        ) : (
+                          <input
+                            ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
+                            type={type}
+                            value={d[key] ?? ""}
+                            onChange={e => setField(p.id, key, e.target.value)}
+                            onFocus={e => e.target.select()}
+                            onKeyDown={e => handleKeyDown(e, rowIdx, key)}
+                            style={{
+                              width: "100%", marginBottom: 0, fontSize: 13,
+                              border: errs[key] ? "1.5px solid #e74c3c" : "1.5px solid #e2e8f0",
+                              borderRadius: 6, padding: "5px 8px", boxSizing: "border-box",
+                              minWidth: 80,
+                            }}
+                          />
+                        )}
                         {errs[key] && (
                           <div style={{ fontSize: 10, color: "#e74c3c", marginTop: 2, paddingLeft: 2 }}>{errs[key]}</div>
                         )}
@@ -395,7 +430,7 @@ export default function AdminProducts() {
     setLoading(true);
     supabase
       .from("products")
-      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, standard_packing, image_urls, video_url, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details")
+      .select("id, name, mrp, dlp, price, unit, stock, hsn_code, category, standard_packing, image_urls, image_url, video_url, about_item, brand, colour, style, dimensions, room_type, special_features, recommended_use, mounting_type, power_source, material, wattage, voltage, warranty, weight, features_specs, item_details")
       .order("category", { nullsFirst: true })
       .order("name")
       .then(({ data, error: err }) => {
@@ -978,16 +1013,14 @@ export default function AdminProducts() {
                         />
                       </td>
                       <td>
-                        {p.image_urls?.[0] ? (
+                        {(() => { const img = getFirstImage(p); return img ? (
                           <span className="admin-img-hover-wrap">
-                            <img src={p.image_urls[0]} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
-                            <span className="admin-img-hover-preview">
-                              <img src={p.image_urls[0]} alt="" />
-                            </span>
+                            <img src={img} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                            <span className="admin-img-hover-preview"><img src={img} alt="" /></span>
                           </span>
                         ) : (
                           <span style={{ color: "#ccc", fontSize: 22 }}>&#128247;</span>
-                        )}
+                        ); })()}
                       </td>
                       <td>{p.name}</td>
                       <td>{p.mrp != null ? `₹${Number(p.mrp).toLocaleString()}` : "—"}</td>
