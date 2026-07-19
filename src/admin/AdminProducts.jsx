@@ -1060,7 +1060,7 @@ export default function AdminProducts() {
             const legacy = p?.image_url || null;
             return legacy ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 12px", background: "#f8f9fc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-                <img src={legacy} alt="current" style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 6, background: "#fff", border: "1px solid #e2e8f0" }} />
+                <img src={legacy} alt="current" onClick={() => setFormBigImg(legacy)} style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 6, background: "#fff", border: "1px solid #e2e8f0", cursor: "zoom-in" }} />
                 <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
                   <strong style={{ color: "#334155" }}>Current image (legacy)</strong><br />
                   This image is stored in the legacy field and shown as the product thumbnail everywhere.<br />
