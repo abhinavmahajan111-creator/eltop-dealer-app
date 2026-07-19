@@ -160,6 +160,102 @@ function autoResize(el) {
   el.style.height = el.scrollHeight + "px";
 }
 
+// ── Image lightbox — shared by BulkEditModal and edit-form thumbnail ──────────
+async function downloadImage(url) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `eltop-product.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch {
+    // silently fail — image may be unreachable in this context
+  }
+}
+
+async function shareImage(url) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const ext = (blob.type.split("/")[1] || "jpg").replace("jpeg", "jpg");
+    const file = new File([blob], `eltop-product.${ext}`, { type: blob.type });
+    if (navigator.share) {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Product Image" });
+      } else {
+        await navigator.share({ url });
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      return "copied";
+    }
+  } catch {
+    // user cancelled share or clipboard blocked — ignore
+  }
+}
+
+function ImageLightbox({ src, onClose }) {
+  const [dlBusy, setDlBusy] = useState(false);
+  const [shareLabel, setShareLabel] = useState("Share");
+
+  const handleDownload = async (e) => {
+    e.stopPropagation();
+    setDlBusy(true);
+    await downloadImage(src);
+    setDlBusy(false);
+  };
+
+  const handleShare = async (e) => {
+    e.stopPropagation();
+    setShareLabel("…");
+    const result = await shareImage(src);
+    setShareLabel(result === "copied" ? "Copied!" : "Share");
+    if (result === "copied") setTimeout(() => setShareLabel("Share"), 2000);
+  };
+
+  const btnStyle = {
+    background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.35)",
+    color: "#fff", borderRadius: 20, padding: "8px 20px", cursor: "pointer",
+    fontSize: 13, fontWeight: 600, whiteSpace: "nowrap",
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1100,
+        background: "rgba(0,0,0,0.78)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 16,
+      }}
+    >
+      <img
+        src={src}
+        alt=""
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "min(300px, 90vw)", maxHeight: "75vh",
+          borderRadius: 12, objectFit: "contain",
+          boxShadow: "0 8px 40px rgba(0,0,0,.5)",
+        }}
+      />
+      <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 10 }}>
+        <button style={btnStyle} onClick={handleDownload} disabled={dlBusy}>
+          {dlBusy ? "…" : "⬇ Download"}
+        </button>
+        <button style={btnStyle} onClick={handleShare}>
+          ↗ {shareLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Bulk edit modal ───────────────────────────────────────────────────────────
 function BulkEditModal({ rows, onClose, onSaved }) {
   // Uncontrolled inputs: initial values stored in a ref (not state) so
@@ -384,27 +480,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         </ScrollFade>
 
         {/* Enlarged image lightbox */}
-        {bigImg && (
-          <div
-            onClick={() => setBigImg(null)}
-            style={{
-              position: "fixed", inset: 0, zIndex: 1100,
-              background: "rgba(0,0,0,0.75)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <img
-              src={bigImg}
-              alt=""
-              onClick={e => e.stopPropagation()}
-              style={{
-                maxWidth: "min(300px, 90vw)", maxHeight: "80vh",
-                borderRadius: 12, objectFit: "contain",
-                boxShadow: "0 8px 40px rgba(0,0,0,.5)",
-              }}
-            />
-          </div>
-        )}
+        {bigImg && <ImageLightbox src={bigImg} onClose={() => setBigImg(null)} />}
 
         {/* Footer */}
         <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
@@ -1150,27 +1226,7 @@ export default function AdminProducts() {
       )}
 
       {/* Form thumbnail lightbox — tap-to-enlarge for mobile */}
-      {formBigImg && (
-        <div
-          onClick={() => setFormBigImg(null)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 1100,
-            background: "rgba(0,0,0,0.75)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-        >
-          <img
-            src={formBigImg}
-            alt=""
-            onClick={e => e.stopPropagation()}
-            style={{
-              maxWidth: "min(300px, 90vw)", maxHeight: "80vh",
-              borderRadius: 12, objectFit: "contain",
-              boxShadow: "0 8px 40px rgba(0,0,0,.5)",
-            }}
-          />
-        </div>
-      )}
+      {formBigImg && <ImageLightbox src={formBigImg} onClose={() => setFormBigImg(null)} />}
     </div>
   );
 }
