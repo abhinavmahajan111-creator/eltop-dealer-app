@@ -1055,6 +1055,20 @@ export default function AdminProducts() {
           <div className="admin-media-label" style={{ marginTop: 16 }}>
             &#128247; Images ({form.image_urls.length}/9)
           </div>
+          {form.image_urls.length === 0 && (() => {
+            const p = products.find(x => x.id === form.id);
+            const legacy = p?.image_url || null;
+            return legacy ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 12px", background: "#f8f9fc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                <img src={legacy} alt="current" style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 6, background: "#fff", border: "1px solid #e2e8f0" }} />
+                <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+                  <strong style={{ color: "#334155" }}>Current image (legacy)</strong><br />
+                  This image is stored in the legacy field and shown as the product thumbnail everywhere.<br />
+                  Upload via "Add image" below to manage it in the gallery.
+                </div>
+              </div>
+            ) : null;
+          })()}
           <div className="admin-img-grid">
             {form.image_urls.map((url, i) => (
               <div key={url} className="admin-img-thumb">
