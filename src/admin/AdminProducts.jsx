@@ -747,6 +747,34 @@ export default function AdminProducts() {
     }
   };
 
+  const handleDuplicate = async (p) => {
+    const payload = {
+      name: `${p.name} (Copy)`,
+      category: p.category || null,
+      mrp: p.mrp ?? null, dlp: p.dlp ?? null, price: p.price ?? null,
+      unit: p.unit || "pc",
+      stock: 0,
+      hsn_code: p.hsn_code || null,
+      standard_packing: p.standard_packing ?? null,
+      video_url: p.video_url || null,
+      image_urls: p.image_urls ?? [],
+      about_item: p.about_item ?? [],
+      brand: p.brand || null, colour: p.colour || null, style: p.style || null,
+      dimensions: p.dimensions || null, room_type: p.room_type || null,
+      special_features: p.special_features || null, recommended_use: p.recommended_use || null,
+      mounting_type: p.mounting_type || null, power_source: p.power_source || null,
+      material: p.material || null, wattage: p.wattage || null, voltage: p.voltage || null,
+      warranty: p.warranty || null, weight: p.weight || null,
+      features_specs: p.features_specs || null,
+      item_details: p.item_details || null,
+    };
+    const { data: created, error: err } = await supabase
+      .from("products").insert(payload).select().single();
+    if (err) { setError(`Duplicate failed: ${err.message}`); return; }
+    loadProducts();
+    handleEdit(created);
+  };
+
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this product?")) return;
     await supabase.from("products").delete().eq("id", id);
@@ -1179,6 +1207,7 @@ export default function AdminProducts() {
                       <td>{p.stock}</td>
                       <td className="admin-row-actions">
                         <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
+                        <button className="admin-link" onClick={() => handleDuplicate(p)}>Duplicate</button>
                       </td>
                     </tr>
                   )),
