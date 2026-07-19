@@ -199,9 +199,26 @@ async function shareImage(url) {
   }
 }
 
-function ImageLightbox({ src, onClose }) {
+function ImageLightbox({ images, startIndex = 0, onClose }) {
+  const [idx, setIdx] = useState(startIndex);
+  const src = images[idx];
+  const isMulti = images.length > 1;
+
   const [dlBusy, setDlBusy] = useState(false);
   const [shareLabel, setShareLabel] = useState("Share");
+
+  // Reset idx if caller swaps to a different image set
+  useEffect(() => { setIdx(startIndex); }, [startIndex]);
+
+  // Arrow-key navigation (separate from Escape which callers handle)
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "ArrowLeft")  setIdx(i => Math.max(0, i - 1));
+      if (e.key === "ArrowRight") setIdx(i => Math.min(images.length - 1, i + 1));
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [images.length]);
 
   const handleDownload = async (e) => {
     e.stopPropagation();
@@ -224,6 +241,14 @@ function ImageLightbox({ src, onClose }) {
     fontSize: 13, fontWeight: 600, whiteSpace: "nowrap",
   };
 
+  const arrowStyle = {
+    position: "absolute", top: "50%", transform: "translateY(-50%)",
+    background: "rgba(0,0,0,0.45)", border: "none", borderRadius: "50%",
+    width: 44, height: 44, color: "#fff", fontSize: 22, cursor: "pointer",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    lineHeight: 1,
+  };
+
   return (
     <div
       onClick={onClose}
@@ -234,6 +259,33 @@ function ImageLightbox({ src, onClose }) {
         alignItems: "center", justifyContent: "center", gap: 16,
       }}
     >
+      {/* "Pic X of N" counter */}
+      {isMulti && (
+        <div style={{
+          position: "absolute", top: 16, left: "50%", transform: "translateX(-50%)",
+          background: "rgba(0,0,0,0.45)", color: "#fff", fontSize: 12, fontWeight: 600,
+          padding: "4px 12px", borderRadius: 12, whiteSpace: "nowrap",
+        }}>
+          {idx + 1} / {images.length}
+        </div>
+      )}
+
+      {/* Left arrow — hidden at first image */}
+      {isMulti && idx > 0 && (
+        <button
+          style={{ ...arrowStyle, left: 16 }}
+          onClick={e => { e.stopPropagation(); setIdx(i => i - 1); }}
+        >‹</button>
+      )}
+
+      {/* Right arrow — hidden at last image */}
+      {isMulti && idx < images.length - 1 && (
+        <button
+          style={{ ...arrowStyle, right: 16 }}
+          onClick={e => { e.stopPropagation(); setIdx(i => i + 1); }}
+        >›</button>
+      )}
+
       <img
         src={src}
         alt=""
@@ -431,7 +483,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                     <td
                       style={{ padding: "5px 6px 5px 10px", verticalAlign: "middle", width: 40, cursor: thumb ? "pointer" : "default" }}
-                      onClick={() => { if (thumb) setBigImg(thumb); }}
+                      onClick={() => { if (thumb) setBigImg({ images: getImages(p), index: 0 }); }}
                     >
                       {thumb && <img src={thumb} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 4, display: "block" }} />}
                     </td>
@@ -480,7 +532,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         </ScrollFade>
 
         {/* Enlarged image lightbox */}
-        {bigImg && <ImageLightbox src={bigImg} onClose={() => setBigImg(null)} />}
+        {bigImg && <ImageLightbox images={bigImg.images} startIndex={bigImg.index} onClose={() => setBigImg(null)} />}
 
         {/* Footer */}
         <div style={{ padding: "14px 24px 18px", borderTop: "1px solid #e2e8f0", flexShrink: 0 }}>
@@ -850,7 +902,7 @@ export default function AdminProducts() {
             const img = p ? getFirstImage(p) : null;
             return img ? (
               <div style={{ display: "flex", alignItems: "flex-start", paddingTop: 2 }}>
-                <span className="admin-img-hover-wrap" onClick={() => setFormBigImg(img)} style={{ cursor: "zoom-in" }}>
+                <span className="admin-img-hover-wrap" onClick={() => setFormBigImg({ images: getImages(p), index: 0 })} style={{ cursor: "zoom-in" }}>
                   <img src={img} alt="" style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, display: "block" }} />
                   <span className="admin-img-hover-preview"><img src={img} alt="" /></span>
                 </span>
@@ -1060,7 +1112,7 @@ export default function AdminProducts() {
             const legacy = p?.image_url || null;
             return legacy ? (
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 12px", background: "#f8f9fc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
-                <img src={legacy} alt="current" onClick={() => setFormBigImg(legacy)} style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 6, background: "#fff", border: "1px solid #e2e8f0", cursor: "zoom-in" }} />
+                <img src={legacy} alt="current" onClick={() => setFormBigImg({ images: getImages(p), index: 0 })} style={{ width: 60, height: 60, objectFit: "contain", borderRadius: 6, background: "#fff", border: "1px solid #e2e8f0", cursor: "zoom-in" }} />
                 <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
                   <strong style={{ color: "#334155" }}>Current image (legacy)</strong><br />
                   This image is stored in the legacy field and shown as the product thumbnail everywhere.<br />
@@ -1270,7 +1322,7 @@ export default function AdminProducts() {
       )}
 
       {/* Form thumbnail lightbox — tap-to-enlarge for mobile */}
-      {formBigImg && <ImageLightbox src={formBigImg} onClose={() => setFormBigImg(null)} />}
+      {formBigImg && <ImageLightbox images={formBigImg.images} startIndex={formBigImg.index} onClose={() => setFormBigImg(null)} />}
     </div>
   );
 }
