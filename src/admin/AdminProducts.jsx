@@ -201,24 +201,33 @@ async function shareImage(url) {
 
 function ImageLightbox({ images, startIndex = 0, onClose }) {
   const [idx, setIdx] = useState(startIndex);
+  const [imgLoaded, setImgLoaded] = useState(false);
   const src = images[idx];
   const isMulti = images.length > 1;
 
   const [dlBusy, setDlBusy] = useState(false);
   const [shareLabel, setShareLabel] = useState("Share");
 
-  // Reset idx if caller swaps to a different image set
-  useEffect(() => { setIdx(startIndex); }, [startIndex]);
+  // Batch idx + imgLoaded reset in one render so no stale-image frame exists
+  const navigate = (newIdx) => { setIdx(newIdx); setImgLoaded(false); };
+
+  // Reset when caller opens lightbox for a different product
+  useEffect(() => { setIdx(startIndex); setImgLoaded(false); }, [startIndex]);
+
+  // Preload entire gallery into browser cache as soon as lightbox opens
+  useEffect(() => {
+    images.forEach(url => { new Image().src = url; });
+  }, [images]);
 
   // Arrow-key navigation (separate from Escape which callers handle)
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === "ArrowLeft")  setIdx(i => Math.max(0, i - 1));
-      if (e.key === "ArrowRight") setIdx(i => Math.min(images.length - 1, i + 1));
+      if (e.key === "ArrowLeft")  navigate(Math.max(0, idx - 1));
+      if (e.key === "ArrowRight") navigate(Math.min(images.length - 1, idx + 1));
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [images.length]);
+  }, [idx, images.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownload = async (e) => {
     e.stopPropagation();
@@ -274,7 +283,7 @@ function ImageLightbox({ images, startIndex = 0, onClose }) {
       {isMulti && idx > 0 && (
         <button
           style={{ ...arrowStyle, left: 16 }}
-          onClick={e => { e.stopPropagation(); setIdx(i => i - 1); }}
+          onClick={e => { e.stopPropagation(); navigate(idx - 1); }}
         >‹</button>
       )}
 
@@ -282,15 +291,31 @@ function ImageLightbox({ images, startIndex = 0, onClose }) {
       {isMulti && idx < images.length - 1 && (
         <button
           style={{ ...arrowStyle, right: 16 }}
-          onClick={e => { e.stopPropagation(); setIdx(i => i + 1); }}
+          onClick={e => { e.stopPropagation(); navigate(idx + 1); }}
         >›</button>
       )}
 
+      {/* Loading placeholder — same size as image area, visible only while loading */}
+      {!imgLoaded && (
+        <div onClick={e => e.stopPropagation()} style={{
+          width: "min(300px, 90vw)", minHeight: 180,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          color: "rgba(255,255,255,0.35)", fontSize: 13, letterSpacing: 1,
+        }}>
+          Loading…
+        </div>
+      )}
+
+      {/* key={idx} forces a fresh DOM node on navigation, so the browser can't
+          keep painting the old image while the new src loads */}
       <img
+        key={idx}
         src={src}
         alt=""
+        onLoad={() => setImgLoaded(true)}
         onClick={e => e.stopPropagation()}
         style={{
+          display: imgLoaded ? "block" : "none",
           maxWidth: "min(300px, 90vw)", maxHeight: "75vh",
           borderRadius: 12, objectFit: "contain",
           boxShadow: "0 8px 40px rgba(0,0,0,.5)",
