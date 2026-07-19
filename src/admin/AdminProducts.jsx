@@ -352,6 +352,63 @@ function BulkEditModal({ rows, onClose, onSaved }) {
   const [saveError, setSaveError] = useState("");
   const [bigImg,    setBigImg]    = useState(null);
 
+  // ── Column order (reorderable, persisted to localStorage) ────────────────
+  const [colOrder, setColOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("eltop-bulk-col-order") || "null");
+      if (Array.isArray(saved) && saved.length === BULK_COLS.length &&
+          saved.every(k => BULK_COLS.some(c => c.key === k))) return saved;
+    } catch {}
+    return BULK_COLS.map(c => c.key);
+  });
+  const [dropTarget, setDropTarget] = useState(null); // key of th being dragged over
+  const dragKeyRef = useRef(null);                    // key currently being dragged
+
+  const orderedCols = colOrder.map(k => BULK_COLS.find(c => c.key === k));
+
+  const saveColOrder = (next) => {
+    try { localStorage.setItem("eltop-bulk-col-order", JSON.stringify(next)); } catch {}
+  };
+
+  const moveCol = (key, dir) => {
+    setColOrder(prev => {
+      const i = prev.indexOf(key);
+      const j = i + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      saveColOrder(next);
+      return next;
+    });
+  };
+
+  const onColDragStart = (key) => (e) => {
+    dragKeyRef.current = key;
+    e.dataTransfer.effectAllowed = "move";
+  };
+  const onColDragOver = (key) => (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (key !== dragKeyRef.current) setDropTarget(key);
+  };
+  const onColDrop = (key) => (e) => {
+    e.preventDefault();
+    const from = dragKeyRef.current;
+    setDropTarget(null);
+    dragKeyRef.current = null;
+    if (!from || from === key) return;
+    setColOrder(prev => {
+      const next = [...prev];
+      const fromIdx = next.indexOf(from);
+      const toIdx   = next.indexOf(key);
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, from);
+      saveColOrder(next);
+      return next;
+    });
+  };
+  const onColDragEnd = () => { setDropTarget(null); dragKeyRef.current = null; };
+
   const inputRefs    = useRef({});
   const saveButtonRef = useRef(null);
 
@@ -491,12 +548,58 @@ function BulkEditModal({ rows, onClose, onSaved }) {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
-                <th style={{ padding: "10px 6px 10px 12px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 40 }}>IMG</th>
-                {BULK_COLS.map(({ key, label }) => (
-                  <th key={key} style={{ padding: "10px 10px 10px 12px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
-                    {label}
-                  </th>
-                ))}
+                {/* Fixed: serial number */}
+                <th style={{ padding: "10px 4px 10px 10px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 28 }}>#</th>
+                {/* Fixed: image */}
+                <th style={{ padding: "10px 6px 10px 6px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 40 }}>IMG</th>
+                {/* Reorderable data columns */}
+                {orderedCols.map((col) => {
+                  const colIdx = colOrder.indexOf(col.key);
+                  const isDragTarget = dropTarget === col.key && dragKeyRef.current !== col.key;
+                  return (
+                    <th
+                      key={col.key}
+                      draggable
+                      onDragStart={onColDragStart(col.key)}
+                      onDragOver={onColDragOver(col.key)}
+                      onDrop={onColDrop(col.key)}
+                      onDragEnd={onColDragEnd}
+                      style={{
+                        padding: "10px 10px 10px 8px",
+                        fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b",
+                        textTransform: "uppercase", letterSpacing: "0.5px",
+                        borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap",
+                        cursor: "grab", userSelect: "none",
+                        borderLeft: isDragTarget ? "3px solid #6c47ff" : "3px solid transparent",
+                        background: isDragTarget ? "#f0edff" : undefined,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                        <span style={{ color: "#c7c7d4", fontSize: 10, letterSpacing: 0 }}>⠿</span>
+                        {col.label}
+                        {/* Touch-friendly reorder buttons (also work on desktop) */}
+                        <span style={{ display: "inline-flex", gap: 1, marginLeft: 1 }}>
+                          {colIdx > 0 && (
+                            <button
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); moveCol(col.key, -1); }}
+                              title="Move left"
+                              style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#94a3b8", fontSize: 11, lineHeight: 1 }}
+                            >◂</button>
+                          )}
+                          {colIdx < colOrder.length - 1 && (
+                            <button
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); moveCol(col.key, +1); }}
+                              title="Move right"
+                              style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#94a3b8", fontSize: 11, lineHeight: 1 }}
+                            >▸</button>
+                          )}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -506,13 +609,18 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                 const thumb = getFirstImage(p);
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    {/* Serial number — fixed, read-only */}
+                    <td style={{ padding: "5px 4px 5px 10px", verticalAlign: "middle", width: 28, color: "#94a3b8", fontSize: 12, fontWeight: 600, textAlign: "right" }}>
+                      {rowIdx + 1}
+                    </td>
+                    {/* Image thumbnail — fixed, click to enlarge */}
                     <td
-                      style={{ padding: "5px 6px 5px 10px", verticalAlign: "middle", width: 40, cursor: thumb ? "pointer" : "default" }}
+                      style={{ padding: "5px 6px 5px 6px", verticalAlign: "middle", width: 40, cursor: thumb ? "pointer" : "default" }}
                       onClick={() => { if (thumb) setBigImg({ images: getImages(p), index: 0 }); }}
                     >
                       {thumb && <img src={thumb} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 4, display: "block" }} />}
                     </td>
-                    {BULK_COLS.map(({ key, type }) => (
+                    {orderedCols.map(({ key, type }) => (
                       <td key={key} style={{ padding: "5px 6px 5px 10px", verticalAlign: "top" }}>
                         {key === "name" ? (
                           <textarea
