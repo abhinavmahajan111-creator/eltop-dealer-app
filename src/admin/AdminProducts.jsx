@@ -586,8 +586,9 @@ export default function AdminProducts() {
   const [selected, setSelected] = useState(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
 
-  // ── Form thumbnail lightbox (tap-to-enlarge on mobile) ───────────────────
-  const [formBigImg, setFormBigImg] = useState(null);
+  // ── Thumbnail lightboxes ─────────────────────────────────────────────────
+  const [formBigImg,  setFormBigImg]  = useState(null);
+  const [tableBigImg, setTableBigImg] = useState(null);
 
   const toggleItemDetailVisibility = (key) =>
     setItemDetailsVisibility(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1258,7 +1259,7 @@ export default function AdminProducts() {
                       </td>
                       <td>
                         {(() => { const img = getFirstImage(p); return img ? (
-                          <span className="admin-img-hover-wrap">
+                          <span className="admin-img-hover-wrap" onClick={() => setTableBigImg({ images: getImages(p), index: 0 })} style={{ cursor: "zoom-in" }}>
                             <img src={img} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, display: "block" }} />
                             <span className="admin-img-hover-preview"><img src={img} alt="" /></span>
                           </span>
@@ -1323,6 +1324,9 @@ export default function AdminProducts() {
 
       {/* Form thumbnail lightbox — tap-to-enlarge for mobile */}
       {formBigImg && <ImageLightbox images={formBigImg.images} startIndex={formBigImg.index} onClose={() => setFormBigImg(null)} />}
+
+      {/* Table thumbnail lightbox */}
+      {tableBigImg && <ImageLightbox images={tableBigImg.images} startIndex={tableBigImg.index} onClose={() => setTableBigImg(null)} />}
     </div>
   );
 }
