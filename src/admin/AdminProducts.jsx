@@ -1065,7 +1065,7 @@ export default function AdminProducts() {
                   setForm({ ...form, category: e.target.value });
                 }
               }}
-              style={{ marginBottom: showNewCategory ? 6 : undefined }}
+              style={{ marginBottom: showNewCategory ? 6 : undefined, textTransform: "uppercase" }}
             >
               <option value="">— Select category —</option>
               {existingCategories.map(c => <option key={c} value={c}>{c}</option>)}
