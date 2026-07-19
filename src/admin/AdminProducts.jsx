@@ -757,6 +757,7 @@ export default function AdminProducts() {
       hsn_code: p.hsn_code || null,
       standard_packing: p.standard_packing ?? null,
       video_url: p.video_url || null,
+      image_url:  p.image_url  || null,
       image_urls: p.image_urls ?? [],
       about_item: p.about_item ?? [],
       brand: p.brand || null, colour: p.colour || null, style: p.style || null,
