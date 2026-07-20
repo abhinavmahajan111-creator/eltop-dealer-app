@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
@@ -723,6 +723,23 @@ export default function AdminProducts() {
   const [formBigImg,  setFormBigImg]  = useState(null);
   const [tableBigImg, setTableBigImg] = useState(null);
 
+  // ── Sticky header measurement ─────────────────────────────────────────────
+  const theadRef    = useRef(null);
+  const [theadH,    setTheadH]    = useState(0);
+  const [tableMaxH, setTableMaxH] = useState(0);
+  // Measure after products load (thead isn't in DOM until products array is non-empty)
+  const measureTable = useCallback(() => {
+    if (!theadRef.current) return;
+    setTheadH(theadRef.current.offsetHeight);
+    const tableTop = theadRef.current.closest("table").getBoundingClientRect().top;
+    setTableMaxH(window.innerHeight - tableTop - 40);
+  }, []);
+  useEffect(() => { measureTable(); }, [products.length, measureTable]); // eslint-disable-line
+  useEffect(() => {
+    window.addEventListener("resize", measureTable);
+    return () => window.removeEventListener("resize", measureTable);
+  }, [measureTable]);
+
   const toggleItemDetailVisibility = (key) =>
     setItemDetailsVisibility(prev => ({ ...prev, [key]: !prev[key] }));
 
@@ -1309,10 +1326,10 @@ export default function AdminProducts() {
       ) : grouped.length === 0 ? (
         <div className="admin-empty">No products match "{search}".</div>
       ) : (
-        <ScrollFade className="admin-table-wrap" bg="#fff">
+        <ScrollFade className="admin-table-wrap" bg="#fff" style={tableMaxH ? { maxHeight: tableMaxH } : undefined}>
           <table className="admin-table">
-            <thead>
-              <tr>
+            <thead ref={theadRef}>
+              <tr style={{ position: "sticky", top: 0, zIndex: 4, boxShadow: "0 2px 4px rgba(0,0,0,0.08)" }}>
                 <th style={{ width: 36, textAlign: "center" }}>
                   <input
                     type="checkbox"
@@ -1339,7 +1356,7 @@ export default function AdminProducts() {
                 const catAllSelected = catIds.every(id => selected.has(id));
                 const catSomeSelected = catIds.some(id => selected.has(id));
                 return [
-                  <tr key={`cat-${cat}`}>
+                  <tr key={`cat-${cat}`} style={{ position: "sticky", top: theadH, zIndex: 3 }}>
                     {/* Per-category select-all checkbox in the checkbox column */}
                     <td style={{ background: "var(--red-dark)", textAlign: "center", padding: "5px 8px" }}>
                       <input
