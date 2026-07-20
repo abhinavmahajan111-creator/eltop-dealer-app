@@ -723,6 +723,22 @@ export default function AdminProducts() {
   const [formBigImg,  setFormBigImg]  = useState(null);
   const [tableBigImg, setTableBigImg] = useState(null);
 
+  // ── Discount columns (local-only calculation tool, never persisted) ──────
+  const [discountCols, setDiscountCols] = useState([]);
+  const [addColOpen,   setAddColOpen]   = useState(false);
+  const [pendingPct,   setPendingPct]   = useState("");
+  const discountColCounter = useRef(0);
+
+  const addDiscountCol = () => {
+    const pct = parseFloat(pendingPct);
+    if (isNaN(pct) || pct <= 0 || pct >= 100) return;
+    discountColCounter.current += 1;
+    setDiscountCols(prev => [...prev, { id: discountColCounter.current, pct }]);
+    setPendingPct("");
+    setAddColOpen(false);
+  };
+  const removeDiscountCol = (id) => setDiscountCols(prev => prev.filter(c => c.id !== id));
+
   // ── Category collapse state ───────────────────────────────────────────────
   const [collapsedCats, setCollapsedCats] = useState(() => {
     try {
@@ -1048,8 +1064,8 @@ export default function AdminProducts() {
     });
   };
 
-  // ── Table column count: [checkbox, Img, Name, MRP, DLP, Unit, Packing, Stock, Edit] = 9
-  const TABLE_COLS = 9;
+  // ── Table column count: [checkbox, Img, Name, MRP, DLP, Unit, Packing, Stock, ...discountCols, Edit]
+  const TABLE_COLS = 9 + discountCols.length;
 
   return (
     <div className="admin-page">
@@ -1353,6 +1369,40 @@ export default function AdminProducts() {
       ) : grouped.length === 0 ? (
         <div className="admin-empty">No products match "{search}".</div>
       ) : (
+        <>
+        {/* ── Discount-column toolbar ── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+          {addColOpen ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="number"
+                min="1" max="99" step="0.5"
+                placeholder="e.g. 36"
+                value={pendingPct}
+                autoFocus
+                onChange={e => setPendingPct(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") addDiscountCol(); if (e.key === "Escape") { setAddColOpen(false); setPendingPct(""); } }}
+                style={{ width: 80, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid #c4b5d0" }}
+              />
+              <span style={{ fontSize: 13, color: "#64748b" }}>%</span>
+              <button
+                onClick={addDiscountCol}
+                style={{ background: "var(--red-dark)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}
+              >Add</button>
+              <button
+                onClick={() => { setAddColOpen(false); setPendingPct(""); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: "0 4px" }}
+                title="Cancel"
+              >✕</button>
+            </span>
+          ) : (
+            <button
+              onClick={() => { setAddColOpen(true); setPendingPct(""); }}
+              style={{ background: "none", border: "1px dashed #c4b5d0", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 13, color: "var(--red-dark)", fontWeight: 600 }}
+            >+ Add column</button>
+          )}
+        </div>
+
         <ScrollFade className="admin-table-wrap" bg="#fff" style={tableMaxH ? { maxHeight: tableMaxH } : undefined}>
           <table className="admin-table">
             <thead ref={theadRef}>
@@ -1374,6 +1424,19 @@ export default function AdminProducts() {
                 <th>Unit</th>
                 <th>Packing</th>
                 <th>Stock</th>
+                {discountCols.map(col => (
+                  <th key={col.id} style={{ minWidth: 70, textAlign: "right", whiteSpace: "nowrap", paddingRight: 10 }}>
+                    <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 0, position: "relative", paddingRight: 16 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2 }}>{col.pct}%</span>
+                      <span style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.2 }}>Disc.</span>
+                      <button
+                        onClick={() => removeDiscountCol(col.id)}
+                        title={`Remove ${col.pct}% column`}
+                        style={{ position: "absolute", top: -4, right: -2, background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 11, lineHeight: 1, padding: 0 }}
+                      >✕</button>
+                    </div>
+                  </th>
+                ))}
                 <th></th>
               </tr>
             </thead>
@@ -1457,6 +1520,15 @@ export default function AdminProducts() {
                       <td>{p.unit || "pc"}</td>
                       <td>{p.standard_packing ? `${p.standard_packing} pcs` : "—"}</td>
                       <td>{p.stock}</td>
+                      {discountCols.map(col => {
+                        const dlp = Number(p.dlp ?? p.price ?? 0);
+                        const val = Math.round(dlp * (1 - col.pct / 100));
+                        return (
+                          <td key={col.id} style={{ textAlign: "right", paddingRight: 10, fontVariantNumeric: "tabular-nums" }}>
+                            {dlp > 0 ? `₹${val.toLocaleString()}` : "—"}
+                          </td>
+                        );
+                      })}
                       <td className="admin-row-actions">
                         <button className="admin-link" onClick={() => handleEdit(p)}>Edit</button>
                         <button className="admin-link" onClick={() => handleDuplicate(p)}>Duplicate</button>
@@ -1468,6 +1540,7 @@ export default function AdminProducts() {
             </tbody>
           </table>
         </ScrollFade>
+        </>
       ))}
 
       {/* ── Floating bulk-edit button (shown when products are selected, not in single-edit mode) ── */}
