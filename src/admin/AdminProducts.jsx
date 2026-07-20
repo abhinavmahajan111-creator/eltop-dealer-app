@@ -1053,14 +1053,46 @@ export default function AdminProducts() {
 
   return (
     <div className="admin-page">
-      <h1 className="admin-title">Products</h1>
+      {/* ── Page header: search | Products | + Add Product ── */}
+      <div className="products-page-header">
+        {/* LEFT — search bar */}
+        <div className="ph-search" style={{ justifySelf: "start" }}>
+          {!form.id && !formOpen && products.length > 0 && (
+            <div style={{ position: "relative", width: 180 }}>
+              <input
+                type="text"
+                placeholder="Search…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ width: "100%", paddingRight: search ? 28 : undefined, boxSizing: "border-box" }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  style={{
+                    position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 0,
+                  }}
+                  title="Clear"
+                >✕</button>
+              )}
+            </div>
+          )}
+        </div>
 
-      {/* ── Add Product toggle ── */}
-      {!form.id && !formOpen && (
-        <button className="btn" style={{ marginBottom: 20, width: "fit-content" }} onClick={() => setFormOpen(true)}>
-          + Add Product
-        </button>
-      )}
+        {/* CENTER — heading always centered */}
+        <h1 className="ph-title admin-title" style={{ textAlign: "center" }}>Products</h1>
+
+        {/* RIGHT — Add Product button */}
+        <div className="ph-btn" style={{ justifySelf: "end" }}>
+          {!form.id && !formOpen && (
+            <button className="btn" onClick={() => setFormOpen(true)}>
+              + Add Product
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* ── Basic info form (new product or editing existing) ── */}
       {(formOpen || form.id) && (
@@ -1311,29 +1343,7 @@ export default function AdminProducts() {
         </div>
       )}
 
-      {/* ── Search bar + table — hidden while editing a product ── */}
-      {!form.id && products.length > 0 && (
-        <div style={{ position: "relative", maxWidth: 400, marginBottom: 16 }}>
-          <input
-            type="text"
-            placeholder="Search products by name, category, HSN…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%", paddingRight: 32, boxSizing: "border-box" }}
-          />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              style={{
-                position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                background: "none", border: "none", cursor: "pointer",
-                color: "var(--muted)", fontSize: 16, lineHeight: 1, padding: 0,
-              }}
-              title="Clear"
-            >✕</button>
-          )}
-        </div>
-      )}
+      {/* ── Table — hidden while editing a product ── */}
 
       {/* ── Product table grouped by category — hidden while editing ── */}
       {!form.id && (loading ? (
