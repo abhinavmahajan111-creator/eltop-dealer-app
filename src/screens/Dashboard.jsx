@@ -259,7 +259,7 @@ export default function Dashboard() {
           />
           <div style={{ paddingLeft: 12, textAlign: "right" }}>
             <div className="welcome">Welcome back,</div>
-            <div className="dealer-name" style={{ marginBottom: 6 }}>{dealer?.name || "Dealer"}</div>
+            <div className="dealer-name" style={{ marginBottom: 6 }}>{dealer?.shop_name || dealer?.owner_name || dealer?.name || "there"}</div>
             {!loading && (
               <span style={{
                 display: "inline-flex", alignItems: "center", gap: 5,
