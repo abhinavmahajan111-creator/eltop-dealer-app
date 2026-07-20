@@ -723,6 +723,23 @@ export default function AdminProducts() {
   const [formBigImg,  setFormBigImg]  = useState(null);
   const [tableBigImg, setTableBigImg] = useState(null);
 
+  // ── Category collapse state ───────────────────────────────────────────────
+  const [collapsedCats, setCollapsedCats] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("eltop-collapsed-cats") || "null");
+      if (Array.isArray(saved)) return new Set(saved);
+    } catch {}
+    return new Set();
+  });
+  const toggleCatCollapse = (cat) => {
+    setCollapsedCats(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      try { localStorage.setItem("eltop-collapsed-cats", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
   // ── Sticky header measurement ─────────────────────────────────────────────
   const theadRef    = useRef(null);
   const [theadH,    setTheadH]    = useState(0);
@@ -1356,9 +1373,13 @@ export default function AdminProducts() {
                 const catAllSelected = catIds.every(id => selected.has(id));
                 const catSomeSelected = catIds.some(id => selected.has(id));
                 return [
-                  <tr key={`cat-${cat}`} style={{ position: "sticky", top: theadH, zIndex: 3 }}>
+                  <tr key={`cat-${cat}`}
+                    style={{ position: "sticky", top: theadH, zIndex: 3, cursor: "pointer" }}
+                    onClick={() => { if (editingCategory !== cat) toggleCatCollapse(cat); }}
+                  >
                     {/* Per-category select-all checkbox in the checkbox column */}
-                    <td style={{ background: "var(--red-dark)", textAlign: "center", padding: "5px 8px" }}>
+                    <td style={{ background: "var(--red-dark)", textAlign: "center", padding: "5px 8px" }}
+                        onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={catAllSelected}
@@ -1382,14 +1403,17 @@ export default function AdminProducts() {
                             autoFocus
                             style={{ fontWeight: 700, fontSize: 12, background: "transparent", border: "1px solid rgba(255,255,255,.7)", color: "#fff", padding: "2px 6px", borderRadius: 4, outline: "none", letterSpacing: "0.5px", textTransform: "uppercase", width: 180 }}
                           />
-                          <button onClick={() => handleCategoryRename(cat, categoryNewName)} style={{ background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>✓</button>
-                          <button onClick={() => setEditingCategory(null)} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 13 }}>✗</button>
+                          <button onClick={e => { e.stopPropagation(); handleCategoryRename(cat, categoryNewName); }} style={{ background: "rgba(255,255,255,.2)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>✓</button>
+                          <button onClick={e => { e.stopPropagation(); setEditingCategory(null); }} style={{ background: "rgba(255,255,255,.15)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 13 }}>✗</button>
                         </span>
                       ) : (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 10, opacity: 0.8, userSelect: "none", minWidth: 10 }}>
+                            {collapsedCats.has(cat) ? "▶" : "▼"}
+                          </span>
                           {cat}
                           <span
-                            onClick={() => { setEditingCategory(cat); setCategoryNewName(cat); }}
+                            onClick={e => { e.stopPropagation(); setEditingCategory(cat); setCategoryNewName(cat); }}
                             title="Rename category"
                             style={{ marginLeft: 4, cursor: "pointer", fontSize: 12, opacity: 0.7, textTransform: "none", letterSpacing: 0 }}
                           >✏️</span>
@@ -1397,7 +1421,7 @@ export default function AdminProducts() {
                       )}
                     </td>
                   </tr>,
-                  ...rows.map((p) => (
+                  ...(collapsedCats.has(cat) ? [] : rows.map((p) => (
                     <tr key={p.id} style={form.id === p.id ? { background: "#f8f4f8" } : selected.has(p.id) ? { background: "#faf7ff" } : {}}>
                       <td style={{ textAlign: "center" }}>
                         <input
@@ -1428,7 +1452,7 @@ export default function AdminProducts() {
                         <button className="admin-link" onClick={() => handleDuplicate(p)}>Duplicate</button>
                       </td>
                     </tr>
-                  )),
+                  ))),
                 ];
               })}
             </tbody>
