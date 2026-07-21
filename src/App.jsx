@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import PhoneFrame from "./components/PhoneFrame";
 import AdminRoute from "./components/AdminRoute";
 import DealerRoute from "./components/DealerRoute";
@@ -28,9 +29,19 @@ import GuestCRM from "./admin/GuestCRM";
 import CustomerCRM from "./admin/CustomerCRM";
 import TrackOrder from "./pages/TrackOrder";
 
+// Resets window scroll to top on every client-side route change.
+// Fixes carry-over scroll position when navigating (e.g. guest login → Store).
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
 export default function App() {
   return (
-    <Routes>
+    <>
+      <ScrollToTop />
+      <Routes>
       <Route element={<PhoneFrame />}>
         <Route path="/" element={<Splash />} />
         <Route path="/login" element={<Login />} />
@@ -73,5 +84,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }

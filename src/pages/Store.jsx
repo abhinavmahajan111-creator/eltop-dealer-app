@@ -1314,7 +1314,7 @@ export default function Store() {
       )}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
-        .store-root { min-height: 100vh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
+        .store-root { min-height: 100vh; min-height: 100dvh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
 
         /* ── Header ── */
         .store-header { position: sticky; top: 0; z-index: 200; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
