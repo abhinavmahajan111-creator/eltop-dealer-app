@@ -233,7 +233,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.5);
     doc.setTextColor(...C.white);
-    doc.text('EMBASSY ELECTRICALS', ML, fy + 5);
+    doc.text('Embassy Electricals (India) Pvt. Ltd.', ML, fy + 5);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(5.8);
     doc.setTextColor(...C.ghost);
@@ -275,54 +275,43 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.setFontSize(22);
     doc.setTextColor(...C.lavLt);
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
-    cy += 16;
+    // Middle area intentionally left empty — collage is at the bottom
 
-    // 8-product collage — 4 cols × 2 rows
+    // 8-product collage — 4 cols × 2 rows, anchored near bottom
     const imgW = 43; const imgH = 43; const gapX = 2.7; const gapY = 3;
-    const gridX = ML + (CW - 4 * imgW - 3 * gapX) / 2; // centre the grid in content width
+    const gridH  = 2 * imgH + gapY;             // 89 mm
+    const gridX  = ML + (CW - 4 * imgW - 3 * gapX) / 2;
+    const gridY  = PH - 6 - 6 - 5 - 6 - 6 - gridH; // anchor from bottom strip upward
     const collage = products.filter(p => imageMap.has(p.id)).slice(0, 8);
 
     collage.forEach((p, idx) => {
       const col = idx % 4;
       const row = Math.floor(idx / 4);
       const cx2 = gridX + col * (imgW + gapX);
-      const cy2 = cy + row * (imgH + gapY);
+      const cy2 = gridY + row * (imgH + gapY);
       // Subtle white frame
       doc.setFillColor(255, 255, 255);
       doc.roundedRect(cx2, cy2, imgW, imgH, 2, 2, 'F');
-      // Product image inside frame (1mm inset)
       const b64 = imageMap.get(p.id);
       if (b64) {
         try { doc.addImage(b64, imgFmt(b64), cx2 + 1, cy2 + 1, imgW - 2, imgH - 2, `cv-img-${p.id}`, 'FAST'); } catch {}
       }
     });
-    cy += 2 * imgH + gapY + 10; // move past collage + small gap
 
-    // Tagline
+    // Tagline — just above collage
+    const tagY = gridY - 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(...C.lavLt);
-    doc.text('Fans  |  Geysers  |  Home Appliances', PW / 2, cy, { align: 'center' });
-    cy += 7;
+    doc.text('Fans  |  Geysers  |  Home Appliances', PW / 2, tagY, { align: 'center' });
 
-    // Website sub-line
+    // Company name + phone — below collage, above bottom strip
+    const infoY = gridY + gridH + 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...C.ghost);
-    doc.text(COMPANY.website, PW / 2, cy, { align: 'center' });
-
-    // Fanman full-body — bottom-right, large
-    if (fanmanFull) {
-      const fW = 55; const fH = 88;
-      doc.addImage(fanmanFull, 'PNG', PW - MR - fW, PH - fH - 18, fW, fH, 'fanman-cv', 'FAST');
-    }
-
-    // Company name at bottom-left
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...C.ghost);
-    doc.text(COMPANY.name, ML, PH - 18);
-    doc.text(COMPANY.phone + '  |  Toll Free: ' + COMPANY.tollfree, ML, PH - 12);
+    doc.text(COMPANY.name, ML, infoY);
+    doc.text(COMPANY.phone + '  |  Toll Free: ' + COMPANY.tollfree, ML, infoY + 5);
 
     // Bottom strip
     doc.setFillColor(55, 25, 68);
@@ -627,7 +616,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     'All prices are inclusive of applicable GST unless stated otherwise.',
     'Prices are subject to change without prior notice.',
     'Goods supplied in standard packing only — no part packing.',
-    'Payment terms as per agreement with Embassy Electricals.',
+    'Payment terms as per agreement with Embassy Electricals (India) Pvt. Ltd.',
     'Goods once sold will not be taken back without prior approval.',
     'All disputes are subject to Delhi jurisdiction.',
   ];
