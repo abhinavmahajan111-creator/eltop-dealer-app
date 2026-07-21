@@ -171,6 +171,20 @@ Specifically: grep for the outermost element's className or id on the reference 
 it's styled (inline or in index.css), and use the identical pattern. State in your summary
 which existing page/pattern you mirrored, e.g. "used same `.screen` wrapper as Dashboard.jsx".
 
+### 8. Added a UI element that needs a brand asset (logo, mascot, icon)?
+ALWAYS search the repo's `public/assets/` folder first for an existing file before creating one
+with typed text, CSS shapes, or drawn SVG. Sumaksh has explicitly stated brand assets (like the
+Eltop logo and Fanman mascot) already exist as saved files in the project and MUST be used as-is
+— recreating them with text or shapes is not acceptable, even as a placeholder.
+
+Concrete examples of files that already exist and must be used:
+- `public/assets/ELTOP LOGO.png` — the Eltop "ELTOP / BY EMBASSY" logotype
+- `public/assets/EMBASSY LOGO.png` — the Embassy Electricals logo
+- `public/assets/fan man eltop.png` — the Fanman mascot character
+
+If a brand asset is needed and is NOT found in `public/assets/`, stop and ask the user to provide
+it — do not create a substitute.
+
 ---
 
 ## Still requires human testing (Claude Code cannot verify these itself)
