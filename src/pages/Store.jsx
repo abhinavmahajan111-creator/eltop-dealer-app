@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { useApp } from "../context/AppContext";
 import { generatePriceListPDF } from "../utils/generatePriceListPDF";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 // ── Cart helpers ──────────────────────────────────────────────────────────────
 function useCart() {
@@ -1003,7 +1004,8 @@ export default function Store() {
   const dealerMenuRef = useRef(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfBusy, setPdfBusy]   = useState(false);
+  const [pdfViewer, setPdfViewer] = useState(null); // { blobUrl, filename }
   const savedCheckoutData = useRef(null);
 
   // Resolve display name: profiles.name > most-recent order > email
@@ -1303,6 +1305,13 @@ export default function Store() {
 
   return (
     <div className="store-root" ref={containerRef}>
+      {pdfViewer && (
+        <PdfViewerModal
+          blobUrl={pdfViewer.blobUrl}
+          filename={pdfViewer.filename}
+          onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
+        />
+      )}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
         .store-root { min-height: 100vh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
@@ -1466,7 +1475,12 @@ export default function Store() {
                   onClick={async () => {
                     setPdfBusy(true);
                     try {
-                      await generatePriceListPDF({ role: isDealer ? 'dealer' : 'customer' });
+                      const result = await generatePriceListPDF({
+                        role: isDealer ? 'dealer' : 'customer',
+                        returnBlob: true,
+                      });
+                      const blobUrl = URL.createObjectURL(result.blob);
+                      setPdfViewer({ blobUrl, filename: result.filename });
                     } catch (err) {
                       alert('Could not generate PDF: ' + err.message);
                     } finally {

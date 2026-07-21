@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
 import { generatePriceListPDF } from "../utils/generatePriceListPDF";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 // Same fallback logic as Store.jsx: prefer image_urls, fall back to image_url
 function getImages(p) {
@@ -832,6 +833,7 @@ export default function AdminProducts() {
   // ── Price List PDF ────────────────────────────────────────────────────────
   const [pdfBusy,               setPdfBusy]               = useState(false);
   const [includePdfDiscountCols, setIncludePdfDiscountCols] = useState(false);
+  const [pdfViewer,              setPdfViewer]              = useState(null); // { blobUrl, filename }
 
   const addDiscountCol = () => {
     const pct = parseFloat(pendingPct);
@@ -1173,6 +1175,13 @@ export default function AdminProducts() {
 
   return (
     <div className="admin-page">
+      {pdfViewer && (
+        <PdfViewerModal
+          blobUrl={pdfViewer.blobUrl}
+          filename={pdfViewer.filename}
+          onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
+        />
+      )}
       {/* ── Page header: search | Products | + Add Product ── */}
       <div className="products-page-header">
         {/* LEFT — search bar */}
@@ -1212,11 +1221,14 @@ export default function AdminProducts() {
                 onClick={async () => {
                   setPdfBusy(true);
                   try {
-                    await generatePriceListPDF({
+                    const result = await generatePriceListPDF({
                       role: 'admin',
                       discountCols,
                       includeDiscountCols: includePdfDiscountCols,
+                      returnBlob: true,
                     });
+                    const blobUrl = URL.createObjectURL(result.blob);
+                    setPdfViewer({ blobUrl, filename: result.filename });
                   } catch (err) {
                     alert('Could not generate PDF: ' + err.message);
                   } finally {

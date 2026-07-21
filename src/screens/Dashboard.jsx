@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { useApp } from "../context/AppContext";
 import { generatePriceListPDF } from "../utils/generatePriceListPDF";
+import PdfViewerModal from "../components/PdfViewerModal";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 // ── Tier config ────────────────────────────────────────────────────────────────
@@ -110,6 +111,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { dealer, session } = useApp();
 
+  const [pdfViewer, setPdfViewer]          = useState(null); // { blobUrl, filename }
   const [loading, setLoading]             = useState(true);
   const [outstanding, setOutstanding]     = useState(null);
   const [ledgerError, setLedgerError]     = useState(false);
@@ -245,6 +247,13 @@ export default function Dashboard() {
 
   return (
     <div className="screen" id="screen-dashboard">
+      {pdfViewer && (
+        <PdfViewerModal
+          blobUrl={pdfViewer.blobUrl}
+          filename={pdfViewer.filename}
+          onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
+        />
+      )}
       <div className="topbar">
         <h1 style={{ flex: 1 }}>Eltop Dealer</h1>
         <span onClick={() => navigate("/profile")} style={{ fontSize: 18, cursor: "pointer" }}>&#128100;</span>
@@ -367,9 +376,15 @@ export default function Dashboard() {
               <div className="quick-item" onClick={async (e) => {
                 const el = e.currentTarget;
                 el.style.opacity = '0.6';
-                try { await generatePriceListPDF({ role: 'dealer' }); }
-                catch (err) { alert('Could not generate PDF: ' + err.message); }
-                finally { el.style.opacity = '1'; }
+                try {
+                  const result = await generatePriceListPDF({ role: 'dealer', returnBlob: true });
+                  const blobUrl = URL.createObjectURL(result.blob);
+                  setPdfViewer({ blobUrl, filename: result.filename });
+                } catch (err) {
+                  alert('Could not generate PDF: ' + err.message);
+                } finally {
+                  el.style.opacity = '1';
+                }
               }}>
                 <div className="ic">&#128196;</div><div className="lb">Price List</div>
               </div>

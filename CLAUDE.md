@@ -171,7 +171,17 @@ Specifically: grep for the outermost element's className or id on the reference 
 it's styled (inline or in index.css), and use the identical pattern. State in your summary
 which existing page/pattern you mirrored, e.g. "used same `.screen` wrapper as Dashboard.jsx".
 
-### 8. Added a UI element that needs a brand asset (logo, mascot, icon)?
+### 8. Changed PDF generation or page layout in `generatePriceListPDF.js`?
+PDFs for print MUST have a total page count that is a multiple of 4 (so booklets fold correctly —
+one sheet = 4 pages). The current formula at the end of the function handles this automatically:
+```
+blankNeeded = (4 - (afterContent + 1) % 4) % 4
+```
+where `afterContent = doc.internal.getNumberOfPages()` BEFORE adding blank and back pages.
+The back page is ALWAYS the absolute last page; blank "Notes" pages are inserted before it.
+Never change this ordering or remove this logic without re-checking the multiple-of-4 constraint.
+
+### 9. Added a UI element that needs a brand asset (logo, mascot, icon)?
 ALWAYS search the repo's `public/assets/` folder first for an existing file before creating one
 with typed text, CSS shapes, or drawn SVG. Sumaksh has explicitly stated brand assets (like the
 Eltop logo and Fanman mascot) already exist as saved files in the project and MUST be used as-is
