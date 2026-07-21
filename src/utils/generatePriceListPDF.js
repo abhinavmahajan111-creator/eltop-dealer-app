@@ -275,43 +275,20 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.setFontSize(22);
     doc.setTextColor(...C.lavLt);
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
-    // Middle area intentionally left empty — collage is at the bottom
+    // Middle area intentionally left empty — a custom collage image will be added here manually.
 
-    // 8-product collage — 4 cols × 2 rows, anchored near bottom
-    const imgW = 43; const imgH = 43; const gapX = 2.7; const gapY = 3;
-    const gridH  = 2 * imgH + gapY;             // 89 mm
-    const gridX  = ML + (CW - 4 * imgW - 3 * gapX) / 2;
-    const gridY  = PH - 6 - 6 - 5 - 6 - 6 - gridH; // anchor from bottom strip upward
-    const collage = products.filter(p => imageMap.has(p.id)).slice(0, 8);
-
-    collage.forEach((p, idx) => {
-      const col = idx % 4;
-      const row = Math.floor(idx / 4);
-      const cx2 = gridX + col * (imgW + gapX);
-      const cy2 = gridY + row * (imgH + gapY);
-      // Subtle white frame
-      doc.setFillColor(255, 255, 255);
-      doc.roundedRect(cx2, cy2, imgW, imgH, 2, 2, 'F');
-      const b64 = imageMap.get(p.id);
-      if (b64) {
-        try { doc.addImage(b64, imgFmt(b64), cx2 + 1, cy2 + 1, imgW - 2, imgH - 2, `cv-img-${p.id}`, 'FAST'); } catch {}
-      }
-    });
-
-    // Tagline — just above collage
-    const tagY = gridY - 8;
+    // Tagline — near bottom, above company info
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11.5);
     doc.setTextColor(...C.lavLt);
-    doc.text('Fans  |  Geysers  |  Home Appliances', PW / 2, tagY, { align: 'center' });
+    doc.text('Fans  |  Geysers  |  Home Appliances', PW / 2, PH - 32, { align: 'center' });
 
-    // Company name + phone — below collage, above bottom strip
-    const infoY = gridY + gridH + 6;
+    // Company name + phone — just above the bottom strip
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...C.ghost);
-    doc.text(COMPANY.name, ML, infoY);
-    doc.text(COMPANY.phone + '  |  Toll Free: ' + COMPANY.tollfree, ML, infoY + 5);
+    doc.text(COMPANY.name, ML, PH - 22);
+    doc.text(COMPANY.phone + '  |  Toll Free: ' + COMPANY.tollfree, ML, PH - 15);
 
     // Bottom strip
     doc.setFillColor(55, 25, 68);

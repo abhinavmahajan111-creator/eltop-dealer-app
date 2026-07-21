@@ -1004,8 +1004,11 @@ export default function Store() {
   const dealerMenuRef = useRef(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
-  const [pdfBusy, setPdfBusy]   = useState(false);
-  const [pdfViewer, setPdfViewer] = useState(null); // { blobUrl, filename }
+  const [pdfBusy, setPdfBusy]       = useState(false);
+  const [pdfViewer, setPdfViewer]   = useState(null); // { blobUrl, filename }
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  // Remember category count across reloads to avoid skeleton-count CLS
+  const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 8)));
   const savedCheckoutData = useRef(null);
 
   // Resolve display name: profiles.name > most-recent order > email
@@ -1242,7 +1245,12 @@ export default function Store() {
       .order("name")
       .then(({ data, error }) => {
         console.log("products:", data, "error:", error);
-        if (data) setProducts(data);
+        if (data) {
+          setProducts(data);
+          // Save category count (unique cats + "All Products") for next-load skeleton sizing
+          const cnt = [...new Set(data.map(p => p.category).filter(Boolean))].length + 1;
+          try { localStorage.setItem('eltop_cat_count', String(cnt)); } catch {}
+        }
         setLoading(false);
       });
   }, []);
@@ -1311,6 +1319,66 @@ export default function Store() {
           filename={pdfViewer.filename}
           onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
         />
+      )}
+
+      {/* ── Hamburger Nav Drawer ── */}
+      {navMenuOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1500 }}>
+          {/* Backdrop */}
+          <div onClick={() => setNavMenuOpen(false)}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }} />
+          {/* Side panel (slides from right) */}
+          <div style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0,
+            width: 'min(300px, 88vw)', background: '#fff',
+            boxShadow: '-4px 0 32px rgba(0,0,0,.25)',
+            display: 'flex', flexDirection: 'column', overflowY: 'auto',
+          }}>
+            {/* Panel header — purple with ELTOP logo */}
+            <div style={{ background: '#6B3A73', padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <img
+                src="/assets/ELTOP%20LOGO.png"
+                alt="Eltop by Embassy"
+                style={{ height: 28, width: 'auto', filter: 'brightness(0) invert(1)', display: 'block' }}
+                onError={e => e.target.style.display = 'none'}
+              />
+              <button onClick={() => setNavMenuOpen(false)}
+                style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 6, width: 30, height: 30, fontSize: 16, cursor: 'pointer', lineHeight: 1 }}>
+                ✕
+              </button>
+            </div>
+
+            {/* Nav links */}
+            <div style={{ flex: 1 }}>
+              {[
+                { icon: '🏠', label: 'Home', action: () => { setNavMenuOpen(false); setCategory(null); setSearch(''); navigate('/store'); scrollToTop(); } },
+                { icon: '🔍', label: 'Shop by Category', action: () => { setNavMenuOpen(false); setCategory(null); setSearch(''); navigate('/store'); scrollToTop(); } },
+                { icon: '📦', label: 'Track Your Order', action: () => { setNavMenuOpen(false); navigate('/track'); } },
+                ...(!session ? [{ icon: '🏪', label: 'Dealer Login', action: () => { setNavMenuOpen(false); navigate('/login'); } }] : []),
+              ].map(({ icon, label, action }) => (
+                <button key={label} onClick={action}
+                  style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', border: 'none', borderBottom: '1px solid #f0f0f0', background: 'none', textAlign: 'left', cursor: 'pointer', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', color: '#1e293b', width: '100%' }}>
+                  <span style={{ fontSize: 20, width: 26, textAlign: 'center', flexShrink: 0 }}>{icon}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Contact block pinned to bottom */}
+            <div style={{ padding: '18px 20px', borderTop: '2px solid #f0f0f0', background: '#faf5ff' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#6B3A73', letterSpacing: '0.05em', marginBottom: 10 }}>CONTACT US</div>
+              <div style={{ fontSize: 13, color: '#475569', lineHeight: 2 }}>
+                📞 +91 93101 59139<br />
+                📞 Toll Free: 1800-123-0906<br />
+                ✉️ embassyelectricindia@gmail.com<br />
+                🌐 www.EltopByEmbassy.com
+              </div>
+              <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8' }}>
+                Embassy Electricals (India) Pvt. Ltd.
+              </div>
+            </div>
+          </div>
+        </div>
       )}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
@@ -1422,6 +1490,8 @@ export default function Store() {
         /* Skeleton */
         .store-skeleton { border-radius: 10px; background: #e2e8f0; animation: pulse 1.4s ease infinite; }
         .cat-skeleton { border-radius: 14px; background: #e2e8f0; animation: pulse 1.4s ease infinite; height: 200px; }
+        @media (max-width: 639px) { .cat-skeleton { height: 160px; } }
+        .store-nav-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; flex-shrink: 0; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 
         /* Back button */
@@ -1624,6 +1694,11 @@ export default function Store() {
                   </span>
                 )}
               </button>
+              {/* Hamburger nav menu */}
+              <button className="store-nav-btn" onClick={() => setNavMenuOpen(true)} aria-label="Menu">
+                <span style={{ fontSize: 20, lineHeight: 1 }}>☰</span>
+                <span style={{ fontSize: 10, fontWeight: 700 }}>Menu</span>
+              </button>
             </div>
           </div>
 
@@ -1724,7 +1799,7 @@ export default function Store() {
           <div className="cat-grid-title">Shop by Category</div>
           {loading ? (
             <div className="cat-grid">
-              {[...Array(8)].map((_, i) => <div key={i} className="cat-skeleton" />)}
+              {[...Array(skeletonCount)].map((_, i) => <div key={i} className="cat-skeleton" />)}
             </div>
           ) : (
             <div className="cat-grid">
