@@ -147,12 +147,19 @@ function SpecsEditor({ data, onChange }) {
 
 // ── Bulk edit columns definition ──────────────────────────────────────────────
 const BULK_COLS = [
-  { key: "name",             label: "Name",      type: "text"   },
-  { key: "dlp",              label: "DLP (₹)",   type: "number" },
-  { key: "mrp",              label: "MRP (₹)",   type: "number" },
-  { key: "stock",            label: "Stock",     type: "number" },
-  { key: "standard_packing", label: "Packing",   type: "number" },
+  { key: "name",             label: "Name",      type: "text",   removable: false },
+  { key: "dlp",              label: "DLP (₹)",   type: "number", removable: true  },
+  { key: "mrp",              label: "MRP (₹)",   type: "number", removable: true  },
+  { key: "stock",            label: "Stock",     type: "number", removable: true  },
+  { key: "standard_packing", label: "Packing",   type: "number", removable: true  },
 ];
+// Fields from Single Edit that can be added on demand (complex/rich-text fields excluded)
+const BULK_OPTIONAL_COLS = [
+  { key: "hsn_code", label: "HSN Code", type: "text",   removable: true },
+  { key: "category", label: "Category", type: "select", removable: true },
+  { key: "unit",     label: "Unit",     type: "text",   removable: true },
+];
+const ALL_BULK_COLS = [...BULK_COLS, ...BULK_OPTIONAL_COLS];
 
 function autoResize(el) {
   if (!el) return;
@@ -334,7 +341,7 @@ function ImageLightbox({ images, startIndex = 0, onClose }) {
 }
 
 // ── Bulk edit modal ───────────────────────────────────────────────────────────
-function BulkEditModal({ rows, onClose, onSaved }) {
+function BulkEditModal({ rows, onClose, onSaved, existingCategories }) {
   // Uncontrolled inputs: initial values stored in a ref (not state) so
   // keystrokes don't trigger React re-renders of all N rows.
   const initialDrafts = useRef(
@@ -344,6 +351,9 @@ function BulkEditModal({ rows, onClose, onSaved }) {
       mrp:              p.mrp              ?? "",
       stock:            p.stock            ?? 0,
       standard_packing: p.standard_packing ?? "",
+      hsn_code:         p.hsn_code         ?? "",
+      category:         p.category         ?? "",
+      unit:             p.unit             ?? "pc",
     }]))
   );
 
@@ -352,26 +362,48 @@ function BulkEditModal({ rows, onClose, onSaved }) {
   const [saveError, setSaveError] = useState("");
   const [bigImg,    setBigImg]    = useState(null);
 
-  // ── Column order (reorderable, persisted to localStorage) ────────────────
-  const [colOrder, setColOrder] = useState(() => {
+  // ── Visible column keys (reorderable + removable, persisted to localStorage) ──
+  const DEFAULT_COL_KEYS = BULK_COLS.map(c => c.key);
+  const [visibleColKeys, setVisibleColKeys] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("eltop-bulk-col-order") || "null");
-      if (Array.isArray(saved) && saved.length === BULK_COLS.length &&
-          saved.every(k => BULK_COLS.some(c => c.key === k))) return saved;
+      if (Array.isArray(saved) && saved.length > 0 &&
+          saved.every(k => ALL_BULK_COLS.some(c => c.key === k))) return saved;
     } catch {}
-    return BULK_COLS.map(c => c.key);
+    return DEFAULT_COL_KEYS;
   });
-  const [dropTarget, setDropTarget] = useState(null); // key of th being dragged over
-  const dragKeyRef = useRef(null);                    // key currently being dragged
+  const [addFieldOpen, setAddFieldOpen] = useState(false);
+  const [dropTarget, setDropTarget] = useState(null);
+  const dragKeyRef = useRef(null);
 
-  const orderedCols = colOrder.map(k => BULK_COLS.find(c => c.key === k));
+  const orderedCols = visibleColKeys.map(k => ALL_BULK_COLS.find(c => c.key === k)).filter(Boolean);
+  // Show any removable column (default or optional) that isn't currently visible
+  const availableToAdd = ALL_BULK_COLS.filter(c => c.removable !== false && !visibleColKeys.includes(c.key));
 
   const saveColOrder = (next) => {
     try { localStorage.setItem("eltop-bulk-col-order", JSON.stringify(next)); } catch {}
   };
 
+  const addCol = (key) => {
+    setVisibleColKeys(prev => {
+      if (prev.includes(key)) return prev;
+      const next = [...prev, key];
+      saveColOrder(next);
+      return next;
+    });
+    setAddFieldOpen(false);
+  };
+
+  const removeCol = (key) => {
+    setVisibleColKeys(prev => {
+      const next = prev.filter(k => k !== key);
+      saveColOrder(next);
+      return next;
+    });
+  };
+
   const moveCol = (key, dir) => {
-    setColOrder(prev => {
+    setVisibleColKeys(prev => {
       const i = prev.indexOf(key);
       const j = i + dir;
       if (j < 0 || j >= prev.length) return prev;
@@ -397,7 +429,7 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     setDropTarget(null);
     dragKeyRef.current = null;
     if (!from || from === key) return;
-    setColOrder(prev => {
+    setVisibleColKeys(prev => {
       const next = [...prev];
       const fromIdx = next.indexOf(from);
       const toIdx   = next.indexOf(key);
@@ -412,12 +444,12 @@ function BulkEditModal({ rows, onClose, onSaved }) {
   const inputRefs    = useRef({});
   const saveButtonRef = useRef(null);
 
-  // Size all name textareas once after mount (batched, not per-ref-callback)
+  // Size all name textareas once after mount
   useEffect(() => {
     rows.forEach(p => autoResize(inputRefs.current[`${p.id}-name`]));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Close on Escape — dismiss enlarged image first, then close modal
+  // Close on Escape
   const bigImgRef = useRef(null);
   useEffect(() => { bigImgRef.current = bigImg; }, [bigImg]);
   useEffect(() => {
@@ -431,7 +463,16 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // Read live value from DOM (used by validate + handleSave)
+  // Close add-field dropdown on outside click
+  useEffect(() => {
+    if (!addFieldOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest("[data-add-field-root]")) setAddFieldOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addFieldOpen]);
+
   const getValue = (id, field) => inputRefs.current[`${id}-${field}`]?.value ?? "";
 
   const validate = () => {
@@ -439,11 +480,11 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     let hasError = false;
     for (const p of rows) {
       const rowErrors = {};
-      if (!String(getValue(p.id, "name") || "").trim()) {
+      if (visibleColKeys.includes("name") && !String(getValue(p.id, "name") || "").trim()) {
         rowErrors.name = "Required";
         hasError = true;
       }
-      ["dlp", "mrp", "stock", "standard_packing"].forEach(f => {
+      ["dlp", "mrp", "stock", "standard_packing"].filter(f => visibleColKeys.includes(f)).forEach(f => {
         const v = getValue(p.id, f);
         if (v !== "" && (isNaN(Number(v)) || Number(v) < 0)) {
           rowErrors[f] = "Must be ≥ 0";
@@ -468,16 +509,20 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
       const results = await Promise.allSettled(chunk.map(p => {
-        const dlp = getValue(p.id, "dlp");
-        const mrp = getValue(p.id, "mrp");
-        const sp  = getValue(p.id, "standard_packing");
-        return supabase.from("products").update({
-          name:             String(getValue(p.id, "name")).trim(),
-          dlp:              dlp !== "" ? Number(dlp) : null,
-          mrp:              mrp !== "" ? Number(mrp) : null,
-          stock:            Number(getValue(p.id, "stock")) || 0,
-          standard_packing: sp  !== "" ? Number(sp)  : null,
-        }).eq("id", p.id);
+        // Build update object from ONLY currently visible columns
+        const upd = {};
+        for (const key of visibleColKeys) {
+          const val = getValue(p.id, key);
+          if (key === "name")             upd.name             = String(val).trim();
+          else if (key === "dlp")         upd.dlp              = val !== "" ? Number(val) : null;
+          else if (key === "mrp")         upd.mrp              = val !== "" ? Number(val) : null;
+          else if (key === "stock")       upd.stock            = Number(val) || 0;
+          else if (key === "standard_packing") upd.standard_packing = val !== "" ? Number(val) : null;
+          else if (key === "hsn_code")    upd.hsn_code         = val || null;
+          else if (key === "category")    upd.category         = val || null;
+          else if (key === "unit")        upd.unit             = val || "pc";
+        }
+        return supabase.from("products").update(upd).eq("id", p.id);
         // If a product was deleted between selection and save, .update().eq('id', ...) is a no-op
         // (0 rows matched, no error) — it's silently skipped and won't appear in the refreshed table.
       }));
@@ -497,7 +542,6 @@ function BulkEditModal({ rows, onClose, onSaved }) {
     onSaved();
   };
 
-  // Enter moves focus to the same column, next row; on last row goes to Save button.
   const handleKeyDown = (e, rowIdx, colKey) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
@@ -525,14 +569,14 @@ function BulkEditModal({ rows, onClose, onSaved }) {
         onClick={e => e.stopPropagation()}
         style={{
           background: "#fff", borderRadius: 16,
-          width: "100%", maxWidth: 860,
+          width: "100%", maxWidth: 900,
           maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column",
           boxShadow: "0 8px 40px rgba(0,0,0,.2)",
         }}
       >
         {/* Header */}
-        <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-          <div>
+        <div style={{ padding: "18px 24px 14px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0, gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>
               Bulk Edit — {rows.length} product{rows.length !== 1 ? "s" : ""}
             </div>
@@ -540,7 +584,44 @@ function BulkEditModal({ rows, onClose, onSaved }) {
               Values are pre-filled with current data. Enter moves down the same column. Changes are saved as absolute values.
             </div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#94a3b8", lineHeight: 1, padding: "0 4px", flexShrink: 0 }}>✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {/* + Add field */}
+            {availableToAdd.length > 0 && (
+              <div style={{ position: "relative" }} data-add-field-root="">
+                <button
+                  onClick={() => setAddFieldOpen(o => !o)}
+                  style={{
+                    background: "none", border: "1px solid #c4b5d0", borderRadius: 6,
+                    padding: "5px 10px", cursor: "pointer", fontSize: 12,
+                    color: "var(--red-dark)", fontWeight: 600, whiteSpace: "nowrap",
+                  }}
+                >+ Add field</button>
+                {addFieldOpen && (
+                  <div style={{
+                    position: "absolute", right: 0, top: "calc(100% + 4px)",
+                    background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+                    boxShadow: "0 4px 16px rgba(0,0,0,.12)", zIndex: 20, minWidth: 140, overflow: "hidden",
+                  }}>
+                    {availableToAdd.map(col => (
+                      <div
+                        key={col.key}
+                        onClick={() => addCol(col.key)}
+                        style={{
+                          padding: "9px 14px", cursor: "pointer", fontSize: 13,
+                          color: "#334155", borderBottom: "1px solid #f1f5f9",
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = "#f8f4f8"}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}
+                      >
+                        {col.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#94a3b8", lineHeight: 1, padding: "0 4px" }}>✕</button>
+          </div>
         </div>
 
         {/* Scrollable table */}
@@ -548,13 +629,10 @@ function BulkEditModal({ rows, onClose, onSaved }) {
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f8f9fc", zIndex: 2 }}>
-                {/* Fixed: serial number */}
                 <th style={{ padding: "10px 4px 10px 10px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 28 }}>#</th>
-                {/* Fixed: image */}
                 <th style={{ padding: "10px 6px 10px 6px", fontSize: 11, fontWeight: 700, textAlign: "left", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap", width: 40 }}>IMG</th>
-                {/* Reorderable data columns */}
                 {orderedCols.map((col) => {
-                  const colIdx = colOrder.indexOf(col.key);
+                  const colIdx = visibleColKeys.indexOf(col.key);
                   const isDragTarget = dropTarget === col.key && dragKeyRef.current !== col.key;
                   return (
                     <th
@@ -577,7 +655,6 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                         <span style={{ color: "#c7c7d4", fontSize: 10, letterSpacing: 0 }}>⠿</span>
                         {col.label}
-                        {/* Touch-friendly reorder buttons (also work on desktop) */}
                         <span style={{ display: "inline-flex", gap: 1, marginLeft: 1 }}>
                           {colIdx > 0 && (
                             <button
@@ -587,13 +664,21 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                               style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#94a3b8", fontSize: 11, lineHeight: 1 }}
                             >◂</button>
                           )}
-                          {colIdx < colOrder.length - 1 && (
+                          {colIdx < visibleColKeys.length - 1 && (
                             <button
                               onMouseDown={e => e.stopPropagation()}
                               onClick={e => { e.stopPropagation(); moveCol(col.key, +1); }}
                               title="Move right"
                               style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#94a3b8", fontSize: 11, lineHeight: 1 }}
                             >▸</button>
+                          )}
+                          {col.removable !== false && (
+                            <button
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); removeCol(col.key); }}
+                              title={`Remove ${col.label} column`}
+                              style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#e74c3c", fontSize: 11, lineHeight: 1, opacity: 0.6 }}
+                            >✕</button>
                           )}
                         </span>
                       </div>
@@ -609,11 +694,9 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                 const thumb = getFirstImage(p);
                 return (
                   <tr key={p.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    {/* Serial number — fixed, read-only */}
                     <td style={{ padding: "5px 4px 5px 10px", verticalAlign: "middle", width: 28, color: "#94a3b8", fontSize: 12, fontWeight: 600, textAlign: "right" }}>
                       {rowIdx + 1}
                     </td>
-                    {/* Image thumbnail — fixed, click to enlarge */}
                     <td
                       style={{ padding: "5px 6px 5px 6px", verticalAlign: "middle", width: 40, cursor: thumb ? "pointer" : "default" }}
                       onClick={() => { if (thumb) setBigImg({ images: getImages(p), index: 0 }); }}
@@ -637,6 +720,22 @@ function BulkEditModal({ rows, onClose, onSaved }) {
                               minWidth: 160, fontFamily: "inherit", display: "block", lineHeight: 1.4,
                             }}
                           />
+                        ) : type === "select" && key === "category" ? (
+                          <select
+                            ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
+                            defaultValue={init.category}
+                            style={{
+                              width: "100%", fontSize: 13,
+                              border: "1.5px solid #e2e8f0",
+                              borderRadius: 6, padding: "5px 8px", boxSizing: "border-box",
+                              minWidth: 120, background: "#fff",
+                            }}
+                          >
+                            <option value="">— Category —</option>
+                            {(existingCategories || []).map(c => (
+                              <option key={c} value={c}>{c}</option>
+                            ))}
+                          </select>
                         ) : (
                           <input
                             ref={el => { inputRefs.current[`${p.id}-${key}`] = el; }}
@@ -1576,6 +1675,7 @@ export default function AdminProducts() {
           rows={products.filter(p => selected.has(p.id))}
           onClose={() => setBulkOpen(false)}
           onSaved={() => { setBulkOpen(false); setSelected(new Set()); loadProducts(); }}
+          existingCategories={existingCategories}
         />
       )}
 
