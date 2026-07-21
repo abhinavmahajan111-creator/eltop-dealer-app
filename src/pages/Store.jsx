@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { useApp } from "../context/AppContext";
+import { generatePriceListPDF } from "../utils/generatePriceListPDF";
 
 // ── Cart helpers ──────────────────────────────────────────────────────────────
 function useCart() {
@@ -1002,6 +1003,7 @@ export default function Store() {
   const dealerMenuRef = useRef(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const savedCheckoutData = useRef(null);
 
   // Resolve display name: profiles.name > most-recent order > email
@@ -1458,6 +1460,37 @@ export default function Store() {
 
             {/* Actions */}
             <div className="store-header-actions">
+              {/* Price List download — visible for all logged-in users */}
+              {(isCustomer || isDealer) && (
+                <button
+                  onClick={async () => {
+                    setPdfBusy(true);
+                    try {
+                      await generatePriceListPDF({ role: isDealer ? 'dealer' : 'customer' });
+                    } catch (err) {
+                      alert('Could not generate PDF: ' + err.message);
+                    } finally {
+                      setPdfBusy(false);
+                    }
+                  }}
+                  disabled={pdfBusy}
+                  style={{
+                    background: 'none',
+                    border: '1.5px solid #7B2D8B',
+                    color: '#7B2D8B',
+                    borderRadius: 8,
+                    padding: '7px 12px',
+                    cursor: pdfBusy ? 'wait' : 'pointer',
+                    fontWeight: 700,
+                    fontSize: 13,
+                    whiteSpace: 'nowrap',
+                    opacity: pdfBusy ? 0.6 : 1,
+                  }}
+                  title="Download Price List PDF"
+                >
+                  {pdfBusy ? '...' : '⬇ Price List'}
+                </button>
+              )}
               {isCustomer ? (
                 // ── Logged-in customer: Hi, {name} dropdown ──
                 <div ref={accountMenuRef} style={{ position: "relative" }}>

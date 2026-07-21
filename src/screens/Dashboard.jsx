@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { useApp } from "../context/AppContext";
+import { generatePriceListPDF } from "../utils/generatePriceListPDF";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 // ── Tier config ────────────────────────────────────────────────────────────────
@@ -362,6 +363,15 @@ export default function Dashboard() {
               </div>
               <div className="quick-item" onClick={() => navigate("/tracking")}>
                 <div className="ic">&#128666;</div><div className="lb">Track</div>
+              </div>
+              <div className="quick-item" onClick={async (e) => {
+                const el = e.currentTarget;
+                el.style.opacity = '0.6';
+                try { await generatePriceListPDF({ role: 'dealer' }); }
+                catch (err) { alert('Could not generate PDF: ' + err.message); }
+                finally { el.style.opacity = '1'; }
+              }}>
+                <div className="ic">&#128196;</div><div className="lb">Price List</div>
               </div>
             </div>
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
+import { generatePriceListPDF } from "../utils/generatePriceListPDF";
 
 // Same fallback logic as Store.jsx: prefer image_urls, fall back to image_url
 function getImages(p) {
@@ -828,6 +829,10 @@ export default function AdminProducts() {
   const [pendingPct,   setPendingPct]   = useState("");
   const discountColCounter = useRef(0);
 
+  // ── Price List PDF ────────────────────────────────────────────────────────
+  const [pdfBusy,               setPdfBusy]               = useState(false);
+  const [includePdfDiscountCols, setIncludePdfDiscountCols] = useState(false);
+
   const addDiscountCol = () => {
     const pct = parseFloat(pendingPct);
     if (isNaN(pct) || pct <= 0 || pct >= 100) return;
@@ -1199,15 +1204,64 @@ export default function AdminProducts() {
         {/* CENTER — heading always centered */}
         <h1 className="ph-title admin-title" style={{ textAlign: "center" }}>Products</h1>
 
-        {/* RIGHT — Add Product button */}
-        <div className="ph-btn" style={{ justifySelf: "end" }}>
+        {/* RIGHT — Add Product + Price List buttons */}
+        <div className="ph-btn" style={{ justifySelf: "end", display: "flex", alignItems: "center", gap: 8 }}>
           {!form.id && !formOpen && (
-            <button className="btn" onClick={() => setFormOpen(true)}>
-              + Add Product
-            </button>
+            <>
+              <button
+                onClick={async () => {
+                  setPdfBusy(true);
+                  try {
+                    await generatePriceListPDF({
+                      role: 'admin',
+                      discountCols,
+                      includeDiscountCols: includePdfDiscountCols,
+                    });
+                  } catch (err) {
+                    alert('Could not generate PDF: ' + err.message);
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                }}
+                disabled={pdfBusy}
+                style={{
+                  background: 'none',
+                  border: '1.5px solid var(--red-dark)',
+                  color: 'var(--red-dark)',
+                  borderRadius: 8,
+                  padding: '7px 12px',
+                  cursor: pdfBusy ? 'wait' : 'pointer',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  whiteSpace: 'nowrap',
+                  opacity: pdfBusy ? 0.6 : 1,
+                }}
+              >
+                {pdfBusy ? '...' : '⬇ Price List'}
+              </button>
+              <button className="btn" onClick={() => setFormOpen(true)}>
+                + Add Product
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      {/* ── PDF discount-col toggle (only when discount cols are active and form is closed) ── */}
+      {!form.id && !formOpen && discountCols.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0 2px", fontSize: 12, color: "var(--muted)" }}>
+          <input
+            id="pdf-disc-toggle"
+            type="checkbox"
+            checked={includePdfDiscountCols}
+            onChange={e => setIncludePdfDiscountCols(e.target.checked)}
+            style={{ cursor: "pointer", accentColor: "var(--red-dark)" }}
+          />
+          <label htmlFor="pdf-disc-toggle" style={{ cursor: "pointer", userSelect: "none" }}>
+            Include custom discount columns in Price List PDF
+          </label>
+        </div>
+      )}
 
       {/* ── Basic info form (new product or editing existing) ── */}
       {(formOpen || form.id) && (
