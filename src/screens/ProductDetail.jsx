@@ -23,7 +23,7 @@ export default function ProductDetail() {
   const isApprovedDealer = dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none';
   const d1 = isApprovedDealer ? Number(dealer?.discount1 || 0) : 0;
   const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
-  const dlp = Number(product.dlp ?? product.price ?? 0);
+  const dlp = Number(product.dlp ?? product.price ?? product.mrp ?? 0);
   const net = isApprovedDealer
     ? Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100
     : Math.round(Number(product.mrp || 0) * 0.85 * 100) / 100;

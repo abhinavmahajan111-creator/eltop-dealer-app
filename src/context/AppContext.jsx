@@ -232,7 +232,9 @@ export function AppProvider({ children }) {
             mrp: p.mrp,
             stock: p.stock,
             img: p.image_url,
-            image_urls: Array.isArray(p.image_urls) ? p.image_urls : [],
+            image_urls: (Array.isArray(p.image_urls) && p.image_urls.filter(Boolean).length > 0)
+              ? p.image_urls.filter(Boolean)
+              : (p.image_url ? [p.image_url] : []),
             video_url: p.video_url || null,
             dlp: p.dlp ?? p.price,
             hsn_code: p.hsn_code || null,
@@ -273,7 +275,7 @@ export function AppProvider({ children }) {
       const existing = prev.find((c) => c.id === product.id);
       if (existing) {
         return prev.map((c) =>
-          c.id === product.id ? { ...c, qty: c.qty + qty } : c
+          c.id === product.id ? { ...c, qty } : c
         );
       }
       return [...prev, { ...product, qty }];

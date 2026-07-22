@@ -53,7 +53,7 @@ export default function Catalogue() {
         </div>
         <div className="prod-grid">
           {filtered.map((p) => {
-            const dlp = Number(p.dlp ?? p.price ?? 0);
+            const dlp = Number(p.dlp ?? p.price ?? p.mrp ?? 0);
             const net = isApprovedDealer
               ? Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100
               : Math.round(Number(p.mrp || 0) * 0.85 * 100) / 100;
