@@ -5,6 +5,12 @@ Follow these rules on every change, without being asked.
 
 ---
 
+## STEP-BY-STEP EXECUTION RULE
+
+Kisi bhi multi-step/complex feature ke liye, har step ko implement karne ke baad us step ko THOROUGHLY self-check karo — build check, relevant eval/measurement, aur logic-correctness verify karo — TABHI agle step par jao. Koi shortcut nahi, koi assumption nahi. Agar ek step mein zaroorat se zyada complexity ya ambiguity mile, ruk jao aur clarify karo before proceeding. Goal: zero bugs slip through mid-implementation.
+
+---
+
 ## BEFORE marking any task "done" — self-check this list
 
 ### 1. New Supabase table created?
