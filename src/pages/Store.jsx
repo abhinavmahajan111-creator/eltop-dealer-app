@@ -1665,15 +1665,15 @@ export default function Store() {
                     🚪 Logout
                   </button>
                 </>
-              ) : sessionChecked && !session ? (
-                // ── Genuinely logged out ──
+              ) : (
+                // ── Not a dealer or customer (guest / logged-out / role loading) ──
                 <>
                   {/* Mobile: two stacked buttons */}
                   <div className="btn-login-split">
                     <button className="btn-login-split-login" onClick={() => navigate("/login")}>Login</button>
                     <button className="btn-login-split-signup" onClick={() => navigate("/login")}>Sign up</button>
                   </div>
-                  {/* Desktop: single button */}
+                  {/* Desktop: single prominent Login button — always visible when not logged in */}
                   <button className="btn-login-primary" onClick={() => navigate("/login")}>
                     👤 Login / Sign Up
                   </button>
@@ -1681,9 +1681,6 @@ export default function Store() {
                     📦 Track Your Order
                   </button>
                 </>
-              ) : (
-                // ── Session exists but role not loaded yet — show nothing to avoid flash ──
-                null
               )}
               <button className="store-cart-btn" onClick={() => setCartOpen(true)}>
                 <span style={{ fontSize: 22 }}>🛒</span>
