@@ -250,8 +250,9 @@ export default function AdminDealers() {
   const [deletingId, setDeletingId]           = useState(null);
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
   const [typeDropdownPos, setTypeDropdownPos] = useState({ top: 0, left: 0 });
-  const typeDropdownRef = useRef(null); // ref on the trigger <th>
-  const typeDropdownBtnRef = useRef(null); // ref on the trigger <button> for positioning
+  const typeDropdownRef = useRef(null);        // ref on the trigger <th>
+  const typeDropdownBtnRef = useRef(null);     // ref on the trigger <button> for positioning
+  const typeDropdownPortalRef = useRef(null);  // ref on the portal div — kept out of the <th> DOM tree
   const [deletedGuests, setDeletedGuests]     = useState([]);
 
   useEffect(() => {
@@ -266,7 +267,9 @@ export default function AdminDealers() {
     if (!typeDropdownOpen) return;
     const close = () => setTypeDropdownOpen(false);
     const onMouseDown = (e) => {
-      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target)) close();
+      const inTrigger = typeDropdownRef.current?.contains(e.target);
+      const inPortal  = typeDropdownPortalRef.current?.contains(e.target);
+      if (!inTrigger && !inPortal) close();
     };
     document.addEventListener('mousedown', onMouseDown);
     // Close on any scroll (prevents stale fixed positioning)
@@ -1805,6 +1808,7 @@ export default function AdminDealers() {
       {/* Type-filter dropdown rendered via portal so it's never clipped by overflow:auto ancestors */}
       {typeDropdownOpen && createPortal(
         <div
+          ref={typeDropdownPortalRef}
           style={{
             position: 'fixed', top: typeDropdownPos.top, left: typeDropdownPos.left,
             zIndex: 9999, background: '#fff', border: '1.5px solid var(--border)',
