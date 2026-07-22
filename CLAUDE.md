@@ -81,6 +81,14 @@ console (F12 → Console tab) for red errors — not just confirm the build was 
 
 ---
 
+## Store page consistent scale across entry paths
+
+`/store` page must always render at a consistent, predictable zoom/scale level regardless of entry path (direct navigation, post-login redirect, guest checkout flow, or any other route). If any future change causes scale/zoom inconsistency across entry paths — even subtle width shifts from scrollbar layout shift — treat it as a regression and fix immediately.
+
+**Root cause on record:** `scrollbar-gutter: stable` on `html` in `index.css` is what prevents the 15px content-width shift between pages with/without scrollbars. Do NOT remove this rule.
+
+---
+
 ## Responsive testing — MANDATORY for every UI change
 
 Before reporting any UI change as done, screenshot it at all three breakpoints yourself using
