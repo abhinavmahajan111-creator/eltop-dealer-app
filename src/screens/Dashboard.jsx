@@ -133,21 +133,24 @@ export default function Dashboard() {
       const lastYearEnd   = thisYearStart;
 
       // ── Batch 1: financial + recent + all-time orders ──
+      // OR filter: dealer_id = uid covers existing dealer orders;
+      // profile_id = uid covers guest orders now linked to this account (Req A).
+      const orFilter = `dealer_id.eq.${uid},profile_id.eq.${uid}`;
       const [thisYr, lastYr, ledger, recent, allOrders] = await Promise.all([
         supabase.from("orders").select("total")
-          .eq("dealer_id", uid).neq("status", "cancelled").gte("created_at", thisYearStart),
+          .or(orFilter).neq("status", "cancelled").gte("created_at", thisYearStart),
 
         supabase.from("orders").select("total")
-          .eq("dealer_id", uid).neq("status", "cancelled")
+          .or(orFilter).neq("status", "cancelled")
           .gte("created_at", lastYearStart).lt("created_at", lastYearEnd),
 
         supabase.from("dealer_ledger").select("type, amount").eq("dealer_id", uid),
 
         supabase.from("orders").select("id, total, status, created_at")
-          .eq("dealer_id", uid).order("created_at", { ascending: false }).limit(5),
+          .or(orFilter).order("created_at", { ascending: false }).limit(5),
 
         supabase.from("orders").select("id, total, created_at")
-          .eq("dealer_id", uid).neq("status", "cancelled")
+          .or(orFilter).neq("status", "cancelled")
           .order("created_at", { ascending: true }),
       ]);
 

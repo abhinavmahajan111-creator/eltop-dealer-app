@@ -73,7 +73,7 @@ const INDIAN_STATES = [
 ];
 
 // ── Checkout Modal ────────────────────────────────────────────────────────────
-function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, otpVerified, setOtpVerified, effectiveTotal, isCustomer }) {
+function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, otpVerified, setOtpVerified, effectiveTotal, isCustomer, isDealer }) {
   const [form, setForm] = useState(initialData || { name: '', phone: '', email: '', line1: '', line2: '', city: '', state: 'Delhi', pincode: '' });
   const [errors, setErrors] = useState({});
   const [dealerBanner, setDealerBanner] = useState(false);
@@ -91,8 +91,11 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
   const otpRefs = useRef([]);
   const cooldownRef = useRef(null);
 
+  const [profileExistsBlock, setProfileExistsBlock] = useState(false);
+
   const phoneValid = /^\d{10}$/.test(form.phone.trim());
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email.trim());
+  const isGuestCheckout = !isCustomer && !isDealer;
 
   useEffect(() => {
     if (!phoneValid && !emailValid) setDealerBanner(false);
@@ -117,8 +120,23 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
 
   // Debounced repeat-guest check on email change
   useEffect(() => {
-    if (!emailValid) { setRepeatGuest(false); setOtpSent(false); setOtpVerified(false); return; }
+    if (!emailValid) { setRepeatGuest(false); setOtpSent(false); setOtpVerified(false); setProfileExistsBlock(false); return; }
     const timer = setTimeout(async () => {
+      // Guest hard-block: check if this email already has a profile (customer or dealer account)
+      if (isGuestCheckout) {
+        const { data: pRow } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('email', form.email.trim())
+          .maybeSingle();
+        if (pRow?.id) {
+          setProfileExistsBlock(true);
+          return; // don't bother with repeat-guest OTP flow if blocked
+        } else {
+          setProfileExistsBlock(false);
+        }
+      }
+
       const { data } = await supabase.rpc('check_repeat_guest', { check_email: form.email.trim() });
       setRepeatGuest(data === true);
       if (data === true) {
@@ -209,6 +227,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
   };
 
   const handleSubmit = () => {
+    if (profileExistsBlock && isGuestCheckout) return;
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
     onConfirm(form, { emailVerified: otpVerified });
@@ -248,6 +267,13 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
           {field('Full Name', 'name', { placeholder: 'Your full name' })}
           {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
           {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
+          {profileExistsBlock && isGuestCheckout && (
+            <div style={{ background: '#FFF3CD', border: '1.5px solid #FBBF24', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5 }}>
+              ⚠️ You cannot checkout as a guest with this email address. Either{' '}
+              <span style={{ color: '#7B2D8B', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }} onClick={onLoginClick}>login with this email</span>,
+              {' '}or use a different email to checkout as a guest.
+            </div>
+          )}
 
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14, marginTop: 6 }}>Delivery Address</div>
           {field('Address Line 1', 'line1', { placeholder: 'House/Flat no., Street, Area' })}
@@ -1130,11 +1156,27 @@ export default function Store() {
           const total        = Math.round(grossTotal);
           const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
 
+          // 1a. Resolve profile_id for unified history
+          // Logged-in users: their auth UID is their profile_id directly.
+          // Guests with email: look up profiles table to link the order to an existing account.
+          let resolvedProfileId = null;
+          if (session?.user?.id) {
+            resolvedProfileId = session.user.id;
+          } else if (data.email?.trim()) {
+            const { data: pRow } = await supabase
+              .from('profiles')
+              .select('id')
+              .ilike('email', data.email.trim())
+              .maybeSingle();
+            resolvedProfileId = pRow?.id || null;
+          }
+
           // 1. Insert order row
           const { data: orderRows, error: orderError } = await supabase
             .from('orders')
             .insert([{
               dealer_id:        isDealer ? session.user.id : null,
+              profile_id:       resolvedProfileId,
               customer_name:    data.name,
               customer_phone:   data.phone,
               customer_email:   data.email || null,
@@ -1900,6 +1942,7 @@ export default function Store() {
           setOtpVerified={setOtpVerified}
           effectiveTotal={effectiveTotal}
           isCustomer={isCustomer}
+          isDealer={isDealer}
         />
       )}
 
