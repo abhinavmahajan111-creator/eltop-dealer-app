@@ -382,8 +382,6 @@ export default function Login() {
           align-items: center;
           justify-content: center;
           padding: 40px 24px;
-          min-height: 100vh;
-          min-height: 100dvh;
         }
         .login-card {
           background: #fff;

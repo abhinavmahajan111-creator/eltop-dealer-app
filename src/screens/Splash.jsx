@@ -10,19 +10,34 @@ export default function Splash() {
   }, [navigate]);
 
   return (
-    <div style={{
-      minHeight: "100vh", minHeight: "100dvh",
-      background: "linear-gradient(160deg, #96559E, #3D0A2C)",
-      display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      color: "#fff", textAlign: "center",
-      fontFamily: "'Segoe UI', Arial, sans-serif",
-      border: "2px solid #E8A800",
-    }}>
-      <div className="logo-circle">ET</div>
-      <div className="splash-title">ELTOP</div>
-      <div className="splash-sub">Dealer Ordering Platform</div>
-      <div className="spinner"></div>
-    </div>
+    <>
+      <style>{`
+        .splash-root {
+          min-height: 100vh;
+          min-height: 100dvh;
+          background: linear-gradient(160deg, #96559E, #3D0A2C);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          color: #fff;
+          text-align: center;
+          font-family: 'Segoe UI', Arial, sans-serif;
+          width: 100%;
+        }
+        @media (max-width: 639px) {
+          .splash-root {
+            border: 5px solid #E8A800;
+            border-radius: 24px;
+          }
+        }
+      `}</style>
+      <div className="splash-root">
+        <div className="logo-circle">ET</div>
+        <div className="splash-title">ELTOP</div>
+        <div className="splash-sub">Dealer Ordering Platform</div>
+        <div className="spinner"></div>
+      </div>
+    </>
   );
 }
