@@ -400,12 +400,12 @@ export default function Login() {
           }
         }
         /* Card typography and form elements */
-        .login-card .login-title { font-size: 28px; margin-bottom: 6px; }
-        .login-card .login-sub   { font-size: 16px; margin-bottom: 28px; }
-        .login-card input        { font-size: 16px; padding: 16px; margin-bottom: 16px; }
-        .login-card .otp-row input { margin-bottom: 0; font-size: 20px; padding: 14px 0; }
-        .login-card .btn         { font-size: 18px; padding: 16px; }
-        .login-card .resend      { font-size: 14px; }
+        .login-card .login-title { font-size: 34px; margin-bottom: 8px; }
+        .login-card .login-sub   { font-size: 20px; margin-bottom: 30px; }
+        .login-card input        { font-size: 17px; padding: 17px; margin-bottom: 16px; }
+        .login-card .otp-row input { margin-bottom: 0; font-size: 22px; padding: 15px 0; }
+        .login-card .btn         { font-size: 20px; padding: 18px; }
+        .login-card .resend      { font-size: 15px; }
         /* Reuse existing shared styles for otp-row */
       `}</style>
 
@@ -414,17 +414,17 @@ export default function Login() {
         <img
           src="/assets/ELTOP%20LOGO.png"
           alt="Eltop by Embassy"
-          style={{ height: 68, width: "auto", filter: "brightness(0) invert(1)", marginBottom: 20 }}
+          style={{ height: 110, width: "auto", filter: "brightness(0) invert(1)", marginBottom: 24 }}
           onError={e => e.target.style.display = "none"}
         />
-        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5, marginBottom: 8 }}>Eltop by Embassy</div>
-        <div style={{ fontSize: 17, opacity: 0.8, marginBottom: 36, maxWidth: 300, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 42, fontWeight: 800, letterSpacing: 0.5, marginBottom: 10 }}>Eltop by Embassy</div>
+        <div style={{ fontSize: 24, opacity: 0.8, marginBottom: 44, maxWidth: 360, lineHeight: 1.5 }}>
           Premium Fans · Geysers · Home Appliances
         </div>
         <img
           src="/assets/fan%20man%20eltop.png"
           alt="Eltop Fanman"
-          style={{ height: 162, width: 130, objectFit: "contain" }}
+          style={{ height: 320, width: "auto" }}
           onError={e => e.target.style.display = "none"}
         />
       </div>
@@ -437,7 +437,7 @@ export default function Login() {
             <img
               src="/assets/ELTOP%20LOGO.png"
               alt="Eltop"
-              style={{ height: 32, width: "auto", display: "inline-block" }}
+              style={{ height: 52, width: "auto", display: "inline-block" }}
               onError={e => e.target.style.display = "none"}
             />
           </div>
