@@ -1008,7 +1008,7 @@ export default function Store() {
   const [pdfViewer, setPdfViewer]   = useState(null); // { blobUrl, filename }
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   // Remember category count across reloads to avoid skeleton-count CLS
-  const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 8)));
+  const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 12)));
   const savedCheckoutData = useRef(null);
 
   // Resolve display name: profiles.name > most-recent order > email
@@ -1389,8 +1389,8 @@ export default function Store() {
         .store-header-inner { max-width: 1400px; margin: 0 auto; padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; }
         .store-row1 { display: flex; align-items: center; gap: 12px; width: 100%; justify-content: space-between; }
         .store-logo-wrap { display: flex; flex-direction: row; align-items: center; gap: 8px; flex-shrink: 0; cursor: pointer; }
-        .store-logo-eltop  { height: auto; width: auto; max-width: 90px; }
-        .store-logo-embassy { height: auto; width: auto; max-width: 115px; }
+        .store-logo-eltop  { height: 28px; width: auto; max-width: 90px; }
+        .store-logo-embassy { height: 28px; width: auto; max-width: 115px; }
         .store-row2 { display: flex; width: 100%; }
         .store-search-wrap { display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.2); flex: 1; min-width: 0; }
         .store-search-wrap input { flex: 1; padding: 9px 14px; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; width: 100%; }
@@ -1424,8 +1424,8 @@ export default function Store() {
           .btn-login-split   { display: flex; }
           .btn-dealer-trigger { font-size: 11px; padding: 5px 8px; max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
           .dealer-logout-in-menu { display: block; }
-          .store-logo-eltop  { max-width: 72px; }
-          .store-logo-embassy { max-width: 90px; }
+          .store-logo-eltop  { height: 24px; max-width: 72px; }
+          .store-logo-embassy { height: 24px; max-width: 90px; }
         }
 
         /* Hero banner */

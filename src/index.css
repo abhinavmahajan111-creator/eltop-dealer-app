@@ -64,14 +64,12 @@
     }
   }
 
-  /* ── Gold content border — shared across all page types ── */
+  /* ── Gold content border — dealer app phone-frame only ── */
   #phone,
-  .screen,
-  .store-root {
+  .screen {
     border: 2px solid #E8A800;
   }
-  .screen,
-  .store-root {
+  .screen {
     border-radius: 10px;
   }
   /* Cancel inner border when .screen is directly inside #phone
