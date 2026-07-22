@@ -124,17 +124,18 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
     const timer = setTimeout(async () => {
       // Guest hard-block: check if this email already has a profile (customer or dealer account)
       if (isGuestCheckout) {
-        const { data: pRow } = await supabase
+        const { data: pRow, error: pErr } = await supabase
           .from('profiles')
           .select('id')
           .ilike('email', form.email.trim())
           .maybeSingle();
-        if (pRow?.id) {
+        if (pErr || pRow?.id) {
+          // pErr = query failed (network/RLS) — safe to block rather than expose a gap.
+          // pRow?.id = confirmed profile exists — hard block.
           setProfileExistsBlock(true);
-          return; // don't bother with repeat-guest OTP flow if blocked
-        } else {
-          setProfileExistsBlock(false);
+          return;
         }
+        setProfileExistsBlock(false);
       }
 
       const { data } = await supabase.rpc('check_repeat_guest', { check_email: form.email.trim() });
@@ -226,8 +227,20 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
     return e;
   };
 
-  const handleSubmit = () => {
-    if (profileExistsBlock && isGuestCheckout) return;
+  const handleSubmit = async () => {
+    // Hard-block: re-verify at submit time so debounce-state race conditions can't be bypassed.
+    // isGuestCheckout is checked here too, but the DB re-check is the authoritative gate.
+    if (isGuestCheckout && emailValid) {
+      const { data: pRow } = await supabase
+        .from('profiles')
+        .select('id')
+        .ilike('email', form.email.trim())
+        .maybeSingle();
+      if (pRow?.id) {
+        setProfileExistsBlock(true); // re-show banner if it was dismissed/reset
+        return;
+      }
+    }
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
     onConfirm(form, { emailVerified: otpVerified });
