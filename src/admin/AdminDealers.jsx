@@ -347,6 +347,20 @@ export default function AdminDealers() {
   const unifiedRows = useMemo(() => {
     const q = searchQuery.toLowerCase();
 
+    // ── Role-hierarchy dedup: build suppression sets from ALL profiles (typeFilter-agnostic)
+    // so that a guest whose email matches any profile (dealer or customer) is suppressed
+    // from the guest list regardless of which tab is currently active.
+    const dealerEmailSet = new Set(
+      allProfiles
+        .filter(p => p.is_dealer === true && p.email)
+        .map(p => p.email.toLowerCase())
+    );
+    const customerEmailSet = new Set(
+      allProfiles
+        .filter(p => p.is_dealer === false && p.email && !dealerEmailSet.has(p.email.toLowerCase()))
+        .map(p => p.email.toLowerCase())
+    );
+
     const dealerList = allProfiles
       .filter(p => p.is_dealer === true)
       .filter(p => {
@@ -375,6 +389,7 @@ export default function AdminDealers() {
     const customerList = (typeFilter === 'all' || typeFilter === 'customer')
       ? allProfiles
           .filter(p => p.is_dealer === false && !p.deleted_at)
+          .filter(p => !p.email || !dealerEmailSet.has(p.email.toLowerCase()))
           .filter(p => !q || (
             (p.name  || '').toLowerCase().includes(q) ||
             (p.email || '').toLowerCase().includes(q) ||
@@ -408,7 +423,14 @@ export default function AdminDealers() {
     });
 
     const activeGuests = (typeFilter === 'all' || typeFilter === 'guest')
-      ? guestRows.filter(g => !g._isDeletedGuest && guestMatchesSearch(g)).map(mapGuest)
+      ? guestRows
+          .filter(g => !g._isDeletedGuest && guestMatchesSearch(g))
+          .filter(g => {
+            if (!g.email) return true; // no email = can't match any profile
+            const em = g.email.toLowerCase();
+            return !dealerEmailSet.has(em) && !customerEmailSet.has(em);
+          })
+          .map(mapGuest)
       : [];
 
     const deletedGuestRows = typeFilter === 'deleted'
