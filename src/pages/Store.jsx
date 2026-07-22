@@ -1937,7 +1937,16 @@ export default function Store() {
           onClose={() => setShowCheckout(false)}
           onConfirm={(data, opts) => { const finalOpts = { ...opts, emailVerified: opts.emailVerified || isCustomer }; savedCheckoutData.current = { data, opts: finalOpts }; setShowCheckout(false); handlePayment(data, finalOpts); }}
           onLoginClick={() => { setShowCheckout(false); navigate('/login'); }}
-          initialData={savedCheckoutData.current?.data}
+          initialData={savedCheckoutData.current?.data || ((isDealer || isCustomer) && dealer ? {
+            name:  dealer.shop_name || dealer.owner_name || dealer.name || '',
+            phone: dealer.phone  || '',
+            email: dealer.email  || session?.user?.email || '',
+            line1: dealer.address || '',
+            line2: '',
+            city:  '',
+            state: 'Delhi',
+            pincode: '',
+          } : null)}
           otpVerified={otpVerified}
           setOtpVerified={setOtpVerified}
           effectiveTotal={effectiveTotal}
