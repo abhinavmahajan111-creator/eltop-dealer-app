@@ -11,7 +11,7 @@
     --border:#e6e6e6;
   }
   *{box-sizing:border-box;}
-  html{overflow-x:hidden;scrollbar-gutter:stable;}
+  html{overflow-x:hidden;overflow-y:scroll;}
   /* React root must fill body so full-width pages (Dashboard, Store) can expand */
   #root{width:100%;}
   body{
