@@ -195,6 +195,25 @@ Concrete examples of files that already exist and must be used:
 If a brand asset is needed and is NOT found in `public/assets/`, stop and ask the user to provide
 it — do not create a substitute.
 
+### 10. Token efficiency — MANDATORY during every task
+Actively minimize token usage while working:
+1. **No redundant re-reads** — if a file's content is already in context, do NOT read it again. Use the existing content.
+2. **Targeted search only** — when the exact function/class name is known, grep/read directly. Do NOT do broad exploratory searches.
+3. **Batch related edits** — combine multiple small changes to the same file into one Edit call. Do not make 3 sequential single-line edits when one Edit with more context would cover all three.
+4. **Plan before coding** — spend a moment identifying the correct approach before writing code. A bad approach that requires backtracking costs 2–3x the tokens of a good first pass.
+5. **Screenshots/reloads only when necessary** — take a preview screenshot only when the change is visually observable AND you genuinely need to confirm it. Do NOT screenshot after every small step.
+
+### 11. Usage breakdown — required at end of every non-trivial session
+After completing a task (or at end of session), provide a brief token-usage breakdown:
+- **(a) File exploration/reads** — % of effort spent reading files
+- **(b) Code edits** — % of effort spent writing/editing code
+- **(c) Build checks / preview reloads** — % of effort on builds, server checks, reloads
+- **(d) Screenshot/verification steps** — % of effort on screenshots and eval checks
+- **(e) Retry/backtrack** — % wasted on wrong approaches that had to be redone
+
+If any single category exceeds 30% of the session, identify the specific cause and flag it.
+Goal: surface inefficiencies so future sessions stay leaner.
+
 ---
 
 ## Still requires human testing (Claude Code cannot verify these itself)
