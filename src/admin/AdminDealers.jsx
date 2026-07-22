@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
@@ -248,7 +249,9 @@ export default function AdminDealers() {
   const [deleteConfirm, setDeleteConfirm]     = useState(null);
   const [deletingId, setDeletingId]           = useState(null);
   const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
-  const typeDropdownRef = useRef(null);
+  const [typeDropdownPos, setTypeDropdownPos] = useState({ top: 0, left: 0 });
+  const typeDropdownRef = useRef(null); // ref on the trigger <th>
+  const typeDropdownBtnRef = useRef(null); // ref on the trigger <button> for positioning
   const [deletedGuests, setDeletedGuests]     = useState([]);
 
   useEffect(() => {
@@ -261,13 +264,17 @@ export default function AdminDealers() {
 
   useEffect(() => {
     if (!typeDropdownOpen) return;
-    const handler = (e) => {
-      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target)) {
-        setTypeDropdownOpen(false);
-      }
+    const close = () => setTypeDropdownOpen(false);
+    const onMouseDown = (e) => {
+      if (typeDropdownRef.current && !typeDropdownRef.current.contains(e.target)) close();
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', onMouseDown);
+    // Close on any scroll (prevents stale fixed positioning)
+    window.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('scroll', close, true);
+    };
   }, [typeDropdownOpen]);
 
   // ─── Data fetch ─────────────────────────────────────────────────────────────
@@ -1701,9 +1708,16 @@ export default function AdminDealers() {
             <thead>
               <tr>
                 <th style={{ width: 36 }}>#</th>
-                <th style={{ width: 90, position: 'relative' }} ref={typeDropdownRef}>
+                <th style={{ width: 90 }} ref={typeDropdownRef}>
                   <button
-                    onClick={() => setTypeDropdownOpen(o => !o)}
+                    ref={typeDropdownBtnRef}
+                    onClick={() => {
+                      if (typeDropdownBtnRef.current) {
+                        const r = typeDropdownBtnRef.current.getBoundingClientRect();
+                        setTypeDropdownPos({ top: r.bottom + 6, left: r.left });
+                      }
+                      setTypeDropdownOpen(o => !o);
+                    }}
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer', padding: 0,
                       fontWeight: 800, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px',
@@ -1719,38 +1733,6 @@ export default function AdminDealers() {
                      : 'Type: Deleted'}
                     {' '}▾
                   </button>
-                  {typeDropdownOpen && (
-                    <div style={{
-                      position: 'absolute', top: '100%', left: 0, zIndex: 200,
-                      background: '#fff', border: '1.5px solid var(--border)',
-                      borderRadius: 10, boxShadow: '0 4px 18px rgba(0,0,0,.12)',
-                      minWidth: 170, overflow: 'hidden', marginTop: 6,
-                    }}>
-                      {[
-                        { value: 'all',      label: 'All Types',  count: dealerCount + customerCount + guestCount + deletedCount },
-                        { value: 'dealer',   label: 'Dealers',    count: dealerCount   },
-                        { value: 'customer', label: 'Customers',  count: customerCount },
-                        { value: 'guest',    label: 'Guests',     count: guestCount    },
-                        { value: 'deleted',  label: 'Deleted',    count: deletedCount  },
-                      ].map(opt => (
-                        <div
-                          key={opt.value}
-                          onClick={() => { setTypeFilter(opt.value); setTypeDropdownOpen(false); }}
-                          style={{
-                            padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            background: typeFilter === opt.value ? 'var(--red-light)' : '#fff',
-                            color: typeFilter === opt.value ? 'var(--red-dark)' : '#111',
-                          }}
-                          onMouseEnter={e => { if (typeFilter !== opt.value) e.currentTarget.style.background = '#f9f9f9'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = typeFilter === opt.value ? 'var(--red-light)' : '#fff'; }}
-                        >
-                          <span>{opt.label}</span>
-                          <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500, marginLeft: 8 }}>{opt.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </th>
                 <th>Name</th>
                 <th>App Status</th>
@@ -1818,6 +1800,43 @@ export default function AdminDealers() {
             </tbody>
           </table>
         </ScrollFade>
+      )}
+
+      {/* Type-filter dropdown rendered via portal so it's never clipped by overflow:auto ancestors */}
+      {typeDropdownOpen && createPortal(
+        <div
+          style={{
+            position: 'fixed', top: typeDropdownPos.top, left: typeDropdownPos.left,
+            zIndex: 9999, background: '#fff', border: '1.5px solid var(--border)',
+            borderRadius: 10, boxShadow: '0 4px 18px rgba(0,0,0,.12)', minWidth: 170,
+          }}
+        >
+          {[
+            { value: 'all',      label: 'All Types',  count: dealerCount + customerCount + guestCount + deletedCount },
+            { value: 'dealer',   label: 'Dealers',    count: dealerCount   },
+            { value: 'customer', label: 'Customers',  count: customerCount },
+            { value: 'guest',    label: 'Guests',     count: guestCount    },
+            { value: 'deleted',  label: 'Deleted',    count: deletedCount  },
+          ].map(opt => (
+            <div
+              key={opt.value}
+              onClick={() => { setTypeFilter(opt.value); setTypeDropdownOpen(false); }}
+              style={{
+                padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: typeFilter === opt.value ? 'var(--red-light)' : '#fff',
+                color: typeFilter === opt.value ? 'var(--red-dark)' : '#111',
+                borderRadius: opt.value === 'all' ? '10px 10px 0 0' : opt.value === 'deleted' ? '0 0 10px 10px' : 0,
+              }}
+              onMouseEnter={e => { if (typeFilter !== opt.value) e.currentTarget.style.background = '#f9f9f9'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = typeFilter === opt.value ? 'var(--red-light)' : '#fff'; }}
+            >
+              <span>{opt.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 500, marginLeft: 8 }}>{opt.count}</span>
+            </div>
+          ))}
+        </div>,
+        document.body
       )}
     </div>
   );
