@@ -92,6 +92,8 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
   const cooldownRef = useRef(null);
 
   const [profileExistsBlock, setProfileExistsBlock] = useState(false);
+  const [blockFlash, setBlockFlash] = useState(false);
+  const blockBannerRef = useRef(null);
 
   const phoneValid = /^\d{10}$/.test(form.phone.trim());
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email.trim());
@@ -222,11 +224,22 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
     return e;
   };
 
+  const flashBlockBanner = () => {
+    setTimeout(() => {
+      blockBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      setBlockFlash(true);
+      setTimeout(() => setBlockFlash(false), 700);
+    }, 30);
+  };
+
   const handleSubmit = async () => {
     if (isGuestCheckout && emailValid) {
+      // If debounce already confirmed block, scroll+flash immediately without waiting for RPC
+      if (profileExistsBlock) { flashBlockBanner(); return; }
       const { data: exists, error: pErr } = await supabase.rpc('check_profile_exists', { check_email: form.email.trim() });
       if (pErr || exists === true) {
         setProfileExistsBlock(true);
+        flashBlockBanner();
         return;
       }
     }
@@ -270,7 +283,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
           {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
           {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
           {profileExistsBlock && isGuestCheckout && (
-            <div style={{ background: '#FFF3CD', border: '1.5px solid #FBBF24', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5 }}>
+            <div ref={blockBannerRef} style={{ background: '#FFF3CD', border: blockFlash ? '2px solid #F59E0B' : '1.5px solid #FBBF24', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5, boxShadow: blockFlash ? '0 0 0 3px rgba(251,191,36,0.35)' : 'none', transition: 'box-shadow 0.15s, border-color 0.15s' }}>
               ⚠️ You cannot checkout as a guest with this email address. Either{' '}
               <span style={{ color: '#7B2D8B', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }} onClick={onLoginClick}>login with this email</span>,
               {' '}or use a different email to checkout as a guest.
