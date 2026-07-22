@@ -42,11 +42,11 @@ export default function App() {
     <>
       <ScrollToTop />
       <Routes>
-      {/* /login lives outside PhoneFrame — it has its own full-width responsive layout */}
+      {/* /login and / (Splash) live outside PhoneFrame — full-width, no phone-frame CLS */}
       <Route path="/login" element={<Login />} />
+      <Route path="/" element={<Splash />} />
 
       <Route element={<PhoneFrame />}>
-        <Route path="/" element={<Splash />} />
         <Route element={<DealerRoute />}>
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/cart" element={<Cart />} />

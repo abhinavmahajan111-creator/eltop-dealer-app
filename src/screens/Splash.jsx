@@ -10,7 +10,15 @@ export default function Splash() {
   }, [navigate]);
 
   return (
-    <div className="screen" id="screen-splash">
+    <div style={{
+      minHeight: "100vh", minHeight: "100dvh",
+      background: "linear-gradient(160deg, #96559E, #3D0A2C)",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      color: "#fff", textAlign: "center",
+      fontFamily: "'Segoe UI', Arial, sans-serif",
+      border: "2px solid #E8A800",
+    }}>
       <div className="logo-circle">ET</div>
       <div className="splash-title">ELTOP</div>
       <div className="splash-sub">Dealer Ordering Platform</div>

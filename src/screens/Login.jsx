@@ -346,6 +346,13 @@ export default function Login() {
           font-family: 'Segoe UI', Arial, sans-serif;
           color: var(--text);
         }
+        /* Mobile: gold border visual identity (no width constraint) */
+        @media (max-width: 639px) {
+          .login-root {
+            border: 2px solid #E8A800;
+            border-radius: 10px;
+          }
+        }
         /* Left brand panel — hidden on mobile, shown on desktop */
         .login-brand {
           display: none;
@@ -358,14 +365,14 @@ export default function Login() {
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 48px 40px;
+            padding: 60px 48px;
             color: #fff;
             text-align: center;
             min-height: 100vh;
             min-height: 100dvh;
           }
           .login-form-panel {
-            width: 480px;
+            width: 560px;
             flex-shrink: 0;
           }
         }
@@ -374,27 +381,32 @@ export default function Login() {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 32px 20px;
+          padding: 40px 24px;
           min-height: 100vh;
           min-height: 100dvh;
         }
         .login-card {
           background: #fff;
           border-radius: 16px;
-          padding: 32px 28px;
+          padding: 44px 36px;
           width: 100%;
-          max-width: 400px;
+          max-width: 480px;
           box-shadow: 0 4px 24px rgba(0,0,0,.08);
         }
         @media (max-width: 639px) {
           .login-card {
             box-shadow: 0 2px 12px rgba(0,0,0,.06);
-            padding: 24px 20px;
+            padding: 28px 22px;
           }
         }
-        /* Reuse existing shared styles for inputs, btn, otp-row, resend */
-        .login-card input { margin-bottom: 14px; }
-        .login-card .otp-row input { margin-bottom: 0; }
+        /* Scale up card typography and form elements */
+        .login-card .login-title { font-size: 26px; margin-bottom: 6px; }
+        .login-card .login-sub   { font-size: 15px; margin-bottom: 28px; }
+        .login-card input        { font-size: 16px; padding: 15px; margin-bottom: 16px; }
+        .login-card .otp-row input { margin-bottom: 0; font-size: 20px; padding: 14px 0; }
+        .login-card .btn         { font-size: 16px; padding: 16px; }
+        .login-card .resend      { font-size: 14px; }
+        /* Reuse existing shared styles for otp-row */
       `}</style>
 
       {/* ── Left brand panel (desktop only) ── */}
@@ -402,17 +414,17 @@ export default function Login() {
         <img
           src="/assets/ELTOP%20LOGO.png"
           alt="Eltop by Embassy"
-          style={{ height: 56, width: "auto", filter: "brightness(0) invert(1)", marginBottom: 20 }}
+          style={{ height: 80, width: "auto", filter: "brightness(0) invert(1)", marginBottom: 24 }}
           onError={e => e.target.style.display = "none"}
         />
-        <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5, marginBottom: 8 }}>Eltop by Embassy</div>
-        <div style={{ fontSize: 15, opacity: 0.8, marginBottom: 40, maxWidth: 280, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: 0.5, marginBottom: 10 }}>Eltop by Embassy</div>
+        <div style={{ fontSize: 20, opacity: 0.8, marginBottom: 44, maxWidth: 340, lineHeight: 1.5 }}>
           Premium Fans · Geysers · Home Appliances
         </div>
         <img
           src="/assets/fan%20man%20eltop.png"
           alt="Eltop Fanman"
-          style={{ height: 220, width: "auto" }}
+          style={{ height: 300, width: "auto" }}
           onError={e => e.target.style.display = "none"}
         />
       </div>
@@ -425,7 +437,7 @@ export default function Login() {
             <img
               src="/assets/ELTOP%20LOGO.png"
               alt="Eltop"
-              style={{ height: 36, width: "auto", display: "inline-block" }}
+              style={{ height: 48, width: "auto", display: "inline-block" }}
               onError={e => e.target.style.display = "none"}
             />
           </div>
