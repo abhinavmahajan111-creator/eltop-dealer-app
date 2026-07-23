@@ -177,6 +177,7 @@ export default function SalesOrder() {
                     ["Voucher No.",          voucherNo],
                     ["Dated",                dateStr],
                     ["Mode of Payment",      "Credit"],
+                    ["Payment ID",           order.payment_id || "—"],
                     ["Buyer's Ref / Order No.", "—"],
                     ["Dispatched through",   "—"],
                     ["Destination",          order.delivery_address?.split(",").slice(-1)[0]?.trim() || "—"],

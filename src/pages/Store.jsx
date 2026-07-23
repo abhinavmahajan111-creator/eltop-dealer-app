@@ -1301,12 +1301,17 @@ export default function Store() {
             hsn_code:   item.product.hsn_code ?? null,
           }));
 
+          // Guard: insert([]) returns {error:null} silently — catch it explicitly
+          if (orderItems.length === 0) {
+            console.error('[order-save] capturedItems was empty after payment', razorpay_payment_id);
+            alert('Payment captured but cart was empty — no items saved.\nPayment ID: ' + razorpay_payment_id + '\nPlease contact support immediately.');
+            return;
+          }
+
           const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
 
-          console.log('Order items insert error:', itemsError);
-
           if (itemsError) {
-            console.error('Order items error:', itemsError);
+            console.error('[order-save] order_items insert failed after payment', razorpay_payment_id, itemsError);
             alert('Order saved but items failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + itemsError.message);
             return;
           }
