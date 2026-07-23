@@ -2100,6 +2100,7 @@ export default function Store() {
             <a href="/login" style={{ color: '#ccc', textDecoration: 'none' }}>👤 Sign Up</a>
             <a href="https://wa.me/919310159139" target="_blank" rel="noreferrer" style={{ color: '#ccc', textDecoration: 'none' }}>💬 WhatsApp Us</a>
             <a href="/track" style={{ color: '#ccc', textDecoration: 'none' }}>📦 Track Your Order</a>
+            <a href="/contact" style={{ color: '#f9a8d4', textDecoration: 'none', fontWeight: 600 }}>🆘 Payment or Order Issue?</a>
           </div>
         </div>
         {/* Column 3: Stay Connected */}

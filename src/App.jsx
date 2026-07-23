@@ -23,11 +23,13 @@ import AdminDashboard from "./admin/AdminDashboard";
 import AdminOrders from "./admin/AdminOrders";
 import AdminProducts from "./admin/AdminProducts";
 import AdminDealers from "./admin/AdminDealers";
+import AdminHealth from "./admin/AdminHealth";
 import SalesOrder from "./admin/SalesOrder";
 import DealerCRM from "./admin/DealerCRM";
 import GuestCRM from "./admin/GuestCRM";
 import CustomerCRM from "./admin/CustomerCRM";
 import TrackOrder from "./pages/TrackOrder";
+import ContactSupport from "./pages/ContactSupport";
 
 // Resets window scroll to top on every client-side route change.
 // Fixes carry-over scroll position when navigating (e.g. guest login → Store).
@@ -64,6 +66,7 @@ export default function App() {
           <Route path="/admin/orders" element={<AdminOrders />} />
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/dealers" element={<AdminDealers />} />
+          <Route path="/admin/health" element={<AdminHealth />} />
         </Route>
         {/* Full-page views — no sidebar */}
         <Route path="/admin/orders/:id/print" element={<SalesOrder />} />
@@ -81,6 +84,7 @@ export default function App() {
 
       <Route path="/store" element={<Store />} />
       <Route path="/track" element={<TrackOrder />} />
+      <Route path="/contact" element={<ContactSupport />} />
       <Route element={<CustomerRoute />}>
         <Route path="/my-account" element={<MyAccount />} />
       </Route>

@@ -269,21 +269,20 @@ Additionally: whenever `orders` insert fails after a successful payment, log the
 `payment_failures` table (if it exists) or at minimum ensure `console.error` is called with the
 Payment ID so it appears in any connected error monitoring.
 
-### 14. Periodic reconciliation — run unprompted when relevant.
+### 14. Periodic reconciliation — use /admin/health, not ad-hoc SQL.
 Whenever significant payment-related code has shipped recently, or when asked to do a periodic
-check, proactively compare all Razorpay Captured payments (by asking Sumaksh to paste a Razorpay
-dashboard export, or via any available API) against the `orders` table by `payment_id`. The query:
+check, direct Sumaksh to open **`/admin/health`** (the Admin Health Check page). It runs all
+four reconciliation checks automatically on load and shows any issues at a glance:
 
-```sql
--- Paste Razorpay payment IDs here to find any with no saved order:
-SELECT p.payment_id
-FROM (VALUES ('pay_XXXX'), ('pay_YYYY')) AS p(payment_id)
-LEFT JOIN orders o ON o.payment_id = p.payment_id
-WHERE o.id IS NULL;
-```
+- **Orphaned orders** — order row saved but no order_items (payment captured, items missing)
+- **Duplicate payment IDs** — same Razorpay ID on multiple order rows (manual recovery duplicate)
+- **Paid / no payment_id** — payment_status = 'paid' but payment_id not recorded
+- **Total orders + revenue** — cross-checks against the Dashboard aggregate
 
-Any Captured payment with no matching order row is a **P0 issue** — flag it immediately, do not
-wait to be asked. Propose the manual recovery SQL (INSERT into orders + order_items) on the spot.
+Instruct Sumaksh to check `/admin/health` after every payment-code deploy and after any manual
+SQL recovery. Any row flagged on that page is a **P0 issue** — propose the manual recovery SQL
+(INSERT into orders + order_items, or DELETE of the duplicate row) on the spot, do not wait to
+be asked. The page replaces ad-hoc SQL queries for routine reconciliation.
 
 ---
 

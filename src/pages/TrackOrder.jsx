@@ -267,6 +267,16 @@ export default function TrackOrder() {
           style={{ ...btn, background: "none", color: "#7B2D8B", border: "1.5px solid #7B2D8B", marginTop: 8 }}>
           Track a different order
         </button>
+
+        <div style={{ marginTop: 28, padding: "16px 18px", background: "#fdf4ff", border: "1.5px solid #e9d5ff", borderRadius: 10, textAlign: "center" }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b", marginBottom: 4 }}>Payment deducted but no confirmation?</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+            If money was taken but your order isn't showing here, let us know — we'll sort it out.
+          </div>
+          <a href="/contact" style={{ display: "inline-block", padding: "9px 22px", background: "#7B2D8B", color: "#fff", borderRadius: 8, fontWeight: 700, fontSize: 13, textDecoration: "none" }}>
+            🆘 Report a Payment Issue
+          </a>
+        </div>
       </div>
     </div>
   );
