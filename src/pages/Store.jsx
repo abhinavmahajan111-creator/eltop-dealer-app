@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { useApp } from "../context/AppContext";
@@ -464,16 +464,106 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
 }
 
 // ── Cart Drawer ───────────────────────────────────────────────────────────────
+function CartDebugOverlay({ drawerRef }) {
+  const [info, setInfo] = React.useState("collecting…");
+  React.useEffect(() => {
+    const lines = [];
+    lines.push("=== VIEWPORT ===");
+    lines.push("scrollWidth:        " + document.documentElement.scrollWidth);
+    lines.push("innerWidth:         " + window.innerWidth);
+    lines.push("clientWidth:        " + document.documentElement.clientWidth);
+    lines.push("vv.width:           " + (window.visualViewport?.width ?? "n/a"));
+    lines.push("vv.offsetLeft:      " + (window.visualViewport?.offsetLeft ?? "n/a"));
+
+    lines.push("");
+    lines.push("=== DRAWER RECT ===");
+    const el = drawerRef.current;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      lines.push("left:  " + r.left.toFixed(2));
+      lines.push("right: " + r.right.toFixed(2));
+      lines.push("width: " + r.width.toFixed(2));
+      lines.push("top:   " + r.top.toFixed(2));
+    } else {
+      lines.push("(ref not ready)");
+    }
+
+    lines.push("");
+    lines.push("=== BODY TRANSFORM ===");
+    lines.push(getComputedStyle(document.body).transform || "none");
+
+    lines.push("");
+    lines.push("=== ANCESTOR TRANSFORMS ===");
+    let anc = el?.parentElement;
+    let found = 0;
+    while (anc && anc !== document.documentElement) {
+      const t = getComputedStyle(anc).transform;
+      const wc = getComputedStyle(anc).willChange;
+      if (t && t !== "none") {
+        lines.push((anc.tagName + "#" + anc.id + "." + [...anc.classList].join(".")).slice(0,40) + " → " + t.slice(0,40));
+        found++;
+      }
+      if (wc && wc !== "auto") {
+        lines.push("  will-change: " + wc);
+      }
+      anc = anc.parentElement;
+    }
+    if (found === 0) lines.push("(none)");
+
+    lines.push("");
+    lines.push("=== OVERFLOW OFFENDERS (right > innerWidth+2) ===");
+    let count = 0;
+    document.querySelectorAll("*").forEach(node => {
+      if (count >= 10) return;
+      try {
+        const r = node.getBoundingClientRect();
+        if (r.right > window.innerWidth + 2) {
+          const tag = (node.tagName + "#" + node.id + "." + [...node.classList].join(".")).slice(0,35);
+          lines.push(tag + " r=" + r.right.toFixed(1));
+          count++;
+        }
+      } catch(_) {}
+    });
+    if (count === 0) lines.push("(none)");
+
+    lines.push("");
+    lines.push("=== SAFE AREA ===");
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;visibility:hidden;top:0;left:0;height:1px;";
+    document.body.appendChild(probe);
+    ["left","right"].forEach(side => {
+      probe.style.width = "env(safe-area-inset-" + side + ", -1px)";
+      lines.push("inset-" + side + ": " + getComputedStyle(probe).width);
+    });
+    document.body.removeChild(probe);
+
+    setInfo(lines.join("\n"));
+  }, []);
+
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0,
+      background: "rgba(0,0,0,0.88)", color: "#0f0", zIndex: 9999,
+      maxHeight: 220, overflowY: "auto", padding: "6px 8px",
+    }}>
+      <pre style={{ margin: 0, fontSize: 9, lineHeight: 1.4, fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{info}</pre>
+    </div>
+  );
+}
+
 function CartDrawer({ cart, onClose, onLoginClick, onCheckout, getPrice }) {
+  const debugMode = new URLSearchParams(window.location.search).get("debug") === "cart";
+  const drawerRef = React.useRef(null);
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
-      <div style={{
+      <div ref={drawerRef} style={{
         position: "fixed", top: 0, right: 0, bottom: 0,
         width: "min(380px, 100dvw)", background: "#fff",
         zIndex: 2000, display: "flex", flexDirection: "column",
         boxShadow: "-4px 0 24px rgba(0,0,0,.2)",
       }}>
+        {debugMode && <CartDebugOverlay drawerRef={drawerRef} />}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", background: "#7B2D8B" }}>
           <span style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>
             🛒 Cart {cart.count > 0 && <span style={{ fontWeight: 400, fontSize: 13, opacity: 0.85 }}>({cart.count})</span>}
