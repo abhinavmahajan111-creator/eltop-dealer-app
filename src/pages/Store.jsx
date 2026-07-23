@@ -559,7 +559,7 @@ function CartDrawer({ cart, onClose, onLoginClick, onCheckout, getPrice }) {
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 1999 }} />
       <div ref={drawerRef} style={{
         position: "fixed", top: 0, right: 0, bottom: 0,
-        width: "min(380px, 100dvw)", background: "#fff",
+        width: "100dvw", maxWidth: 420, background: "#fff",
         zIndex: 2000, display: "flex", flexDirection: "column",
         boxShadow: "-4px 0 24px rgba(0,0,0,.2)",
       }}>
