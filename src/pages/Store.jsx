@@ -1234,12 +1234,15 @@ export default function Store() {
           const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
 
           // 1a. Resolve profile_id for unified history
-          // Logged-in users: their auth UID is their profile_id directly.
-          // Guests with email: look up profiles table to link the order to an existing account.
+          // Only dealers have rows in `profiles` — using a Customer's auth UID here
+          // violates orders_profile_id_fkey (customers are in auth.users only, not profiles).
+          // Customers and guests must have profile_id = null.
           let resolvedProfileId = null;
-          if (session?.user?.id) {
+          if (isDealer && session?.user?.id) {
+            // Dealers always have a profiles row — safe to link
             resolvedProfileId = session.user.id;
-          } else if (data.email?.trim()) {
+          } else if (!session?.user?.id && data.email?.trim()) {
+            // Unauthenticated guest — look up profiles table for a dealer email match
             const { data: pRow } = await supabase
               .from('profiles')
               .select('id')
@@ -1247,6 +1250,7 @@ export default function Store() {
               .maybeSingle();
             resolvedProfileId = pRow?.id || null;
           }
+          // isCustomer (logged in, no profiles row): profile_id stays null
 
           // 1. Insert order row
           const { data: orderRows, error: orderError } = await supabase
