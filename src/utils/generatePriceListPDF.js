@@ -155,10 +155,11 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
 
   // 4. Fetch brand assets
   const origin = window.location.origin;
-  const [eltopLogo, fanmanHalf, fanmanFull] = await Promise.all([
+  const [eltopLogo, fanmanHalf, fanmanFull, productCollage] = await Promise.all([
     fetchLogoWhite(origin + '/assets/ELTOP%20LOGO.png'),
     fetchCropTop(origin + '/assets/fan%20man%20eltop.png', 0.62),
     fetchB64(origin + '/assets/fan%20man%20eltop.png'),
+    fetchB64(origin + '/assets/PNG%20product.png'),
   ]);
 
   // 5. PDF setup
@@ -275,7 +276,19 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.setFontSize(22);
     doc.setTextColor(...C.lavLt);
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
-    // Middle area intentionally left empty — a custom collage image will be added here manually.
+    cy += 16;
+
+    // Product collage image — full-width, centred in the remaining middle space
+    if (productCollage) {
+      const imgW = PW - ML - MR;  // 186mm — full content width
+      const imgH = 118;           // fixed height; image is wide landscape collage
+      const imgX = ML;
+      const imgY = cy + 4;
+      // Subtle rounded-rect white border to separate black image from dark bg
+      doc.setFillColor(80, 40, 95);
+      doc.roundedRect(imgX - 2, imgY - 2, imgW + 4, imgH + 4, 4, 4, 'F');
+      doc.addImage(productCollage, 'PNG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
+    }
 
     // Tagline — near bottom, above company info
     doc.setFont('helvetica', 'bold');

@@ -352,7 +352,7 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
                 </button>
               ) : (
                 <>
-                  <div style={{ fontSize: 12, color: '#004d40', marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: '#004d40', marginBottom: 8, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
                     Enter the 6-digit code sent to <strong>{form.email.trim()}</strong>
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -426,6 +426,8 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
                 fontSize: 13,
                 color: '#991B1B',
                 lineHeight: 1.5,
+                overflowWrap: 'break-word',
+                wordBreak: 'break-all',
                 animation: blockAnimState === 'entering'
                   ? 'blockBannerIn 0.28s cubic-bezier(0.34,1.56,0.64,1) forwards'
                   : blockAnimState === 'pulsing'
@@ -1798,7 +1800,7 @@ export default function Store() {
                 <div ref={accountMenuRef} style={{ position: "relative" }}>
                   <button
                     onClick={() => setAccountMenuOpen(v => !v)}
-                    style={{ background: "#7B2D8B", border: "none", color: "#fff", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap" }}
+                    className="btn-dealer-trigger"
                   >
                     👤 Hi, {customerName || session?.user?.email?.split("@")[0] || "You"} ▾
                   </button>

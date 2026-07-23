@@ -312,7 +312,7 @@ export default function Login() {
           )}
           {step === 2 && (
             <div>
-              <div className="login-sub" style={{ marginBottom: 14 }}>OTP sent to <b>{emailInput}</b></div>
+              <div className="login-sub" style={{ marginBottom: 14, overflowWrap: 'break-word', wordBreak: 'break-all' }}>OTP sent to <b>{emailInput}</b></div>
               <div className="otp-row">
                 {otpRefs.map((ref, i) => (
                   <input key={i} ref={ref} maxLength={1} className="otp-box"
