@@ -38,9 +38,10 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, email_verified, profiles(name, email, dealer_code, address, staff_assigned, deleted_at)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, email_verified, profiles!dealer_id(name, email, dealer_code, address, staff_assigned, deleted_at)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
+        if (error) console.error('[AdminOrders] query error:', error);
         if (!error && data) setOrders(data);
         setLoading(false);
       });
