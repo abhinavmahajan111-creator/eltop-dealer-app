@@ -394,6 +394,13 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
             <span style={{ color: '#555', fontWeight: 600 }}>Order Total</span>
             <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(effectiveTotal)}</span>
           </div>
+          {profileExistsBlock && isGuestCheckout && (
+            <div style={{ background: '#FEF2F2', border: '2px solid #EF4444', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#991B1B', lineHeight: 1.5 }}>
+              ⛔ An account already exists for <strong>{form.email.trim()}</strong>.{' '}
+              <span onClick={onLoginClick} style={{ fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}>Log in</span>{' '}
+              to continue, or use a different email.
+            </div>
+          )}
           <button onClick={handleSubmit} style={{ width: '100%', padding: '14px 0', background: '#7B2D8B', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
             Continue to Payment →
           </button>
