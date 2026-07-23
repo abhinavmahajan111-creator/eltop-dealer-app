@@ -84,7 +84,7 @@ export default function CustomerCRM() {
         <button className="btn small outline" onClick={() => navigate("/admin/dealers")} style={{ whiteSpace: "nowrap" }}>
           ← Back
         </button>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
           <div style={{ fontSize: 20, fontWeight: 800 }}>{profile.name || profile.email || "Customer"}</div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#f0fdf4", color: "#15803d", marginRight: 8 }}>

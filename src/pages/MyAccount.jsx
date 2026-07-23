@@ -239,7 +239,7 @@ export default function MyAccount() {
         >
           ← Back to Store
         </button>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
           <div style={{ fontWeight: 700, fontSize: 17 }}>{customerName}</div>
           <div style={{ fontSize: 12, opacity: 0.8 }}>{email}</div>
         </div>

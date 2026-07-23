@@ -242,7 +242,7 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
         >
           ← Back
         </button>
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
           <div style={{ fontWeight: 700, fontSize: 17 }}>{guestName}</div>
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             Guest Customer

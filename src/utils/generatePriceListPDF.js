@@ -90,6 +90,26 @@ async function fetchB64(url) {
   } catch { return null; }
 }
 
+// Load any image URL through a canvas so jsPDF always gets a clean JPEG.
+// Necessary for large RGBA PNGs — jsPDF's raw PNG parser chokes on them.
+async function fetchImageAsJpeg(url, bgColor = '#000000') {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0);
+      resolve(c.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 // ── Misc helpers ───────────────────────────────────────────────────────────
 
 function getFirstImageUrl(p) {
@@ -159,7 +179,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     fetchLogoWhite(origin + '/assets/ELTOP%20LOGO.png'),
     fetchCropTop(origin + '/assets/fan%20man%20eltop.png', 0.62),
     fetchB64(origin + '/assets/fan%20man%20eltop.png'),
-    fetchB64(origin + '/assets/PNG%20product.png'),
+    fetchImageAsJpeg(origin + '/assets/PNG%20product.png', '#000000'),
   ]);
 
   // 5. PDF setup
@@ -287,7 +307,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
       // Subtle rounded-rect white border to separate black image from dark bg
       doc.setFillColor(80, 40, 95);
       doc.roundedRect(imgX - 2, imgY - 2, imgW + 4, imgH + 4, 4, 4, 'F');
-      doc.addImage(productCollage, 'PNG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
+      doc.addImage(productCollage, 'JPEG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
     }
 
     // Tagline — near bottom, above company info
