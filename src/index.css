@@ -24,6 +24,7 @@
     align-items:center;
     min-height:100vh;
     min-height:100dvh;
+    overflow-x:hidden;
   }
   #phone{
     width:min(390px,100%);
