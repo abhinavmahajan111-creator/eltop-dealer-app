@@ -94,6 +94,8 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
   const [profileExistsBlock, setProfileExistsBlock] = useState(false);
   const [blockFlash, setBlockFlash] = useState(false);
   const blockBannerRef = useRef(null);
+  const [blockAnimState, setBlockAnimState] = useState('idle'); // 'idle' | 'entering' | 'pulsing'
+  const [btnPress, setBtnPress] = useState(false);
 
   const phoneValid = /^\d{10}$/.test(form.phone.trim());
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(form.email.trim());
@@ -101,6 +103,11 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
 
   // Tier constants: Guest(1) < Customer(2) < Dealer(3)
   const currentTier = isDealer ? 3 : isCustomer ? 2 : 1;
+
+  // Start entering animation whenever the bottom block banner becomes visible
+  useEffect(() => {
+    if (profileExistsBlock && isGuestCheckout) setBlockAnimState('entering');
+  }, [profileExistsBlock, isGuestCheckout]);
 
   useEffect(() => {
     if (!phoneValid) { setPhoneTierBanner(null); return; }
@@ -233,13 +240,26 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
   };
 
   const handleSubmit = async () => {
+    // Button press feedback on every click
+    setBtnPress(true);
+    setTimeout(() => setBtnPress(false), 150);
+
     if (isGuestCheckout && emailValid) {
-      // If debounce already confirmed block, scroll+flash immediately without waiting for RPC
-      if (profileExistsBlock) { flashBlockBanner(); return; }
+      // Banner already showing — pulse it instead of re-animating
+      if (profileExistsBlock) {
+        setBlockAnimState('pulsing');
+        flashBlockBanner();
+        return;
+      }
       const { data: exists, error: pErr } = await supabase.rpc('check_profile_exists', { check_email: form.email.trim() });
       if (pErr || exists === true) {
         setProfileExistsBlock(true);
-        flashBlockBanner();
+        // pop-in animation triggered by the useEffect above; just flash top banner
+        setTimeout(() => {
+          blockBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          setBlockFlash(true);
+          setTimeout(() => setBlockFlash(false), 700);
+        }, 30);
         return;
       }
     }
@@ -395,13 +415,46 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
             <span style={{ fontWeight: 900, color: '#1e293b', fontSize: 18 }}>₹{fmt(effectiveTotal)}</span>
           </div>
           {profileExistsBlock && isGuestCheckout && (
-            <div style={{ background: '#FEF2F2', border: '2px solid #EF4444', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#991B1B', lineHeight: 1.5 }}>
+            <div
+              onAnimationEnd={() => setBlockAnimState('idle')}
+              style={{
+                background: '#FEF2F2',
+                border: '2px solid #EF4444',
+                borderRadius: 8,
+                padding: '10px 14px',
+                marginBottom: 10,
+                fontSize: 13,
+                color: '#991B1B',
+                lineHeight: 1.5,
+                animation: blockAnimState === 'entering'
+                  ? 'blockBannerIn 0.28s cubic-bezier(0.34,1.56,0.64,1) forwards'
+                  : blockAnimState === 'pulsing'
+                    ? 'blockBannerPulse 150ms ease-out'
+                    : 'none',
+              }}
+            >
               ⛔ An account already exists for <strong>{form.email.trim()}</strong>.{' '}
               <span onClick={onLoginClick} style={{ fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' }}>Log in</span>{' '}
               to continue, or use a different email.
             </div>
           )}
-          <button onClick={handleSubmit} style={{ width: '100%', padding: '14px 0', background: '#7B2D8B', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 800, fontSize: 16, cursor: 'pointer', fontFamily: 'inherit' }}>
+          <button
+            onClick={handleSubmit}
+            style={{
+              width: '100%',
+              padding: '14px 0',
+              background: '#7B2D8B',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontWeight: 800,
+              fontSize: 16,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              transform: btnPress ? 'scale(0.97)' : 'scale(1)',
+              transition: 'transform 0.1s ease',
+            }}
+          >
             Continue to Payment →
           </button>
         </div>
