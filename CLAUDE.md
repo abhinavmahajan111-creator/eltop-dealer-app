@@ -230,6 +230,63 @@ Goal: surface inefficiencies so future sessions stay leaner.
 
 ---
 
+## Rule: Payment-Order Integrity (mandatory, zero tolerance)
+
+**Background:** On 23 July 2026, a bug caused 2 out of 4 real Razorpay payments to be captured
+(money taken from the customer) while the corresponding order record silently failed to save, due
+to a database foreign key violation that was never surfaced to the user, to Sumaksh, or to any log
+Claude Code checked. Both were only discovered hours later via manual cross-checking of the Razorpay
+dashboard against the Admin Orders list. This is the single most serious class of bug possible in
+this app — it means a real customer can pay real money and receive nothing, with no automatic way
+to know.
+
+**The following applies unconditionally from this point forward:**
+
+### 12. Touched payment/checkout code? Self-check ALL three user types.
+Whenever ANY code in the payment/checkout path is touched — `Store.jsx`'s `handlePayment`,
+`handleSubmit`, `CheckoutModal`, the Razorpay success callback, or any order-insert logic — Claude
+Code must explicitly verify, as part of self-check before reporting done, that every successful
+payment path actually results in a saved order. This includes testing the specific user-type
+combinations that could behave differently: **Guest, Customer, and Dealer**. Today's bug was
+Customer-specific and was missed because only one user type was tested.
+
+State in your summary: "Verified order-save path for: Guest / Customer / Dealer" — do not skip.
+
+### 13. Order-save errors must NEVER be swallowed silently.
+Any `insert` into `orders` or `order_items` that can fail must have its error explicitly checked
+and surfaced. The pattern `if (!error && data) { ... }` with no `else` is **forbidden** in the
+payment success callback — it silently drops the failure. Required pattern:
+
+```js
+if (error) {
+  console.error('[order-save] FAILED after payment', razorpay_payment_id, error);
+  alert('Payment done but order save failed.\nPayment ID: ' + razorpay_payment_id + '\nError: ' + error.message);
+  return;
+}
+```
+
+Additionally: whenever `orders` insert fails after a successful payment, log the failure to the
+`payment_failures` table (if it exists) or at minimum ensure `console.error` is called with the
+Payment ID so it appears in any connected error monitoring.
+
+### 14. Periodic reconciliation — run unprompted when relevant.
+Whenever significant payment-related code has shipped recently, or when asked to do a periodic
+check, proactively compare all Razorpay Captured payments (by asking Sumaksh to paste a Razorpay
+dashboard export, or via any available API) against the `orders` table by `payment_id`. The query:
+
+```sql
+-- Paste Razorpay payment IDs here to find any with no saved order:
+SELECT p.payment_id
+FROM (VALUES ('pay_XXXX'), ('pay_YYYY')) AS p(payment_id)
+LEFT JOIN orders o ON o.payment_id = p.payment_id
+WHERE o.id IS NULL;
+```
+
+Any Captured payment with no matching order row is a **P0 issue** — flag it immediately, do not
+wait to be asked. Propose the manual recovery SQL (INSERT into orders + order_items) on the spot.
+
+---
+
 ## Still requires human testing (Claude Code cannot verify these itself)
 
 Always end a non-trivial change with a short "please verify in browser" checklist covering:
