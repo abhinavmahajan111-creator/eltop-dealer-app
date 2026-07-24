@@ -302,9 +302,13 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     if (productCollage) {
       const imgX = ML;
       const imgW = PW - ML - MR;
-      const imgY = cy + 4;               // 4mm gap below year text
-      const imgH = (PH - 32 - 6) - imgY; // fills to 6mm above tagline
+      const imgY = cy + 8;               // 8mm gap below year text
+      const imgH = (PH - 32 - 2) - imgY; // fills to 2mm above tagline
       doc.addImage(productCollage, 'JPEG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
+      // Cover JPEG compression edge artifacts with a purple stroke (same as page bg)
+      doc.setDrawColor(...C.dark);
+      doc.setLineWidth(1.5);
+      doc.rect(imgX, imgY, imgW, imgH, 'S');
     }
 
     // Tagline — near bottom, above company info

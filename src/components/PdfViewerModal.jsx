@@ -1,47 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 /**
- * Full-screen PDF viewer with Share and Download actions.
+ * PDF action sheet — shown after PDF is ready in Supabase Storage.
  *
  * Props:
- *   url      — HTTPS public URL (Supabase Storage) or blob: URL fallback
+ *   url      — HTTPS public URL (Supabase Storage)
  *   filename — suggested filename for download / share
- *   onClose  — called when the viewer is dismissed
+ *   onClose  — called when dismissed
  */
 export default function PdfViewerModal({ url, filename, onClose }) {
   const [downloading, setDownloading] = useState(false);
 
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, []);
-
-  useEffect(() => {
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  async function handleShare() {
-    try {
-      const resp = await fetch(url);
-      const blob = await resp.blob();
-      const file = new File([blob], filename, { type: 'application/pdf' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: filename });
-      } else {
-        window.open(url, '_blank');
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') alert('Share failed: ' + err.message);
-    }
+  function handleOpen() {
+    window.open(url, '_blank');
   }
 
   async function handleDownload() {
     setDownloading(true);
     try {
-      // Fetch + re-blob so the <a download> works cross-origin
       const resp = await fetch(url);
       const blob = await resp.blob();
       const blobUrl = URL.createObjectURL(blob);
@@ -59,66 +35,97 @@ export default function PdfViewerModal({ url, filename, onClose }) {
     }
   }
 
-  const canShareFiles = typeof navigator.canShare === 'function';
+  async function handleShare() {
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const file = new File([blob], filename, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+      } else {
+        window.open(url, '_blank');
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') alert('Share failed: ' + err.message);
+    }
+  }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
-      display: 'flex', flexDirection: 'column',
-      background: '#1a1026',
-    }}>
-      {/* ── Top bar ── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '10px 14px',
-        background: '#6B3A73',
-        flexShrink: 0,
-        minHeight: 50,
-      }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: '16px 16px 0 0',
+          padding: '24px 24px 36px',
+          width: '100%', maxWidth: 480,
+        }}
+      >
+        {/* Handle bar */}
+        <div style={{ width: 40, height: 4, background: '#e2e8f0', borderRadius: 2, margin: '0 auto 20px' }} />
+
+        {/* PDF icon + filename */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 12, flexShrink: 0,
+            background: '#f5eefb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 26,
+          }}>📄</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#1e293b', marginBottom: 3 }}>
+              Price List Ready
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', wordBreak: 'break-all' }}>{filename}</div>
+          </div>
+        </div>
+
+        {/* Primary action: Open */}
         <button
-          onClick={onClose}
-          aria-label="Close"
+          onClick={handleOpen}
           style={{
-            background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
-            borderRadius: 8, width: 34, height: 34,
-            fontSize: 18, cursor: 'pointer', lineHeight: 1,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
+            width: '100%', padding: '14px', marginBottom: 12,
+            background: '#7B2D8B', border: 'none', borderRadius: 10,
+            color: '#fff', fontWeight: 700, fontSize: 15,
+            cursor: 'pointer', fontFamily: 'inherit',
           }}
-        >✕</button>
-
-        <span style={{
-          color: '#e8d8f5', fontWeight: 600, fontSize: 13, flex: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{filename}</span>
-
-        {canShareFiles && (
-          <button onClick={handleShare} style={{
-            background: 'rgba(255,255,255,0.15)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            color: '#fff', borderRadius: 8,
-            padding: '7px 14px', fontSize: 13,
-            cursor: 'pointer', whiteSpace: 'nowrap',
-          }}>Share ↗</button>
-        )}
-
-        <button onClick={handleDownload} disabled={downloading} style={{
-          background: '#fff', border: 'none',
-          color: '#6B3A73', borderRadius: 8,
-          padding: '7px 14px', fontSize: 13,
-          fontWeight: 700, cursor: downloading ? 'wait' : 'pointer',
-          whiteSpace: 'nowrap', opacity: downloading ? 0.7 : 1,
-        }}>
-          {downloading ? '…' : '⬇ Download'}
+        >
+          Open PDF ↗
         </button>
-      </div>
 
-      {/* ── PDF viewer — iframe works for both HTTPS and blob URLs ── */}
-      <iframe
-        src={url}
-        title="Price List PDF"
-        style={{ flex: 1, border: 'none', width: '100%', background: '#fff' }}
-      />
+        {/* Secondary actions row */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            style={{
+              flex: 1, padding: '12px',
+              background: 'none', border: '1.5px solid #7B2D8B', borderRadius: 10,
+              color: '#7B2D8B', fontWeight: 700, fontSize: 14,
+              cursor: downloading ? 'wait' : 'pointer',
+              opacity: downloading ? 0.6 : 1, fontFamily: 'inherit',
+            }}
+          >
+            {downloading ? '…' : '⬇ Download'}
+          </button>
+          <button
+            onClick={handleShare}
+            style={{
+              flex: 1, padding: '12px',
+              background: 'none', border: '1.5px solid #94a3b8', borderRadius: 10,
+              color: '#475569', fontWeight: 600, fontSize: 14,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Share ↗
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
