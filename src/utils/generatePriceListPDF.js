@@ -298,17 +298,30 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
     cy += 16;
 
-    // Product collage — anchored to year text above and tagline below
+    // Product collage — object-fit:contain within available box
     if (productCollage) {
-      const imgX = ML;
-      const imgW = PW - ML - MR;
-      const imgY = cy + 8;               // 8mm gap below year text
-      const imgH = (PH - 32 - 2) - imgY; // fills to 2mm above tagline
-      doc.addImage(productCollage, 'JPEG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
-      // Cover JPEG compression edge artifacts with a purple stroke (same as page bg)
+      const ASPECT   = 3510 / 2483;        // known PNG dimensions
+      const boxW     = PW - ML - MR;       // 186mm
+      const boxY     = cy + 8;
+      const boxH     = (PH - 32 - 2) - boxY;
+      // Contain: fit within box preserving aspect ratio
+      let fitW, fitH;
+      if (boxW / boxH > ASPECT) {
+        // box is wider than image ratio → height-constrained
+        fitH = boxH;
+        fitW = fitH * ASPECT;
+      } else {
+        // box is taller than image ratio → width-constrained
+        fitW = boxW;
+        fitH = fitW / ASPECT;
+      }
+      const imgX = ML + (boxW - fitW) / 2; // centre horizontally
+      const imgY = boxY;
+      doc.addImage(productCollage, 'JPEG', imgX, imgY, fitW, fitH, 'product-collage', 'FAST');
+      // Cover JPEG edge artifacts with a purple stroke matching page background
       doc.setDrawColor(...C.dark);
       doc.setLineWidth(1.5);
-      doc.rect(imgX, imgY, imgW, imgH, 'S');
+      doc.rect(imgX, imgY, fitW, fitH, 'S');
     }
 
     // Tagline — near bottom, above company info
