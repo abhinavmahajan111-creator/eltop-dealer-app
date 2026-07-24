@@ -300,7 +300,25 @@ function CheckoutModal({ cart, onClose, onConfirm, onLoginClick, initialData, ot
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 8px' }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#7B2D8B', marginBottom: 14 }}>Contact</div>
           {field('Full Name', 'name', { placeholder: 'Your full name' })}
-          {field('Phone Number', 'phone', { placeholder: '10-digit mobile number', maxLength: 10 })}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>
+              Phone Number <span style={{ color: '#DC2626' }}>*</span>
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', border: errors.phone ? '1.5px solid #DC2626' : '1.5px solid #ddd', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+              <span style={{ padding: '10px 10px', fontSize: 14, fontWeight: 600, color: '#555', background: '#f8f4ff', borderRight: '1px solid #ddd', flexShrink: 0, whiteSpace: 'nowrap' }}>🇮🇳 +91</span>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel-national"
+                value={form.phone}
+                onChange={e => set('phone', e.target.value.replace(/\D/g, ''))}
+                maxLength={10}
+                placeholder="10-digit mobile number"
+                style={{ flex: 1, padding: '10px 12px', border: 'none', outline: 'none', fontSize: 14, fontFamily: 'inherit', background: 'transparent' }}
+              />
+            </div>
+            {errors.phone && <div style={{ fontSize: 11, color: '#DC2626', marginTop: 3 }}>{errors.phone}</div>}
+          </div>
           {field('Email', 'email', { type: 'email', placeholder: 'example@email.com', optional: true })}
           {profileExistsBlock && isGuestCheckout && (
             <div ref={blockBannerRef} style={{ background: '#FFF3CD', border: blockFlash ? '2px solid #F59E0B' : '1.5px solid #FBBF24', borderRadius: 8, padding: '10px 14px', marginBottom: 10, fontSize: 13, color: '#92400E', lineHeight: 1.5, boxShadow: blockFlash ? '0 0 0 3px rgba(251,191,36,0.35)' : 'none', transition: 'box-shadow 0.15s, border-color 0.15s' }}>
@@ -724,7 +742,7 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease,
                 <span style={{ fontSize: 10, color: "#64748b" }}>Net price</span>
                 <span style={{ fontSize: 15, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
                 {discPct > 0 && (
-                  <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 20 }}>{discPct}% OFF</span>
+                  <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 20 }}>15% OFF</span>
                 )}
               </div>
               {(showDlp || showMrp) && (
@@ -889,7 +907,7 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
                   <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
                   <span style={{ fontSize: 32, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
                   {discPct > 0 && (
-                    <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 13, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{discPct}% OFF</span>
+                    <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 13, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>15% OFF</span>
                   )}
                 </div>
                 {(showDlp || showMrp) && (
