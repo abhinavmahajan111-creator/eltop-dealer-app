@@ -54,6 +54,19 @@ export default function DealerCRM() {
   const [orderItemsCache, setOrderItemsCache] = useState({});
   const [allOrderItems, setAllOrderItems] = useState([]); // for AI context
 
+  // Application status
+  const [appStatusBusy, setAppStatusBusy] = useState(false);
+  const handleChangeAppStatus = async (newStatus) => {
+    setAppStatusBusy(true);
+    const isDealerNow = newStatus === 'approved';
+    const { error } = await supabase.from('profiles')
+      .update({ dealer_application_status: newStatus, is_dealer: isDealerNow })
+      .eq('id', dealerId);
+    if (error) { alert('Failed: ' + error.message); }
+    else { setDealer(prev => ({ ...prev, dealer_application_status: newStatus, is_dealer: isDealerNow })); }
+    setAppStatusBusy(false);
+  };
+
   // Activity form
   const [actForm, setActForm] = useState({ type: "call", notes: "", date: new Date().toISOString().slice(0, 10) });
   const [actOpen, setActOpen] = useState(false);
@@ -293,6 +306,53 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
         <div style={{ background: health.bg, color: health.color, padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
           {health.label}
         </div>
+        {/* Application status badge + approve/reject actions */}
+        {(() => {
+          const appStatus = dealer.dealer_application_status;
+          if (!appStatus || appStatus === 'none') return null;
+          const cfg = {
+            pending_details: { label: 'Pending',      bg: '#fef9c3', color: '#854d0e', border: '#fde047' },
+            under_review:    { label: 'Under Review', bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' },
+            approved:        { label: 'Approved ✓',   bg: '#dcfce7', color: '#166534', border: '#86efac' },
+            rejected:        { label: 'Rejected',     bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
+          };
+          const s = cfg[appStatus] || cfg.pending_details;
+          const isPending = appStatus === 'pending_details' || appStatus === 'under_review';
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{ background: s.bg, color: s.color, border: `1.5px solid ${s.border}`, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
+                {s.label}
+              </span>
+              {isPending && (
+                <>
+                  <button
+                    disabled={appStatusBusy}
+                    onClick={() => handleChangeAppStatus('approved')}
+                    style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: appStatusBusy ? 'wait' : 'pointer', opacity: appStatusBusy ? 0.6 : 1 }}
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    disabled={appStatusBusy}
+                    onClick={() => handleChangeAppStatus('rejected')}
+                    style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: appStatusBusy ? 'wait' : 'pointer', opacity: appStatusBusy ? 0.6 : 1 }}
+                  >
+                    ✕ Reject
+                  </button>
+                </>
+              )}
+              {appStatus === 'approved' && (
+                <button
+                  disabled={appStatusBusy}
+                  onClick={() => handleChangeAppStatus('rejected')}
+                  style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: appStatusBusy ? 'wait' : 'pointer' }}
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── Tabs ── */}

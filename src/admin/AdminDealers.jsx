@@ -765,14 +765,16 @@ export default function AdminDealers() {
     setNewTerritory("");
   };
 
-  const handleChangeAppStatus = async (newStatus) => {
+  const handleChangeAppStatus = async (newStatus, profileId = selected?.id) => {
+    // Approval grants login access; any other status revokes it.
+    const isDealerNow = newStatus === 'approved';
     const { error } = await supabase.from('profiles')
-      .update({ dealer_application_status: newStatus })
-      .eq('id', selected.id);
+      .update({ dealer_application_status: newStatus, is_dealer: isDealerNow })
+      .eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); return; }
-    const updated = { ...selected, dealer_application_status: newStatus };
+    const updated = { ...selected, dealer_application_status: newStatus, is_dealer: isDealerNow };
     setSelected(updated);
-    setAllProfiles(prev => prev.map(p => p.id === selected.id ? updated : p));
+    setAllProfiles(prev => prev.map(p => p.id === profileId ? { ...p, dealer_application_status: newStatus, is_dealer: isDealerNow } : p));
   };
 
   const handleToggleBlock = async () => {
