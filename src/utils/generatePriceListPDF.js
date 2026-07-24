@@ -733,48 +733,60 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
 
     // Core upload logic — shared between immediate (waitForUpload) and background paths.
     const uploadStart = Date.now();
+    // Returns { publicUrl } on success or throws with a descriptive message on failure.
     async function doUpload() {
-      try {
-        onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0 });
-        const { error } = await supabaseClient.storage
-          .from('price-lists')
-          .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
-        const uploadMs = Date.now() - uploadStart;
-        if (error) {
-          onDebug?.({ step: 'upload-error', error: error.message, uploadMs });
-          return null;
-        }
-        const { data: { publicUrl } } = supabaseClient.storage
-          .from('price-lists')
-          .getPublicUrl(storagePath);
-        // Upsert into price_list_cache so Store.jsx lookup works instantly next time.
-        await supabaseClient.from('price_list_cache').upsert({
-          role,
-          storage_path: storagePath,
-          public_url:   publicUrl,
-          generated_at: new Date().toISOString(),
-        }, { onConflict: 'role' });
-        onDebug?.({ step: 'upload-done', uploadMs, publicUrl: publicUrl.slice(0, 60) });
-        return publicUrl;
-      } catch (e) {
-        onDebug?.({ step: 'upload-exception', error: String(e) });
-        return null;
+      onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0 });
+
+      const { error: storageErr } = await supabaseClient.storage
+        .from('price-lists')
+        .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+      const uploadMs = Date.now() - uploadStart;
+
+      if (storageErr) {
+        console.error('[PDF] Storage upload error:', storageErr);
+        onDebug?.({ step: 'upload-error', error: storageErr.message, uploadMs });
+        throw new Error('Storage upload failed: ' + (storageErr.message || JSON.stringify(storageErr)));
       }
+
+      const { data: { publicUrl } } = supabaseClient.storage
+        .from('price-lists')
+        .getPublicUrl(storagePath);
+
+      const { error: cacheErr } = await supabaseClient.from('price_list_cache').upsert({
+        role,
+        storage_path: storagePath,
+        public_url:   publicUrl,
+        generated_at: new Date().toISOString(),
+      }, { onConflict: 'role' });
+
+      if (cacheErr) {
+        console.error('[PDF] price_list_cache upsert error:', cacheErr);
+        // Don't fail the whole flow — file is uploaded, cache write failed
+        onDebug?.({ step: 'cache-upsert-error', error: cacheErr.message });
+      } else {
+        onDebug?.({ step: 'upload-done', uploadMs, publicUrl: publicUrl.slice(0, 60) });
+      }
+
+      return publicUrl;
     }
 
     if (waitForUpload) {
       // Admin regeneration: block until upload + cache upsert finish, return real HTTPS URL.
+      // Any error thrown by doUpload() propagates to AdminProducts.jsx catch block.
       const publicUrl = await doUpload();
       _uploadCache.set(storagePath, Promise.resolve(publicUrl));
       console.timeEnd('[PDF] 4-blob+upload');
       console.timeEnd('[PDF] total');
-      return publicUrl ? { publicUrl, filename } : { blob, filename };
+      return { publicUrl, filename };
     }
 
     // Store.jsx fallback: return blob URL immediately, upload in background.
     const blobUrl = URL.createObjectURL(blob);
     _dbg({ step: '5-blob-url-ready' });
-    const uploadPromise = doUpload();
+    const uploadPromise = doUpload().catch(e => {
+      console.error('[PDF] background upload failed:', e);
+      return null;
+    });
     _uploadCache.set(storagePath, uploadPromise);
     console.timeEnd('[PDF] 4-blob+upload');
     console.timeEnd('[PDF] total');

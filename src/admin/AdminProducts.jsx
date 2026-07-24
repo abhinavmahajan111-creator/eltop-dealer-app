@@ -851,7 +851,9 @@ export default function AdminProducts() {
       const ok = !!(custResult.publicUrl && dealerResult.publicUrl);
       setRegenStatus({ ok, at: new Date() });
     } catch (err) {
-      setRegenStatus({ ok: false, error: err.message, at: new Date() });
+      console.error('[Regenerate PDFs] Full error:', err, JSON.stringify(err));
+      const msg = err?.message || err?.error?.message || JSON.stringify(err) || 'Unknown error';
+      setRegenStatus({ ok: false, error: msg, at: new Date() });
     } finally {
       setRegenBusy(false);
     }
