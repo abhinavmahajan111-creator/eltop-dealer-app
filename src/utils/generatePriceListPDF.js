@@ -30,6 +30,11 @@ const COMPANY = {
 // ── Module-level asset cache (survives re-generation in same session) ──────
 const _assetCache = new Map();
 
+// ── Module-level upload cache: role-date → Promise<publicUrl|null> ─────────
+// On second tap within the same session, we resolve instantly with the cached
+// public URL instead of re-generating and re-uploading the whole PDF.
+const _uploadCache = new Map();
+
 function cached(key, fn) {
   if (_assetCache.has(key)) return Promise.resolve(_assetCache.get(key));
   return fn().then(v => { _assetCache.set(key, v); return v; });
@@ -161,7 +166,10 @@ function setGS(doc, opacity) {
  * @param {Array<{id:number,pct:number}>} opts.discountCols
  * @param {boolean} opts.includeDiscountCols
  */
-export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, supabaseClient = supabase }) {
+export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, supabaseClient = supabase, onDebug }) {
+  const _t0 = Date.now();
+  const _dbg = (extra) => onDebug?.({ elapsed: Date.now() - _t0, ...extra });
+
   console.time('[PDF] total');
   console.time('[PDF] 1-products+assets+thumbs (parallel)');
 
@@ -169,6 +177,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
 
   // 1+3+4 all in parallel: Supabase query, brand assets, thumbnails start together
   // (thumbnails can't start until products load, but assets are independent)
+  _dbg({ step: '1-start', note: 'parallel fetch: products + brand assets' });
   const [productsResult, eltopLogo, fanmanHalf, fanmanFull, productCollage] = await Promise.all([
     supabase
       .from('products')
@@ -195,6 +204,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
 
   // 3. Pre-fetch all thumbnails in parallel (now that products are known)
   console.timeEnd('[PDF] 1-products+assets+thumbs (parallel)');
+  _dbg({ step: '2-assets-done', productCount: products.length });
   console.time('[PDF] 2-thumbnails');
   const imageMap = new Map();
   await Promise.all(products.map(async p => {
@@ -204,6 +214,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     if (b64) imageMap.set(p.id, b64);
   }));
   console.timeEnd('[PDF] 2-thumbnails');
+  _dbg({ step: '3-thumbs-done', thumbCount: imageMap.size });
 
   // 5. PDF setup
   const doc  = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
@@ -699,6 +710,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
 
   // ── 11. Output ────────────────────────────────────────────────────────────
   console.timeEnd('[PDF] 3-page-drawing');
+  _dbg({ step: '4-drawing-done' });
   console.time('[PDF] 4-blob+upload');
 
   const label    = role === 'customer' ? 'Customer' : role === 'dealer' ? 'Dealer' : 'Admin';
@@ -706,24 +718,54 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
   const blob     = doc.output('blob');
 
   if (returnBlob) {
-    // Try to upload to Supabase Storage and return a public HTTPS URL.
-    // Falls back to blob URL if upload fails (e.g. no bucket yet).
-    try {
-      const today       = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      const storagePath = `${role}-${today}.pdf`;
-      const { error: uploadError } = await supabaseClient.storage
-        .from('price-lists')
-        .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+    const today       = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const storagePath = `${role}-${today}.pdf`;
+    const cacheKey    = storagePath;
+
+    // Second tap in same session: if upload already finished, return publicUrl
+    // instantly (no regeneration, no re-upload); if still in progress, await it.
+    if (_uploadCache.has(cacheKey)) {
+      const cachedUrl = await _uploadCache.get(cacheKey);
+      _dbg({ step: '5-cache-hit', publicUrl: !!cachedUrl });
       console.timeEnd('[PDF] 4-blob+upload');
       console.timeEnd('[PDF] total');
-      if (!uploadError) {
+      return cachedUrl ? { publicUrl: cachedUrl, filename } : { blob, filename };
+    }
+
+    // Return a blob URL to the caller immediately — user sees action sheet in ~3s.
+    // Upload to Supabase Storage in the background; cache the resulting publicUrl
+    // so the next tap in this session is instant.
+    const blobUrl = URL.createObjectURL(blob);
+    _dbg({ step: '5-blob-url-ready', blobUrl: blobUrl.slice(0, 40) });
+
+    const uploadStart = Date.now();
+    const uploadPromise = (async () => {
+      try {
+        onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0, uploadElapsed: 0 });
+        const { error } = await supabaseClient.storage
+          .from('price-lists')
+          .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+        const uploadMs = Date.now() - uploadStart;
+        if (error) {
+          onDebug?.({ step: 'upload-error', error: error.message, uploadMs });
+          return null;
+        }
         const { data: { publicUrl } } = supabaseClient.storage
           .from('price-lists')
           .getPublicUrl(storagePath);
-        return { publicUrl, filename };
+        onDebug?.({ step: 'upload-done', uploadMs, publicUrl: publicUrl.slice(0, 60) });
+        return publicUrl;
+      } catch (e) {
+        onDebug?.({ step: 'upload-exception', error: String(e) });
+        return null;
       }
-    } catch (_) { /* fall through to blob fallback */ }
-    return { blob, filename };
+    })();
+    _uploadCache.set(cacheKey, uploadPromise);
+
+    console.timeEnd('[PDF] 4-blob+upload');
+    console.timeEnd('[PDF] total');
+    _dbg({ step: '6-returning-blob-url', totalMs: Date.now() - _t0 });
+    return { publicUrl: blobUrl, filename };
   }
 
   console.timeEnd('[PDF] 4-blob+upload');

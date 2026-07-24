@@ -1219,6 +1219,8 @@ export default function Store() {
   const [otpVerified, setOtpVerified] = useState(false);
   const [pdfBusy, setPdfBusy]       = useState(false);
   const [pdfViewer, setPdfViewer]   = useState(null); // { url, filename }
+  const [pdfDebug, setPdfDebug]     = useState(null); // debug overlay state
+  const showPdfDebug = searchParams.get('debug') === 'pdf';
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   // Remember category count across reloads to avoid skeleton-count CLS
   const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 12)));
@@ -1559,6 +1561,13 @@ export default function Store() {
         />
       )}
 
+      {/* PDF debug overlay — only visible when ?debug=pdf is in the URL */}
+      {showPdfDebug && pdfDebug && (
+        <div style={{ position: 'fixed', top: 10, left: 10, right: 10, zIndex: 99999, background: 'rgba(0,0,0,0.88)', color: '#39ff14', padding: 14, borderRadius: 10, fontFamily: 'monospace', fontSize: 11, overflowY: 'auto', maxHeight: '80vh', pointerEvents: 'none' }}>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{JSON.stringify(pdfDebug, null, 2)}</pre>
+        </div>
+      )}
+
       {/* ── Hamburger Nav Drawer ── */}
       {navMenuOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1500 }}>
@@ -1605,9 +1614,19 @@ export default function Store() {
                   onClick={async () => {
                     setNavMenuOpen(false);
                     setPdfBusy(true);
+                    const _pdfStart = Date.now();
+                    if (showPdfDebug) setPdfDebug({ started: new Date().toISOString(), steps: [] });
                     try {
-                      const result = await generatePriceListPDF({ role: isDealer ? 'dealer' : 'customer', returnBlob: true });
+                      const result = await generatePriceListPDF({
+                        role: isDealer ? 'dealer' : 'customer',
+                        returnBlob: true,
+                        onDebug: showPdfDebug ? (data) => setPdfDebug(prev => ({
+                          ...prev,
+                          steps: [...(prev?.steps || []), { ...data, wallMs: Date.now() - _pdfStart }],
+                        })) : undefined,
+                      });
                       const url = result.publicUrl ?? URL.createObjectURL(result.blob);
+                      if (showPdfDebug) setPdfDebug(prev => ({ ...prev, actionSheetMs: Date.now() - _pdfStart, url: url.slice(0, 60) }));
                       setPdfViewer({ url, filename: result.filename });
                     } catch (err) {
                       alert('Could not generate PDF: ' + err.message);
@@ -1698,7 +1717,7 @@ export default function Store() {
         }
 
         /* Hero banner */
-        .store-hero { background: linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%); color: #fff; text-align: center; padding: 28px 20px; }
+        .store-hero { background: linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%); color: #fff; text-align: center; padding: 28px 20px; display: flex; flex-direction: column; align-items: center; }
         .store-hero-title { font-weight: 900; font-size: 22px; margin-bottom: 6px; }
         .store-hero-sub { font-size: 15px; opacity: 0.9; margin-bottom: 16px; }
         .store-hero-btn { display: inline-block; background: #fff; color: #7B2D8B; font-weight: 800; font-size: 14px; padding: 10px 24px; border-radius: 24px; cursor: pointer; border: none; font-family: inherit; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
@@ -2012,20 +2031,17 @@ export default function Store() {
             </div>
           </div>
         ) : (
-          /* Non-dealer variant: centered text + Fanman mascot bottom-right */
-          <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '30px 20px' : '0 60px', minHeight: 200 }}>
-            <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0', paddingRight: isMobile ? 80 : 120 }}>
-              <div className="store-hero-title">Welcome to Eltop by Embassy</div>
-              <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
-              <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
-            </div>
-            {/* Fanman mascot — bottom-right, same bounce + cape as dealer hero */}
-            <div style={{ position: 'absolute', bottom: 0, right: isMobile ? 6 : 24, display: 'inline-flex', alignItems: 'flex-end', pointerEvents: 'none', zIndex: 1 }}>
-              {/* Cape SVG trailing left */}
+          /* Non-dealer variant: title → subtitle → button → Fanman centered below */
+          <div className="store-hero">
+            <div className="store-hero-title">Welcome to Eltop by Embassy</div>
+            <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
+            <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+            {/* Fanman mascot — centered below button, same bounce + cape as dealer hero */}
+            <div style={{ display: 'inline-flex', alignItems: 'flex-end', marginTop: 14, position: 'relative' }}>
               <svg
                 className="dealer-hero-cape"
-                width={isMobile ? 80 : 140}
-                height={isMobile ? 60 : 105}
+                width={isMobile ? 90 : 140}
+                height={isMobile ? 65 : 105}
                 viewBox="0 0 240 170"
                 style={{ position: 'absolute', right: 'calc(100% - 28px)', bottom: 0, opacity: 0.92 }}
               >
@@ -2040,13 +2056,12 @@ export default function Store() {
                 <path d="M 40 68 C 24 76, 20 88, 24 100 C 28 108, 36 110, 36 114" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.45" strokeLinecap="round" />
                 <path d="M 36 114 C 20 122, 18 132, 22 140 C 26 148, 38 148, 40 150" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.40" strokeLinecap="round" />
               </svg>
-              {/* Fanman image bouncing */}
               <div className="dealer-hero-fanman">
                 <img
                   src="/assets/fan%20man%20eltop.png"
                   alt="Eltop Fanman"
                   style={{ height: isMobile ? 80 : 115, width: 'auto', display: 'block' }}
-                  onError={e => { e.target.parentElement.parentElement.style.display = 'none'; }}
+                  onError={e => { e.target.parentElement.parentElement.parentElement.style.display = 'none'; }}
                 />
               </div>
             </div>
