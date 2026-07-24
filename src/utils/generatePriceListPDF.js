@@ -27,11 +27,19 @@ const COMPANY = {
   website:  'www.EltopByEmbassy.com',
 };
 
+// ── Module-level asset cache (survives re-generation in same session) ──────
+const _assetCache = new Map();
+
+function cached(key, fn) {
+  if (_assetCache.has(key)) return Promise.resolve(_assetCache.get(key));
+  return fn().then(v => { _assetCache.set(key, v); return v; });
+}
+
 // ── Canvas helpers ─────────────────────────────────────────────────────────
 
 // Crop image to top `frac` fraction (half-body mascot for header)
 async function fetchCropTop(url, frac = 0.62) {
-  return new Promise(resolve => {
+  return cached('cropTop:' + url + frac, () => new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -43,14 +51,14 @@ async function fetchCropTop(url, frac = 0.62) {
     };
     img.onerror = () => resolve(null);
     img.src = url;
-  });
+  }));
 }
 
 // Convert logo to white-on-transparent:
 //   near-white pixels → transparent (bg removal)
 //   all other pixels  → pure white (so red/black text becomes white on coloured bg)
 async function fetchLogoWhite(url) {
-  return new Promise(resolve => {
+  return cached('logoWhite:' + url, () => new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -74,40 +82,47 @@ async function fetchLogoWhite(url) {
     };
     img.onerror = () => resolve(null);
     img.src = url;
+  }));  // closes cached()
+}
+
+// Fetch any URL as base64 (for product thumbnails) — cached per URL
+async function fetchB64(url) {
+  return cached('b64:' + url, async () => {
+    try {
+      const blob = await fetch(url).then(r => r.blob());
+      return new Promise(resolve => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result);
+        r.onerror   = () => resolve(null);
+        r.readAsDataURL(blob);
+      });
+    } catch { return null; }
   });
 }
 
-// Fetch any URL as base64 (for product thumbnails)
-async function fetchB64(url) {
-  try {
-    const blob = await fetch(url).then(r => r.blob());
-    return new Promise(resolve => {
-      const r = new FileReader();
-      r.onloadend = () => resolve(r.result);
-      r.onerror   = () => resolve(null);
-      r.readAsDataURL(blob);
-    });
-  } catch { return null; }
-}
-
-// Load any image URL through a canvas so jsPDF always gets a clean JPEG.
-// Necessary for large RGBA PNGs — jsPDF's raw PNG parser chokes on them.
+// Load image through canvas as JPEG — cached, and scaled to 2× PDF output size.
+// Full-res 3510×2483 canvas was the #1 speed bottleneck (8.7M px → toDataURL).
+// At 144 dpi the collage prints at 186mm → ~1053 px wide; 2× = fine for PDF.
 async function fetchImageAsJpeg(url, bgColor = '#000000') {
-  return new Promise(resolve => {
+  return cached('jpeg:' + url + bgColor, () => new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      // Scale down to max 1400px wide (≈2× 186mm@144dpi) — 11× fewer pixels than full-res
+      const MAX_W = 1400;
+      const scale = Math.min(1, MAX_W / img.naturalWidth);
       const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.width  = Math.round(img.naturalWidth  * scale);
+      c.height = Math.round(img.naturalHeight * scale);
       const ctx = c.getContext('2d');
       ctx.fillStyle = bgColor;
       ctx.fillRect(0, 0, c.width, c.height);
-      ctx.drawImage(img, 0, 0);
-      resolve(c.toDataURL('image/jpeg', 0.92));
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', 0.88));
     };
     img.onerror = () => resolve(null);
     img.src = url;
-  });
+  }));
 }
 
 // ── Misc helpers ───────────────────────────────────────────────────────────
@@ -147,12 +162,26 @@ function setGS(doc, opacity) {
  * @param {boolean} opts.includeDiscountCols
  */
 export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, supabaseClient = supabase }) {
-  // 1. Fetch products
-  const { data, error } = await supabase
-    .from('products')
-    .select('id, name, mrp, dlp, price, standard_packing, unit, hsn_code, category, image_urls, image_url')
-    .order('category', { nullsFirst: false })
-    .order('name');
+  console.time('[PDF] total');
+  console.time('[PDF] 1-products+assets+thumbs (parallel)');
+
+  const origin = window.location.origin;
+
+  // 1+3+4 all in parallel: Supabase query, brand assets, thumbnails start together
+  // (thumbnails can't start until products load, but assets are independent)
+  const [productsResult, eltopLogo, fanmanHalf, fanmanFull, productCollage] = await Promise.all([
+    supabase
+      .from('products')
+      .select('id, name, mrp, dlp, price, standard_packing, unit, hsn_code, category, image_urls, image_url')
+      .order('category', { nullsFirst: false })
+      .order('name'),
+    fetchLogoWhite(origin + '/assets/ELTOP%20LOGO.png'),
+    fetchCropTop(origin + '/assets/fan%20man%20eltop.png', 0.62),
+    fetchB64(origin + '/assets/fan%20man%20eltop.png'),
+    fetchImageAsJpeg(origin + '/assets/PNG%20product.png', '#6B3A73'),
+  ]);
+
+  const { data, error } = productsResult;
   if (error) throw new Error('Could not load products: ' + error.message);
   const products = data || [];
 
@@ -164,7 +193,9 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     catMap.get(cat).push(p);
   }
 
-  // 3. Pre-fetch all thumbnails in parallel
+  // 3. Pre-fetch all thumbnails in parallel (now that products are known)
+  console.timeEnd('[PDF] 1-products+assets+thumbs (parallel)');
+  console.time('[PDF] 2-thumbnails');
   const imageMap = new Map();
   await Promise.all(products.map(async p => {
     const url = getFirstImageUrl(p);
@@ -172,15 +203,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     const b64 = await fetchB64(url);
     if (b64) imageMap.set(p.id, b64);
   }));
-
-  // 4. Fetch brand assets
-  const origin = window.location.origin;
-  const [eltopLogo, fanmanHalf, fanmanFull, productCollage] = await Promise.all([
-    fetchLogoWhite(origin + '/assets/ELTOP%20LOGO.png'),
-    fetchCropTop(origin + '/assets/fan%20man%20eltop.png', 0.62),
-    fetchB64(origin + '/assets/fan%20man%20eltop.png'),
-    fetchImageAsJpeg(origin + '/assets/PNG%20product.png', '#6B3A73'),
-  ]);
+  console.timeEnd('[PDF] 2-thumbnails');
 
   // 5. PDF setup
   const doc  = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
@@ -522,6 +545,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
   }
 
   // ── 7. BUILD PDF ───────────────────────────────────────────────────────────
+  console.time('[PDF] 3-page-drawing');
 
   // PAGE 1: Cover (jsPDF always starts with 1 page)
   drawCoverPage();
@@ -674,6 +698,9 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
   }
 
   // ── 11. Output ────────────────────────────────────────────────────────────
+  console.timeEnd('[PDF] 3-page-drawing');
+  console.time('[PDF] 4-blob+upload');
+
   const label    = role === 'customer' ? 'Customer' : role === 'dealer' ? 'Dealer' : 'Admin';
   const filename = `Eltop-Price-List-${label}-${new Date().getFullYear()}.pdf`;
   const blob     = doc.output('blob');
@@ -687,6 +714,8 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
       const { error: uploadError } = await supabaseClient.storage
         .from('price-lists')
         .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+      console.timeEnd('[PDF] 4-blob+upload');
+      console.timeEnd('[PDF] total');
       if (!uploadError) {
         const { data: { publicUrl } } = supabaseClient.storage
           .from('price-lists')
@@ -697,5 +726,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     return { blob, filename };
   }
 
+  console.timeEnd('[PDF] 4-blob+upload');
+  console.timeEnd('[PDF] total');
   doc.save(filename);
 }
