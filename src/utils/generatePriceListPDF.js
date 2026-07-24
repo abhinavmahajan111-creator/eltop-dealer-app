@@ -179,7 +179,7 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     fetchLogoWhite(origin + '/assets/ELTOP%20LOGO.png'),
     fetchCropTop(origin + '/assets/fan%20man%20eltop.png', 0.62),
     fetchB64(origin + '/assets/fan%20man%20eltop.png'),
-    fetchImageAsJpeg(origin + '/assets/PNG%20product.png', '#000000'),
+    fetchImageAsJpeg(origin + '/assets/PNG%20product.png', '#6B3A73'),
   ]);
 
   // 5. PDF setup
@@ -298,12 +298,12 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
     cy += 16;
 
-    // Product collage — flush above tagline, no box/frame
+    // Product collage — anchored to year text above and tagline below
     if (productCollage) {
-      const imgW = PW - ML - MR;  // 186mm full content width
-      const imgH = 118;
       const imgX = ML;
-      const imgY = PH - 32 - 10 - imgH;  // 10mm gap between image bottom and tagline
+      const imgW = PW - ML - MR;
+      const imgY = cy + 4;               // 4mm gap below year text
+      const imgH = (PH - 32 - 6) - imgY; // fills to 6mm above tagline
       doc.addImage(productCollage, 'JPEG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
     }
 
