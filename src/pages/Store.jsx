@@ -2012,12 +2012,43 @@ export default function Store() {
             </div>
           </div>
         ) : (
-          /* Non-dealer variant: unchanged */
+          /* Non-dealer variant: centered text + Fanman mascot bottom-right */
           <div style={{ background: 'linear-gradient(135deg, #7B2D8B 0%, #9B4DB8 100%)', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: isMobile ? '30px 20px' : '0 60px', minHeight: 200 }}>
-            <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0' }}>
+            <div style={{ flex: 1, textAlign: 'center', zIndex: 2, padding: '30px 0', paddingRight: isMobile ? 80 : 120 }}>
               <div className="store-hero-title">Welcome to Eltop by Embassy</div>
               <div className="store-hero-sub">✨ Sign up &amp; get Flat 15% OFF on your first order!</div>
               <button className="store-hero-btn" onClick={() => navigate("/login")}>Claim 15% Discount →</button>
+            </div>
+            {/* Fanman mascot — bottom-right, same bounce + cape as dealer hero */}
+            <div style={{ position: 'absolute', bottom: 0, right: isMobile ? 6 : 24, display: 'inline-flex', alignItems: 'flex-end', pointerEvents: 'none', zIndex: 1 }}>
+              {/* Cape SVG trailing left */}
+              <svg
+                className="dealer-hero-cape"
+                width={isMobile ? 80 : 140}
+                height={isMobile ? 60 : 105}
+                viewBox="0 0 240 170"
+                style={{ position: 'absolute', right: 'calc(100% - 28px)', bottom: 0, opacity: 0.92 }}
+              >
+                <defs>
+                  <linearGradient id="capeGradHero" x1="240" y1="85" x2="0" y2="85" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#E8A800" />
+                    <stop offset="55%" stopColor="#FFC93C" />
+                    <stop offset="100%" stopColor="#FFF3B0" />
+                  </linearGradient>
+                </defs>
+                <path d="M 232 28 C 185 32, 120 36, 75 42 C 55 48, 44 54, 42 58 C 42 66, 10 70, 10 84 C 10 96, 30 100, 30 106 C 30 114, 8 118, 10 128 C 12 138, 36 140, 38 146 C 38 150, 22 152, 28 156 C 34 160, 58 160, 65 155 C 105 150, 158 146, 192 142 C 212 139, 226 135, 232 132 Z" fill="url(#capeGradHero)" />
+                <path d="M 40 68 C 24 76, 20 88, 24 100 C 28 108, 36 110, 36 114" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.45" strokeLinecap="round" />
+                <path d="M 36 114 C 20 122, 18 132, 22 140 C 26 148, 38 148, 40 150" fill="none" stroke="#B07000" strokeWidth="1.5" strokeOpacity="0.40" strokeLinecap="round" />
+              </svg>
+              {/* Fanman image bouncing */}
+              <div className="dealer-hero-fanman">
+                <img
+                  src="/assets/fan%20man%20eltop.png"
+                  alt="Eltop Fanman"
+                  style={{ height: isMobile ? 80 : 115, width: 'auto', display: 'block' }}
+                  onError={e => { e.target.parentElement.parentElement.style.display = 'none'; }}
+                />
+              </div>
             </div>
           </div>
         )
