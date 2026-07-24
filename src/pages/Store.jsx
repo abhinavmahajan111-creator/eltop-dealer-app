@@ -1582,6 +1582,28 @@ export default function Store() {
                   {label}
                 </button>
               ))}
+              {(isCustomer || isDealer) && (
+                <button
+                  onClick={async () => {
+                    setNavMenuOpen(false);
+                    setPdfBusy(true);
+                    try {
+                      const result = await generatePriceListPDF({ role: isDealer ? 'dealer' : 'customer', returnBlob: true });
+                      const blobUrl = URL.createObjectURL(result.blob);
+                      setPdfViewer({ blobUrl, filename: result.filename });
+                    } catch (err) {
+                      alert('Could not generate PDF: ' + err.message);
+                    } finally {
+                      setPdfBusy(false);
+                    }
+                  }}
+                  disabled={pdfBusy}
+                  style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', border: 'none', borderBottom: '1px solid #f0f0f0', background: 'none', textAlign: 'left', cursor: pdfBusy ? 'wait' : 'pointer', fontSize: 15, fontWeight: 600, fontFamily: 'inherit', color: '#1e293b', width: '100%', opacity: pdfBusy ? 0.6 : 1 }}
+                >
+                  <span style={{ fontSize: 20, width: 26, textAlign: 'center', flexShrink: 0 }}>⬇</span>
+                  {pdfBusy ? 'Generating…' : 'Price List PDF'}
+                </button>
+              )}
             </div>
 
             {/* Contact block pinned to bottom */}
@@ -1631,12 +1653,11 @@ export default function Store() {
         .btn-login-primary { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-login { background: none; border: 1.5px solid #7B2D8B; border-radius: 8px; color: #7B2D8B; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: none; padding: 7px 12px; }
         .btn-dealer-logout { background: none; border: 1.5px solid #dc2626; border-radius: 8px; color: #dc2626; font-weight: 700; font-size: 13px; padding: 7px 12px; cursor: pointer; white-space: nowrap; font-family: inherit; }
-        .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 0; position: relative; flex-shrink: 0; width: 34px; }
+        .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0; position: relative; flex-shrink: 0; width: 36px; }
         .btn-login-split { display: none; flex-direction: column; gap: 3px; flex-shrink: 0; }
         .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-login-split-signup { background: transparent; border: 1.5px solid #7B2D8B; border-radius: 6px; color: #7B2D8B; font-size: 10px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-trigger { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 7px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
-        .btn-pricelist { flex-shrink: 0; white-space: nowrap; font-family: inherit; }
         .store-hi-wrap { position: relative; }
         .dealer-logout-in-menu { display: none; }
         @media (max-width: 639px) {
@@ -1646,16 +1667,13 @@ export default function Store() {
           .btn-login-split   { display: flex; }
           /* actions: flex: 1 so it takes space left of logo, then distributes internally */
           .store-header-actions { flex: 1; min-width: 0; gap: 6px; justify-content: flex-end; }
-          /* Hi wrapper: fills space between Price List and Cart */
+          /* Hi wrapper: fills remaining space with truncation */
           .store-hi-wrap { flex: 1; min-width: 0; }
           .store-hi-wrap > .btn-dealer-trigger {
             width: 100%; max-width: none; box-sizing: border-box;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-            font-size: 11px; padding: 5px 8px;
+            font-size: 12px; padding: 6px 10px;
           }
-          /* Price List: icon only, no label text */
-          .btn-pricelist-label { display: none; }
-          .btn-pricelist { padding: 6px 9px !important; }
           .dealer-logout-in-menu { display: block; }
           .store-logo-eltop  { height: 24px; max-width: 72px; }
           .store-logo-embassy { height: 24px; max-width: 90px; }
@@ -1724,7 +1742,7 @@ export default function Store() {
         .store-skeleton { border-radius: 10px; background: #e2e8f0; animation: pulse 1.4s ease infinite; }
         .cat-skeleton { border-radius: 14px; background: #e2e8f0; animation: pulse 1.4s ease infinite; height: 200px; }
         @media (max-width: 639px) { .cat-skeleton { height: 160px; } }
-        .store-nav-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; flex-shrink: 0; }
+        .store-nav-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0; flex-shrink: 0; width: 36px; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 
         /* Back button */
@@ -1772,42 +1790,6 @@ export default function Store() {
 
             {/* Actions */}
             <div className="store-header-actions">
-              {/* Price List download — visible for all logged-in users */}
-              {(isCustomer || isDealer) && (
-                <button
-                  className="btn-pricelist"
-                  onClick={async () => {
-                    setPdfBusy(true);
-                    try {
-                      const result = await generatePriceListPDF({
-                        role: isDealer ? 'dealer' : 'customer',
-                        returnBlob: true,
-                      });
-                      const blobUrl = URL.createObjectURL(result.blob);
-                      setPdfViewer({ blobUrl, filename: result.filename });
-                    } catch (err) {
-                      alert('Could not generate PDF: ' + err.message);
-                    } finally {
-                      setPdfBusy(false);
-                    }
-                  }}
-                  disabled={pdfBusy}
-                  style={{
-                    background: 'none',
-                    border: '1.5px solid #7B2D8B',
-                    color: '#7B2D8B',
-                    borderRadius: 8,
-                    padding: '7px 12px',
-                    cursor: pdfBusy ? 'wait' : 'pointer',
-                    fontWeight: 700,
-                    fontSize: 13,
-                    opacity: pdfBusy ? 0.6 : 1,
-                  }}
-                  title="Download Price List PDF"
-                >
-                  {pdfBusy ? '…' : <span>⬇<span className="btn-pricelist-label"> Price List</span></span>}
-                </button>
-              )}
               {isCustomer ? (
                 // ── Logged-in customer: Hi, {name} dropdown ──
                 <div ref={accountMenuRef} className="store-hi-wrap">
@@ -1916,8 +1898,8 @@ export default function Store() {
                 </>
               )}
               <button className="store-cart-btn" onClick={() => setCartOpen(true)}>
-                <span style={{ fontSize: 22 }}>🛒</span>
-                <span style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 700 }}>Cart</span>
+                <span style={{ fontSize: 20, lineHeight: 1 }}>🛒</span>
+                <span style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700 }}>Cart</span>
                 {cart.count > 0 && (
                   <span style={{ position: "absolute", top: 0, right: 4, background: "#F59E0B", color: "#1e293b", fontSize: 10, fontWeight: 900, minWidth: 18, height: 18, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
                     {cart.count}
@@ -1927,7 +1909,7 @@ export default function Store() {
               {/* Hamburger nav menu */}
               <button className="store-nav-btn" onClick={() => setNavMenuOpen(true)} aria-label="Menu">
                 <span style={{ fontSize: 20, lineHeight: 1 }}>☰</span>
-                <span style={{ fontSize: 10, fontWeight: 700 }}>Menu</span>
+                <span style={{ fontSize: 11, fontWeight: 700 }}>Menu</span>
               </button>
             </div>
           </div>
