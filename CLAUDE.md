@@ -286,6 +286,27 @@ be asked. The page replaces ad-hoc SQL queries for routine reconciliation.
 
 ---
 
+## Regression Checklist — run after EVERY commit/deploy
+
+After completing the specific fix, ALSO quickly re-check these 6 core flows (visual/logical trace is
+acceptable for unrelated changes; explicitly say "checklist skipped because X" if truly not possible
+— do NOT silently omit it):
+
+1. **Guest checkout** — cart → checkout → payment (no login required)
+2. **Customer login (OTP)** — Store → OTP → My Account
+3. **Dealer/Channel Partner login (OTP)** — Store → OTP → Dashboard; ALSO trace the
+   **pending-application dealer** path (is_dealer=true but dealer_application_status != 'Approved')
+   — should show a meaningful state, NOT "No dealer account found"
+4. **Header layout (mobile 375–430px)** — no overflow or clipping
+5. **Cart drawer open/close**
+6. **Price List PDF** — no error, expected speed (~1s if cache hit, ~3–5s if fallback generate)
+
+**If the current change logically touches any of these flows**, trace that flow in full and state the
+result explicitly. If the change is completely unrelated to a flow, one sentence ("Flow N: not
+touched by this change — no regression risk") is sufficient.
+
+---
+
 ## Still requires human testing (Claude Code cannot verify these itself)
 
 Always end a non-trivial change with a short "please verify in browser" checklist covering:
