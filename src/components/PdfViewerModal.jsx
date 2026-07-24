@@ -48,7 +48,9 @@ export default function PdfViewerModal({ blobUrl, filename, onClose }) {
     const a = document.createElement('a');
     a.href = blobUrl;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
   }
 
   const canShareFiles = typeof navigator.canShare === 'function';

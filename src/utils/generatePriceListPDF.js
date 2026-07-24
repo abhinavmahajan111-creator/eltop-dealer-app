@@ -298,15 +298,12 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     doc.text(String(year), PW / 2, cy + 8, { align: 'center' });
     cy += 16;
 
-    // Product collage image — full-width, centred in the remaining middle space
+    // Product collage — flush above tagline, no box/frame
     if (productCollage) {
-      const imgW = PW - ML - MR;  // 186mm — full content width
-      const imgH = 118;           // fixed height; image is wide landscape collage
+      const imgW = PW - ML - MR;  // 186mm full content width
+      const imgH = 118;
       const imgX = ML;
-      const imgY = cy + 4;
-      // Subtle rounded-rect white border to separate black image from dark bg
-      doc.setFillColor(80, 40, 95);
-      doc.roundedRect(imgX - 2, imgY - 2, imgW + 4, imgH + 4, 4, 4, 'F');
+      const imgY = PH - 32 - 10 - imgH;  // 10mm gap between image bottom and tagline
       doc.addImage(productCollage, 'JPEG', imgX, imgY, imgW, imgH, 'product-collage', 'FAST');
     }
 

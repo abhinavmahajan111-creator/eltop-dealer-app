@@ -12,23 +12,33 @@ function fmtDateOnly(s) {
   return new Date(s).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 function StatCard({ label, value, sub, onClick, active }) {
+  const [pressed, setPressed] = useState(false);
   return (
     <div
       onClick={onClick}
+      onPointerDown={() => onClick && setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
       style={{
-        background: active ? "#7B2D8B" : "#fff",
+        background: active ? "#7B2D8B" : pressed ? "#f5eefb" : "#fff",
         borderRadius: 12,
-        padding: "16px 18px",
+        padding: "14px 14px 12px",
         boxShadow: active ? "0 4px 16px rgba(123,45,139,.25)" : "0 2px 8px rgba(0,0,0,.06)",
-        minWidth: 130,
+        minWidth: 0,
         cursor: onClick ? "pointer" : "default",
-        border: active ? "2px solid #7B2D8B" : "2px solid transparent",
-        transition: "all 0.15s",
+        border: active ? "2px solid #7B2D8B" : pressed ? "2px solid #7B2D8B" : "2px solid transparent",
+        transition: "all 0.12s",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
       }}
     >
-      <div style={{ fontSize: 11, color: active ? "rgba(255,255,255,0.75)" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: active ? "#fff" : "#DC2626" }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: active ? "rgba(255,255,255,0.7)" : "#94a3b8", marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: 10, color: active ? "rgba(255,255,255,0.75)" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: active ? "#fff" : "#DC2626" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: active ? "rgba(255,255,255,0.7)" : "#94a3b8", marginTop: 2 }}>{sub}</div>}
+      {onClick && (
+        <div style={{ position: "absolute", top: "50%", right: 10, transform: "translateY(-50%)", color: active ? "rgba(255,255,255,0.6)" : "#cbd5e1", fontSize: 14, lineHeight: 1 }}>›</div>
+      )}
     </div>
   );
 }
@@ -231,24 +241,28 @@ export default function MyAccount() {
         }
       `}</style>
 
-      {/* Header */}
-      <div style={{ background: "#7B2D8B", color: "#fff", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16 }}>
-        <button
-          onClick={() => navigate("/store")}
-          style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}
-        >
-          ← Back to Store
-        </button>
-        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
-          <div style={{ fontWeight: 700, fontSize: 17 }}>{customerName}</div>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>{email}</div>
+      {/* Header — two rows */}
+      <div style={{ background: "#7B2D8B", color: "#fff", padding: "14px 20px 12px" }}>
+        {/* Row 1: name + email */}
+        <div style={{ marginBottom: 10, overflowWrap: "break-word", wordBreak: "break-all" }}>
+          <div style={{ fontWeight: 700, fontSize: 17, lineHeight: 1.3 }}>{customerName}</div>
+          <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>{email}</div>
         </div>
-        <button
-          onClick={async () => { await signOut(); navigate("/store"); }}
-          style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}
-        >
-          Logout
-        </button>
+        {/* Row 2: Back (left) + Logout (right) */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <button
+            onClick={() => navigate("/store")}
+            style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+          >
+            ← Back to Store
+          </button>
+          <button
+            onClick={async () => { await signOut(); navigate("/store"); }}
+            style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontWeight: 600, fontSize: 12, fontFamily: "inherit" }}
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -489,29 +503,28 @@ export default function MyAccount() {
         {/* TAB 1: OVERVIEW */}
         {tab === 1 && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-              <StatCard label="Total Orders"    value={orders.length} />
-              <StatCard label="Total Spent"     value={`₹${fmt(totalRevenue)}`} />
-              <StatCard label="Avg Order Value" value={`₹${fmt(avgOrder)}`} />
-              <StatCard label="Last Order"      value={lastOrder} />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 20 }}>
+              <StatCard label="Total Orders"    value={orders.length}          onClick={() => setTab(0)} />
+              <StatCard label="Total Spent"     value={`₹${fmt(totalRevenue)}`} onClick={() => setTab(0)} />
+              <StatCard label="Avg Order Value" value={`₹${fmt(avgOrder)}`}    onClick={() => setTab(0)} />
+              <StatCard label="Last Order"      value={lastOrder}
+                onClick={() => { setTab(0); if (orders[0]) setExpandedOrderId(orders[0].id); }} />
             </div>
             <div style={card}>
-              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>Account Details</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px" }}>
-                {[
-                  ["Name",         customerName],
-                  ["Email",        email || "—"],
-                  ["Account Type", "Verified Customer"],
-                  ["Payment",      "Prepaid (Razorpay)"],
-                  ["First Order",  orders.length ? fmtDateOnly(orders[orders.length - 1].created_at) : "—"],
-                  ["Member Since", orders.length ? fmtDateOnly(orders[orders.length - 1].created_at) : "—"],
-                ].map(([l, v]) => (
-                  <div key={l}>
-                    <div style={lbl}>{l}</div>
-                    <div style={val}>{v}</div>
-                  </div>
-                ))}
-              </div>
+              <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 14 }}>Account Details</div>
+              {[
+                ["Name",         customerName],
+                ["Email",        email || "—"],
+                ["Account Type", "Verified Customer"],
+                ["Payment",      "Prepaid (Razorpay)"],
+                ["First Order",  orders.length ? fmtDateOnly(orders[orders.length - 1].created_at) : "—"],
+                ["Member Since", orders.length ? fmtDateOnly(orders[orders.length - 1].created_at) : "—"],
+              ].map(([l, v], i) => (
+                <div key={l} style={{ paddingTop: 12, paddingBottom: 12, borderTop: i === 0 ? "none" : "0.5px solid #e2e8f0", marginTop: i === 0 ? 8 : 0 }}>
+                  <div style={lbl}>{l}</div>
+                  <div style={{ ...val, overflowWrap: "break-word", wordBreak: "break-all" }}>{v}</div>
+                </div>
+              ))}
             </div>
           </>
         )}

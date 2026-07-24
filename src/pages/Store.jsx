@@ -1631,18 +1631,31 @@ export default function Store() {
         .btn-login-primary { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-login { background: none; border: 1.5px solid #7B2D8B; border-radius: 8px; color: #7B2D8B; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; text-decoration: none; padding: 7px 12px; }
         .btn-dealer-logout { background: none; border: 1.5px solid #dc2626; border-radius: 8px; color: #dc2626; font-weight: 700; font-size: 13px; padding: 7px 12px; cursor: pointer; white-space: nowrap; font-family: inherit; }
-        .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 8px; position: relative; flex-shrink: 0; }
+        .store-cart-btn { background: none; border: none; color: #7B2D8B; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 2px 0; position: relative; flex-shrink: 0; width: 34px; }
         .btn-login-split { display: none; flex-direction: column; gap: 3px; flex-shrink: 0; }
         .btn-login-split-login { background: #7B2D8B; border: none; border-radius: 6px; color: #fff; font-weight: 700; font-size: 10px; padding: 4px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-login-split-signup { background: transparent; border: 1.5px solid #7B2D8B; border-radius: 6px; color: #7B2D8B; font-size: 10px; font-weight: 600; padding: 3px 8px; cursor: pointer; white-space: nowrap; font-family: inherit; }
         .btn-dealer-trigger { background: #7B2D8B; border: none; border-radius: 8px; color: #fff; font-weight: 700; font-size: 13px; padding: 7px 14px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+        .btn-pricelist { flex-shrink: 0; white-space: nowrap; font-family: inherit; }
+        .store-hi-wrap { position: relative; }
         .dealer-logout-in-menu { display: none; }
         @media (max-width: 639px) {
           .btn-login-primary { display: none; }
           .btn-dealer-login  { display: none; }
           .btn-dealer-logout { display: none; }
           .btn-login-split   { display: flex; }
-          .btn-dealer-trigger { font-size: 11px; padding: 5px 8px; max-width: 108px; overflow: hidden; text-overflow: ellipsis; }
+          /* actions: flex: 1 so it takes space left of logo, then distributes internally */
+          .store-header-actions { flex: 1; min-width: 0; gap: 6px; justify-content: flex-end; }
+          /* Hi wrapper: fills space between Price List and Cart */
+          .store-hi-wrap { flex: 1; min-width: 0; }
+          .store-hi-wrap > .btn-dealer-trigger {
+            width: 100%; max-width: none; box-sizing: border-box;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-size: 11px; padding: 5px 8px;
+          }
+          /* Price List: icon only, no label text */
+          .btn-pricelist-label { display: none; }
+          .btn-pricelist { padding: 6px 9px !important; }
           .dealer-logout-in-menu { display: block; }
           .store-logo-eltop  { height: 24px; max-width: 72px; }
           .store-logo-embassy { height: 24px; max-width: 90px; }
@@ -1762,6 +1775,7 @@ export default function Store() {
               {/* Price List download — visible for all logged-in users */}
               {(isCustomer || isDealer) && (
                 <button
+                  className="btn-pricelist"
                   onClick={async () => {
                     setPdfBusy(true);
                     try {
@@ -1787,17 +1801,16 @@ export default function Store() {
                     cursor: pdfBusy ? 'wait' : 'pointer',
                     fontWeight: 700,
                     fontSize: 13,
-                    whiteSpace: 'nowrap',
                     opacity: pdfBusy ? 0.6 : 1,
                   }}
                   title="Download Price List PDF"
                 >
-                  {pdfBusy ? '...' : '⬇ Price List'}
+                  {pdfBusy ? '…' : <span>⬇<span className="btn-pricelist-label"> Price List</span></span>}
                 </button>
               )}
               {isCustomer ? (
                 // ── Logged-in customer: Hi, {name} dropdown ──
-                <div ref={accountMenuRef} style={{ position: "relative" }}>
+                <div ref={accountMenuRef} className="store-hi-wrap">
                   <button
                     onClick={() => setAccountMenuOpen(v => !v)}
                     className="btn-dealer-trigger"
@@ -1832,7 +1845,7 @@ export default function Store() {
               ) : isDealer ? (
                 // ── Logged-in dealer browsing /store: dropdown + Logout ──
                 <>
-                  <div ref={dealerMenuRef} style={{ position: "relative" }}>
+                  <div ref={dealerMenuRef} className="store-hi-wrap">
                     <button
                       onClick={() => setDealerMenuOpen(v => !v)}
                       className="btn-dealer-trigger"
