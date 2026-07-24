@@ -1200,7 +1200,7 @@ export default function Store() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [pdfBusy, setPdfBusy]       = useState(false);
-  const [pdfViewer, setPdfViewer]   = useState(null); // { blobUrl, filename }
+  const [pdfViewer, setPdfViewer]   = useState(null); // { url, filename }
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   // Remember category count across reloads to avoid skeleton-count CLS
   const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 12)));
@@ -1535,9 +1535,9 @@ export default function Store() {
     <div className="store-root" ref={containerRef}>
       {pdfViewer && (
         <PdfViewerModal
-          blobUrl={pdfViewer.blobUrl}
+          url={pdfViewer.url}
           filename={pdfViewer.filename}
-          onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
+          onClose={() => setPdfViewer(null)}
         />
       )}
 
@@ -1589,8 +1589,8 @@ export default function Store() {
                     setPdfBusy(true);
                     try {
                       const result = await generatePriceListPDF({ role: isDealer ? 'dealer' : 'customer', returnBlob: true });
-                      const blobUrl = URL.createObjectURL(result.blob);
-                      setPdfViewer({ blobUrl, filename: result.filename });
+                      const url = result.publicUrl ?? URL.createObjectURL(result.blob);
+                      setPdfViewer({ url, filename: result.filename });
                     } catch (err) {
                       alert('Could not generate PDF: ' + err.message);
                     } finally {

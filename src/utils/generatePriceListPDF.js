@@ -146,7 +146,7 @@ function setGS(doc, opacity) {
  * @param {Array<{id:number,pct:number}>} opts.discountCols
  * @param {boolean} opts.includeDiscountCols
  */
-export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false }) {
+export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, supabaseClient = supabase }) {
   // 1. Fetch products
   const { data, error } = await supabase
     .from('products')
@@ -659,8 +659,26 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
   // ── 11. Output ────────────────────────────────────────────────────────────
   const label    = role === 'customer' ? 'Customer' : role === 'dealer' ? 'Dealer' : 'Admin';
   const filename = `Eltop-Price-List-${label}-${new Date().getFullYear()}.pdf`;
+  const blob     = doc.output('blob');
+
   if (returnBlob) {
-    return { blob: doc.output('blob'), filename };
+    // Try to upload to Supabase Storage and return a public HTTPS URL.
+    // Falls back to blob URL if upload fails (e.g. no bucket yet).
+    try {
+      const today       = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const storagePath = `${role}-${today}.pdf`;
+      const { error: uploadError } = await supabaseClient.storage
+        .from('price-lists')
+        .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+      if (!uploadError) {
+        const { data: { publicUrl } } = supabaseClient.storage
+          .from('price-lists')
+          .getPublicUrl(storagePath);
+        return { publicUrl, filename };
+      }
+    } catch (_) { /* fall through to blob fallback */ }
+    return { blob, filename };
   }
+
   doc.save(filename);
 }
