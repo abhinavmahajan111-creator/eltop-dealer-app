@@ -1617,8 +1617,27 @@ export default function Store() {
                     const _pdfStart = Date.now();
                     if (showPdfDebug) setPdfDebug({ started: new Date().toISOString(), steps: [] });
                     try {
+                      const pdfRole = isDealer ? 'dealer' : 'customer';
+                      const label   = pdfRole === 'dealer' ? 'Dealer' : 'Customer';
+                      const filename = `Eltop-Price-List-${label}-${new Date().getFullYear()}.pdf`;
+
+                      // Fast path: check pre-generated file in price_list_cache
+                      const { data: cached } = await supabase
+                        .from('price_list_cache')
+                        .select('public_url')
+                        .eq('role', pdfRole)
+                        .maybeSingle();
+
+                      if (cached?.public_url) {
+                        if (showPdfDebug) setPdfDebug(prev => ({ ...prev, source: 'cache', actionSheetMs: Date.now() - _pdfStart, url: cached.public_url.slice(0, 60) }));
+                        setPdfViewer({ url: cached.public_url, filename });
+                        return;
+                      }
+
+                      // Fallback: generate on-the-fly (first use / cache miss)
+                      if (showPdfDebug) setPdfDebug(prev => ({ ...prev, source: 'generating' }));
                       const result = await generatePriceListPDF({
-                        role: isDealer ? 'dealer' : 'customer',
+                        role: pdfRole,
                         returnBlob: true,
                         onDebug: showPdfDebug ? (data) => setPdfDebug(prev => ({
                           ...prev,
@@ -1629,7 +1648,7 @@ export default function Store() {
                       if (showPdfDebug) setPdfDebug(prev => ({ ...prev, actionSheetMs: Date.now() - _pdfStart, url: url.slice(0, 60) }));
                       setPdfViewer({ url, filename: result.filename });
                     } catch (err) {
-                      alert('Could not generate PDF: ' + err.message);
+                      alert('Could not load Price List: ' + err.message);
                     } finally {
                       setPdfBusy(false);
                     }

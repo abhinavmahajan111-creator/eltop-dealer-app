@@ -166,7 +166,7 @@ function setGS(doc, opacity) {
  * @param {Array<{id:number,pct:number}>} opts.discountCols
  * @param {boolean} opts.includeDiscountCols
  */
-export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, supabaseClient = supabase, onDebug }) {
+export async function generatePriceListPDF({ role = 'customer', discountCols = [], includeDiscountCols = false, returnBlob = false, waitForUpload = false, supabaseClient = supabase, onDebug }) {
   const _t0 = Date.now();
   const _dbg = (extra) => onDebug?.({ elapsed: Date.now() - _t0, ...extra });
 
@@ -718,30 +718,24 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
   const blob     = doc.output('blob');
 
   if (returnBlob) {
-    const today       = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const storagePath = `${role}-${today}.pdf`;
-    const cacheKey    = storagePath;
+    // Fixed storage path — admin regeneration always overwrites the same file,
+    // so customers always hit the latest version.
+    const storagePath = `${role}-latest.pdf`;
 
-    // Second tap in same session: if upload already finished, return publicUrl
-    // instantly (no regeneration, no re-upload); if still in progress, await it.
-    if (_uploadCache.has(cacheKey)) {
-      const cachedUrl = await _uploadCache.get(cacheKey);
+    // Session-level upload cache: avoid re-uploading if tapped again in same session.
+    if (_uploadCache.has(storagePath)) {
+      const cachedUrl = await _uploadCache.get(storagePath);
       _dbg({ step: '5-cache-hit', publicUrl: !!cachedUrl });
       console.timeEnd('[PDF] 4-blob+upload');
       console.timeEnd('[PDF] total');
       return cachedUrl ? { publicUrl: cachedUrl, filename } : { blob, filename };
     }
 
-    // Return a blob URL to the caller immediately — user sees action sheet in ~3s.
-    // Upload to Supabase Storage in the background; cache the resulting publicUrl
-    // so the next tap in this session is instant.
-    const blobUrl = URL.createObjectURL(blob);
-    _dbg({ step: '5-blob-url-ready', blobUrl: blobUrl.slice(0, 40) });
-
+    // Core upload logic — shared between immediate (waitForUpload) and background paths.
     const uploadStart = Date.now();
-    const uploadPromise = (async () => {
+    async function doUpload() {
       try {
-        onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0, uploadElapsed: 0 });
+        onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0 });
         const { error } = await supabaseClient.storage
           .from('price-lists')
           .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
@@ -753,15 +747,35 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
         const { data: { publicUrl } } = supabaseClient.storage
           .from('price-lists')
           .getPublicUrl(storagePath);
+        // Upsert into price_list_cache so Store.jsx lookup works instantly next time.
+        await supabaseClient.from('price_list_cache').upsert({
+          role,
+          storage_path: storagePath,
+          public_url:   publicUrl,
+          generated_at: new Date().toISOString(),
+        }, { onConflict: 'role' });
         onDebug?.({ step: 'upload-done', uploadMs, publicUrl: publicUrl.slice(0, 60) });
         return publicUrl;
       } catch (e) {
         onDebug?.({ step: 'upload-exception', error: String(e) });
         return null;
       }
-    })();
-    _uploadCache.set(cacheKey, uploadPromise);
+    }
 
+    if (waitForUpload) {
+      // Admin regeneration: block until upload + cache upsert finish, return real HTTPS URL.
+      const publicUrl = await doUpload();
+      _uploadCache.set(storagePath, Promise.resolve(publicUrl));
+      console.timeEnd('[PDF] 4-blob+upload');
+      console.timeEnd('[PDF] total');
+      return publicUrl ? { publicUrl, filename } : { blob, filename };
+    }
+
+    // Store.jsx fallback: return blob URL immediately, upload in background.
+    const blobUrl = URL.createObjectURL(blob);
+    _dbg({ step: '5-blob-url-ready' });
+    const uploadPromise = doUpload();
+    _uploadCache.set(storagePath, uploadPromise);
     console.timeEnd('[PDF] 4-blob+upload');
     console.timeEnd('[PDF] total');
     _dbg({ step: '6-returning-blob-url', totalMs: Date.now() - _t0 });

@@ -835,6 +835,28 @@ export default function AdminProducts() {
   const [includePdfDiscountCols, setIncludePdfDiscountCols] = useState(false);
   const [pdfViewer,              setPdfViewer]              = useState(null); // { blobUrl, filename }
 
+  // ── Regenerate Price Lists (pre-generate for customers + dealers) ─────────
+  const [regenBusy,    setRegenBusy]    = useState(false);
+  const [regenStatus,  setRegenStatus]  = useState(null); // { ok, message, at }
+
+  async function handleRegenerate() {
+    setRegenBusy(true);
+    setRegenStatus(null);
+    try {
+      // Generate customer + dealer PDFs in parallel, upload + upsert cache (waitForUpload=true)
+      const [custResult, dealerResult] = await Promise.all([
+        generatePriceListPDF({ role: 'customer', returnBlob: true, waitForUpload: true }),
+        generatePriceListPDF({ role: 'dealer',   returnBlob: true, waitForUpload: true }),
+      ]);
+      const ok = !!(custResult.publicUrl && dealerResult.publicUrl);
+      setRegenStatus({ ok, at: new Date() });
+    } catch (err) {
+      setRegenStatus({ ok: false, error: err.message, at: new Date() });
+    } finally {
+      setRegenBusy(false);
+    }
+  }
+
   const addDiscountCol = () => {
     const pct = parseFloat(pendingPct);
     if (isNaN(pct) || pct <= 0 || pct >= 100) return;
@@ -1251,6 +1273,24 @@ export default function AdminProducts() {
               >
                 {pdfBusy ? '...' : '⬇ Price List'}
               </button>
+              <button
+                onClick={handleRegenerate}
+                disabled={regenBusy}
+                title="Pre-generate customer + dealer PDFs so customers get instant access"
+                style={{
+                  background: regenBusy ? '#f3e8ff' : '#7B2D8B',
+                  border: 'none',
+                  color: regenBusy ? '#7B2D8B' : '#fff',
+                  borderRadius: 8,
+                  padding: '7px 12px',
+                  cursor: regenBusy ? 'wait' : 'pointer',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {regenBusy ? '⏳ Generating…' : '🔄 Regenerate PDFs'}
+              </button>
               <button className="btn" onClick={() => setFormOpen(true)}>
                 + Add Product
               </button>
@@ -1258,6 +1298,27 @@ export default function AdminProducts() {
           )}
         </div>
       </div>
+
+      {/* ── Regenerate status banner ── */}
+      {regenStatus && (
+        <div style={{
+          margin: '0 0 12px',
+          padding: '10px 16px',
+          borderRadius: 8,
+          background: regenStatus.ok ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${regenStatus.ok ? '#86efac' : '#fca5a5'}`,
+          color: regenStatus.ok ? '#166534' : '#991b1b',
+          fontSize: 13, fontWeight: 600,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span>
+            {regenStatus.ok
+              ? `✅ Price lists updated — ${Math.round((Date.now() - regenStatus.at) / 1000)}s ago. Customers will now get instant PDF access.`
+              : `❌ Regeneration failed: ${regenStatus.error}`}
+          </span>
+          <button onClick={() => setRegenStatus(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: 'inherit', padding: '0 4px' }}>×</button>
+        </div>
+      )}
 
       {/* ── PDF discount-col toggle (only when discount cols are active and form is closed) ── */}
       {!form.id && !formOpen && discountCols.length > 0 && (
