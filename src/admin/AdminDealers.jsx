@@ -255,6 +255,11 @@ export default function AdminDealers() {
   const typeDropdownPortalRef = useRef(null);  // ref on the portal div — kept out of the <th> DOM tree
   const [deletedGuests, setDeletedGuests]     = useState([]);
 
+  // ── Bulk-edit state ──────────────────────────────────────────────────────────
+  const [selectedRows, setSelectedRows] = useState(new Set()); // Set of profile IDs
+  const [bulkStatus,   setBulkStatus]   = useState('approved');
+  const [bulkBusy,     setBulkBusy]     = useState(false);
+
   useEffect(() => {
     if (!location.state?.resetAt) return;
     setTypeFilter('all');
@@ -766,15 +771,34 @@ export default function AdminDealers() {
   };
 
   const handleChangeAppStatus = async (newStatus, profileId = selected?.id) => {
-    // Approval grants login access; any other status revokes it.
     const isDealerNow = newStatus === 'approved';
     const { error } = await supabase.from('profiles')
       .update({ dealer_application_status: newStatus, is_dealer: isDealerNow })
       .eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); return; }
-    const updated = { ...selected, dealer_application_status: newStatus, is_dealer: isDealerNow };
-    setSelected(updated);
-    setAllProfiles(prev => prev.map(p => p.id === profileId ? { ...p, dealer_application_status: newStatus, is_dealer: isDealerNow } : p));
+    // Only update the detail-panel `selected` if it's the same record being changed.
+    if (selected?.id === profileId) {
+      setSelected(prev => ({ ...prev, dealer_application_status: newStatus, is_dealer: isDealerNow }));
+    }
+    setAllProfiles(prev => prev.map(p => p.id === profileId
+      ? { ...p, dealer_application_status: newStatus, is_dealer: isDealerNow } : p));
+  };
+
+  const handleBulkChangeStatus = async () => {
+    if (!selectedRows.size || bulkBusy) return;
+    setBulkBusy(true);
+    const ids = [...selectedRows];
+    const isDealerNow = bulkStatus === 'approved';
+    const { error } = await supabase.from('profiles')
+      .update({ dealer_application_status: bulkStatus, is_dealer: isDealerNow })
+      .in('id', ids);
+    if (error) { alert('Bulk update failed: ' + error.message); }
+    else {
+      setAllProfiles(prev => prev.map(p => ids.includes(p.id)
+        ? { ...p, dealer_application_status: bulkStatus, is_dealer: isDealerNow } : p));
+      setSelectedRows(new Set());
+    }
+    setBulkBusy(false);
   };
 
   const handleToggleBlock = async () => {
@@ -1708,10 +1732,63 @@ export default function AdminDealers() {
           {searchQuery || typeFilter !== 'all' ? 'No results match your filter.' : 'No dealers or customers yet.'}
         </div>
       ) : (
+        <>
+        {/* Bulk action bar — visible when 1+ rows selected */}
+        {selectedRows.size > 0 && (
+          <div style={{ background: '#f5eefb', border: '1.5px solid #c4b5fd', borderRadius: 10, padding: '10px 16px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, fontSize: 13, color: '#5b21b6' }}>{selectedRows.size} selected</span>
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Change status to:</span>
+            <select
+              value={bulkStatus}
+              onChange={e => setBulkStatus(e.target.value)}
+              style={{ border: '1.5px solid #c4b5fd', borderRadius: 8, padding: '5px 10px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', background: '#fff', color: '#5b21b6', cursor: 'pointer' }}
+            >
+              <option value="pending_details">Pending</option>
+              <option value="under_review">Under Review</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <button
+              onClick={handleBulkChangeStatus}
+              disabled={bulkBusy}
+              style={{ background: '#7B2D8B', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 18px', fontSize: 13, fontWeight: 700, cursor: bulkBusy ? 'wait' : 'pointer', opacity: bulkBusy ? 0.6 : 1, fontFamily: 'inherit' }}
+            >
+              {bulkBusy ? 'Applying…' : 'Apply'}
+            </button>
+            <button
+              onClick={() => setSelectedRows(new Set())}
+              style={{ background: 'none', border: '1px solid #c4b5fd', color: '#5b21b6', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
         <ScrollFade className="admin-table-wrap" bg="#fff">
+          {(() => {
+            // Rows eligible for checkbox selection (dealer or customer with a dealer application)
+            const selectableRows = unifiedRows.filter(r => r._type === 'dealer' || r.dealer_application_status);
+            const allSelected = selectableRows.length > 0 && selectableRows.every(r => selectedRows.has(r.id));
+            const toggleAll = () => allSelected
+              ? setSelectedRows(new Set())
+              : setSelectedRows(new Set(selectableRows.map(r => r.id)));
+            const toggleRow = (id) => setSelectedRows(prev => {
+              const next = new Set(prev);
+              next.has(id) ? next.delete(id) : next.add(id);
+              return next;
+            });
+            const appStatusColors = {
+              pending_details: { bg: '#fef3c7', color: '#92400e', border: '#fcd34d' },
+              under_review:    { bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' },
+              approved:        { bg: '#dcfce7', color: '#166534', border: '#86efac' },
+              rejected:        { bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
+            };
+            return (
           <table className="admin-table">
             <thead>
               <tr>
+                <th style={{ width: 32, textAlign: 'center' }}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: '#7B2D8B' }} title="Select all" />
+                </th>
                 <th style={{ width: 36 }}>#</th>
                 <th style={{ width: 90 }} ref={typeDropdownRef}>
                   <button
@@ -1750,7 +1827,13 @@ export default function AdminDealers() {
               </tr>
             </thead>
             <tbody>
-              {unifiedRows.map((row, idx) => (
+              {unifiedRows.map((row, idx) => {
+                const isSelectable = row._type === 'dealer' || !!row.dealer_application_status;
+                const isChecked = isSelectable && selectedRows.has(row.id);
+                const appStatus = row.dealer_application_status;
+                const showStatusDropdown = row._type === 'dealer' || !!appStatus;
+                const sc = appStatusColors[appStatus] || appStatusColors.pending_details;
+                return (
                 <tr
                   key={row._type === 'guest' ? `guest-${row._key}` : row.id}
                   onClick={() => {
@@ -1758,9 +1841,15 @@ export default function AdminDealers() {
                     else if (row._type === 'customer') navigate(`/admin/crm/customer/${row.id}`);
                     else openDealer(row);
                   }}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', background: isChecked ? '#fdf4ff' : undefined }}
                   className="admin-dealer-row"
                 >
+                  <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                    {isSelectable && (
+                      <input type="checkbox" checked={isChecked} onChange={() => toggleRow(row.id)}
+                        style={{ cursor: 'pointer', accentColor: '#7B2D8B' }} />
+                    )}
+                  </td>
                   <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
                   <td><TypeBadge type={row._type} /></td>
                   <td>
@@ -1769,14 +1858,19 @@ export default function AdminDealers() {
                       <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{row.dealer_code}</div>
                     )}
                   </td>
-                  <td>
-                    {row._type === 'dealer' ? (() => {
-                      const s = row.dealer_application_status || 'pending_details';
-                      const appColors = { pending_details: { bg: '#fef3c7', color: '#92400e' }, under_review: { bg: '#dbeafe', color: '#1e40af' }, approved: { bg: '#dcfce7', color: '#166534' }, rejected: { bg: '#fee2e2', color: '#991b1b' } };
-                      const appLabels = { pending_details: 'Pending', under_review: 'Under Review', approved: 'Approved', rejected: 'Rejected' };
-                      const c = appColors[s] || appColors.pending_details;
-                      return <span style={{ background: c.bg, color: c.color, fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>{appLabels[s] || s}</span>;
-                    })() : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  <td onClick={e => e.stopPropagation()}>
+                    {showStatusDropdown ? (
+                      <select
+                        value={appStatus || 'pending_details'}
+                        onChange={e => handleChangeAppStatus(e.target.value, row.id)}
+                        style={{ background: sc.bg, color: sc.color, border: `1.5px solid ${sc.border}`, borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
+                      >
+                        <option value="pending_details">Pending</option>
+                        <option value="under_review">Under Review</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                      </select>
+                    ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
                   <td style={{ fontSize: 12 }}>{row._phone || '—'}</td>
                   <td style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._email || '—'}</td>
@@ -1801,10 +1895,14 @@ export default function AdminDealers() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
+            );
+          })()}
         </ScrollFade>
+        </>
       )}
 
       {/* Type-filter dropdown rendered via portal so it's never clipped by overflow:auto ancestors */}
