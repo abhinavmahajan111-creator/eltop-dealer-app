@@ -1828,10 +1828,15 @@ export default function AdminDealers() {
             </thead>
             <tbody>
               {unifiedRows.map((row, idx) => {
-                const isSelectable = row._type === 'dealer' || !!row.dealer_application_status;
-                const isChecked = isSelectable && selectedRows.has(row.id);
                 const appStatus = row.dealer_application_status;
-                const showStatusDropdown = row._type === 'dealer' || !!appStatus;
+                // Show status dropdown for: (a) dealer rows always, or (b) customer rows
+                // that have an active (pending/under_review) dealer application.
+                // Pure customers and customers with stale 'approved'/'rejected' status
+                // but is_dealer=false (no genuine application) show "—" instead.
+                const showStatusDropdown = row._type === 'dealer' ||
+                  (row._type === 'customer' && (appStatus === 'pending_details' || appStatus === 'under_review'));
+                const isSelectable = showStatusDropdown;
+                const isChecked = isSelectable && selectedRows.has(row.id);
                 const sc = appStatusColors[appStatus] || appStatusColors.pending_details;
                 return (
                 <tr
