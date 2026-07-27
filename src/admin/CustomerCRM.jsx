@@ -38,7 +38,7 @@ export default function CustomerCRM() {
       promote:   { is_dealer: true,  dealer_application_status: 'approved', is_blocked: false },
       approve:   { is_dealer: true,  dealer_application_status: 'approved' },
       reject:    { is_dealer: false, dealer_application_status: 'rejected' },
-      downgrade: { is_dealer: false, dealer_application_status: null },
+      downgrade: { is_dealer: false, dealer_application_status: '' },
       block:     { is_blocked: true },
       unblock:   { is_blocked: false },
     };
