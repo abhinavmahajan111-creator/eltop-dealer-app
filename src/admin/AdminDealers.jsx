@@ -221,6 +221,57 @@ function TypeBadge({ type }) {
   );
 }
 
+// ─── dealer action helpers ───────────────────────────────────────────────────
+
+function actionUpdate(action) {
+  return {
+    promote:   { is_dealer: true,  dealer_application_status: 'approved', is_blocked: false },
+    approve:   { is_dealer: true,  dealer_application_status: 'approved' },
+    reject:    { is_dealer: false, dealer_application_status: 'rejected' },
+    downgrade: { is_dealer: false, dealer_application_status: null },
+    block:     { is_blocked: true },
+    unblock:   { is_blocked: false },
+  }[action] || null;
+}
+
+function getRowActions(row) {
+  if (row._type !== 'dealer' && row._type !== 'customer') return [];
+  const { is_dealer, is_blocked, dealer_application_status: das } = row;
+  const isPending = das === 'pending_details' || das === 'under_review';
+  if (is_blocked) return [{ value: 'unblock', label: 'Unblock' }];
+  if (!is_dealer) {
+    if (isPending) return [
+      { value: 'approve',  label: 'Approve as Dealer' },
+      { value: 'reject',   label: 'Reject Application' },
+    ];
+    return [
+      { value: 'promote',  label: 'Promote to Dealer' },
+      { value: 'block',    label: 'Block Customer' },
+    ];
+  }
+  if (isPending) return [
+    { value: 'approve',  label: 'Approve as Dealer' },
+    { value: 'reject',   label: 'Reject Application' },
+  ];
+  return [
+    { value: 'downgrade', label: 'Downgrade to Customer' },
+    { value: 'block',     label: 'Block Dealer' },
+  ];
+}
+
+function rowCurrentStatus(row) {
+  if (row.is_blocked) return '🚫 Blocked';
+  if (!row.is_dealer) {
+    const das = row.dealer_application_status;
+    if (das === 'pending_details' || das === 'under_review') return '⏳ Applied';
+    if (das === 'rejected') return '✗ Rejected';
+    return 'Customer';
+  }
+  const das = row.dealer_application_status;
+  if (das === 'pending_details' || das === 'under_review') return '⏳ Pending Approval';
+  return '✓ Dealer';
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export default function AdminDealers() {
@@ -257,7 +308,7 @@ export default function AdminDealers() {
 
   // ── Bulk-edit state ──────────────────────────────────────────────────────────
   const [selectedRows, setSelectedRows] = useState(new Set()); // Set of profile IDs
-  const [bulkStatus,   setBulkStatus]   = useState('approved');
+  const [bulkStatus,   setBulkStatus]   = useState('approve');
   const [bulkBusy,     setBulkBusy]     = useState(false);
 
   useEffect(() => {
@@ -770,32 +821,25 @@ export default function AdminDealers() {
     setNewTerritory("");
   };
 
-  const handleChangeAppStatus = async (newStatus, profileId = selected?.id) => {
-    const isDealerNow = newStatus === 'approved';
-    const { error } = await supabase.from('profiles')
-      .update({ dealer_application_status: newStatus, is_dealer: isDealerNow })
-      .eq('id', profileId);
+  const handleAction = async (action, profileId = selected?.id) => {
+    const update = actionUpdate(action);
+    if (!update || !profileId) return;
+    const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); return; }
-    // Only update the detail-panel `selected` if it's the same record being changed.
-    if (selected?.id === profileId) {
-      setSelected(prev => ({ ...prev, dealer_application_status: newStatus, is_dealer: isDealerNow }));
-    }
-    setAllProfiles(prev => prev.map(p => p.id === profileId
-      ? { ...p, dealer_application_status: newStatus, is_dealer: isDealerNow } : p));
+    if (selected?.id === profileId) setSelected(prev => ({ ...prev, ...update }));
+    setAllProfiles(prev => prev.map(p => p.id === profileId ? { ...p, ...update } : p));
   };
 
   const handleBulkChangeStatus = async () => {
     if (!selectedRows.size || bulkBusy) return;
     setBulkBusy(true);
     const ids = [...selectedRows];
-    const isDealerNow = bulkStatus === 'approved';
-    const { error } = await supabase.from('profiles')
-      .update({ dealer_application_status: bulkStatus, is_dealer: isDealerNow })
-      .in('id', ids);
+    const update = actionUpdate(bulkStatus);
+    if (!update) { setBulkBusy(false); return; }
+    const { error } = await supabase.from('profiles').update(update).in('id', ids);
     if (error) { alert('Bulk update failed: ' + error.message); }
     else {
-      setAllProfiles(prev => prev.map(p => ids.includes(p.id)
-        ? { ...p, dealer_application_status: bulkStatus, is_dealer: isDealerNow } : p));
+      setAllProfiles(prev => prev.map(p => ids.includes(p.id) ? { ...p, ...update } : p));
       setSelectedRows(new Set());
     }
     setBulkBusy(false);
@@ -1259,22 +1303,25 @@ export default function AdminDealers() {
                 };
                 const c = appStatusColors[appStatus] || appStatusColors.pending_details;
                 return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.4px' }}>App:</span>
-                    <select
-                      value={appStatus}
-                      onChange={e => handleChangeAppStatus(e.target.value)}
-                      style={{
-                        background: c.bg, color: c.color, border: `1.5px solid ${c.border}`,
-                        borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700,
-                        cursor: 'pointer', outline: 'none', appearance: 'auto',
-                      }}
-                    >
-                      {Object.entries(appStatusLabels).map(([val, label]) => (
-                        <option key={val} value={val}>{label}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {(() => {
+                    const isPending = appStatus === 'pending_details' || appStatus === 'under_review';
+                    const isBlocked = selected.is_blocked;
+                    if (isBlocked) return (
+                      <button onClick={() => handleAction('unblock')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Unblock</button>
+                    );
+                    if (isPending) return (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleAction('approve')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓ Approve</button>
+                        <button onClick={() => handleAction('reject')}  style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✕ Reject</button>
+                      </div>
+                    );
+                    return (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleAction('downgrade')} style={{ background: 'none', border: '1.5px solid #dc2626', color: '#dc2626', borderRadius: 8, padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Downgrade to Customer</button>
+                        <button onClick={() => handleAction('block')}     style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Block</button>
+                      </div>
+                    );
+                  })()}
                 );
               })()}
             </div>
@@ -1743,10 +1790,12 @@ export default function AdminDealers() {
               onChange={e => setBulkStatus(e.target.value)}
               style={{ border: '1.5px solid #c4b5fd', borderRadius: 8, padding: '5px 10px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', background: '#fff', color: '#5b21b6', cursor: 'pointer' }}
             >
-              <option value="pending_details">Pending</option>
-              <option value="under_review">Under Review</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
+              <option value="approve">Approve as Dealer</option>
+              <option value="reject">Reject Application</option>
+              <option value="promote">Promote to Dealer</option>
+              <option value="downgrade">Downgrade to Customer</option>
+              <option value="block">Block</option>
+              <option value="unblock">Unblock</option>
             </select>
             <button
               onClick={handleBulkChangeStatus}
@@ -1765,8 +1814,7 @@ export default function AdminDealers() {
         )}
         <ScrollFade className="admin-table-wrap" bg="#fff">
           {(() => {
-            // Rows eligible for checkbox selection (dealer or customer with a dealer application)
-            const selectableRows = unifiedRows.filter(r => r._type === 'dealer' || r.dealer_application_status);
+            const selectableRows = unifiedRows.filter(r => getRowActions(r).length > 0);
             const allSelected = selectableRows.length > 0 && selectableRows.every(r => selectedRows.has(r.id));
             const toggleAll = () => allSelected
               ? setSelectedRows(new Set())
@@ -1830,14 +1878,10 @@ export default function AdminDealers() {
               {unifiedRows.map((row, idx) => {
                 const appStatus = row.dealer_application_status;
                 // Show status dropdown for: (a) dealer rows always, or (b) customer rows
-                // that have an active (pending/under_review) dealer application.
-                // Pure customers and customers with stale 'approved'/'rejected' status
-                // but is_dealer=false (no genuine application) show "—" instead.
-                const showStatusDropdown = row._type === 'dealer' ||
-                  (row._type === 'customer' && (appStatus === 'pending_details' || appStatus === 'under_review'));
+                const rowActions = getRowActions(row);
+                const showStatusDropdown = rowActions.length > 0;
                 const isSelectable = showStatusDropdown;
                 const isChecked = isSelectable && selectedRows.has(row.id);
-                const sc = appStatusColors[appStatus] || appStatusColors.pending_details;
                 return (
                 <tr
                   key={row._type === 'guest' ? `guest-${row._key}` : row.id}
@@ -1866,14 +1910,12 @@ export default function AdminDealers() {
                   <td onClick={e => e.stopPropagation()}>
                     {showStatusDropdown ? (
                       <select
-                        value={appStatus || 'pending_details'}
-                        onChange={e => handleChangeAppStatus(e.target.value, row.id)}
-                        style={{ background: sc.bg, color: sc.color, border: `1.5px solid ${sc.border}`, borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
+                        defaultValue=""
+                        onChange={e => { if (e.target.value) { handleAction(e.target.value, row.id); e.target.value = ''; } }}
+                        style={{ background: '#f5f3ff', color: '#5b21b6', border: '1.5px solid #c4b5fd', borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
                       >
-                        <option value="pending_details">Pending</option>
-                        <option value="under_review">Under Review</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
+                        <option value="" disabled>{rowCurrentStatus(row)}</option>
+                        {rowActions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                       </select>
                     ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>

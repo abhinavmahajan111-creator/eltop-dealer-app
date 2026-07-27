@@ -33,14 +33,21 @@ export default function CustomerCRM() {
   const [loading, setLoading] = useState(true);
   const [appStatusBusy, setAppStatusBusy] = useState(false);
 
-  const handleChangeAppStatus = async (newStatus) => {
+  const handleAction = async (action) => {
+    const updates = {
+      promote:   { is_dealer: true,  dealer_application_status: 'approved', is_blocked: false },
+      approve:   { is_dealer: true,  dealer_application_status: 'approved' },
+      reject:    { is_dealer: false, dealer_application_status: 'rejected' },
+      downgrade: { is_dealer: false, dealer_application_status: null },
+      block:     { is_blocked: true },
+      unblock:   { is_blocked: false },
+    };
+    const update = updates[action];
+    if (!update) return;
     setAppStatusBusy(true);
-    const isDealerNow = newStatus === 'approved';
-    const { error } = await supabase.from('profiles')
-      .update({ dealer_application_status: newStatus, is_dealer: isDealerNow })
-      .eq('id', profileId);
+    const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); }
-    else { setProfile(prev => ({ ...prev, dealer_application_status: newStatus, is_dealer: isDealerNow })); }
+    else { setProfile(prev => ({ ...prev, ...update })); }
     setAppStatusBusy(false);
   };
   const [expandedOrderId, setExpandedOrderId] = useState(null);
@@ -105,41 +112,45 @@ export default function CustomerCRM() {
             {profile.email}
           </div>
         </div>
-        {/* Dealer application status badge + approve/reject (shown when dealer_application_status is set) */}
+        {/* Status badge + context-aware action buttons */}
         {(() => {
-          const appStatus = profile.dealer_application_status;
-          if (!appStatus || appStatus === 'none') return null;
-          const cfg = {
-            pending_details: { label: 'Dealer App: Pending',      bg: '#fef9c3', color: '#854d0e', border: '#fde047' },
-            under_review:    { label: 'Dealer App: Under Review', bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' },
-            approved:        { label: 'Dealer App: Approved ✓',   bg: '#dcfce7', color: '#166534', border: '#86efac' },
-            rejected:        { label: 'Dealer App: Rejected',     bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
-          };
-          const s = cfg[appStatus] || cfg.pending_details;
-          const isPending = appStatus === 'pending_details' || appStatus === 'under_review';
+          const { is_dealer, is_blocked, dealer_application_status: das } = profile;
+          const isPending = das === 'pending_details' || das === 'under_review';
+          const btn = (action, label, extra = {}) => (
+            <button key={action} disabled={appStatusBusy} onClick={() => handleAction(action)}
+              style={{ border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 700, cursor: appStatusBusy ? 'wait' : 'pointer', opacity: appStatusBusy ? 0.6 : 1, ...extra }}>
+              {label}
+            </button>
+          );
+          let badge = null;
+          const actions = [];
+          if (is_blocked) {
+            badge = { text: '🚫 Blocked', bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' };
+            actions.push(btn('unblock', 'Unblock', { background: '#16a34a' }));
+          } else if (isPending) {
+            badge = das === 'under_review'
+              ? { text: 'Dealer App: Under Review', bg: '#dbeafe', color: '#1e40af', border: '#93c5fd' }
+              : { text: 'Dealer App: Pending',      bg: '#fef9c3', color: '#854d0e', border: '#fde047' };
+            actions.push(btn('approve', '✓ Approve', { background: '#16a34a' }));
+            actions.push(btn('reject',  '✕ Reject',  { background: '#dc2626' }));
+          } else if (is_dealer || das === 'approved') {
+            badge = { text: '✓ Dealer Active', bg: '#dcfce7', color: '#166534', border: '#86efac' };
+            actions.push(btn('downgrade', 'Downgrade to Customer', { background: 'none', border: '1.5px solid #dc2626', color: '#dc2626' }));
+            actions.push(btn('block',     'Block Dealer',          { background: '#dc2626' }));
+          } else {
+            // Pure customer
+            actions.push(btn('promote', 'Promote to Dealer', { background: '#7B2D8B' }));
+            actions.push(btn('block',   'Block Customer',     { background: '#dc2626' }));
+          }
+          if (!badge && actions.length === 0) return null;
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ background: s.bg, color: s.color, border: `1.5px solid ${s.border}`, padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
-                {s.label}
-              </span>
-              {isPending && (
-                <>
-                  <button disabled={appStatusBusy} onClick={() => handleChangeAppStatus('approved')}
-                    style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 700, cursor: appStatusBusy ? 'wait' : 'pointer', opacity: appStatusBusy ? 0.6 : 1 }}>
-                    ✓ Approve
-                  </button>
-                  <button disabled={appStatusBusy} onClick={() => handleChangeAppStatus('rejected')}
-                    style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 700, cursor: appStatusBusy ? 'wait' : 'pointer', opacity: appStatusBusy ? 0.6 : 1 }}>
-                    ✕ Reject
-                  </button>
-                </>
+              {badge && (
+                <span style={{ background: badge.bg, color: badge.color, border: `1.5px solid ${badge.border}`, padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
+                  {badge.text}
+                </span>
               )}
-              {appStatus === 'approved' && (
-                <button disabled={appStatusBusy} onClick={() => handleChangeAppStatus('rejected')}
-                  style={{ background: 'none', border: '1.5px solid #dc2626', color: '#dc2626', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: appStatusBusy ? 'wait' : 'pointer' }}>
-                  Revoke Access
-                </button>
-              )}
+              {actions}
             </div>
           );
         })()}
