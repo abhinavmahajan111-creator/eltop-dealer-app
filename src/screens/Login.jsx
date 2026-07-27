@@ -11,7 +11,7 @@ const STAFF_ROLE_MAP = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, blockedAccount, clearBlocked, refreshProfile } = useApp();
+  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, blockedAccount, clearBlocked, markBlocked, refreshProfile } = useApp();
 
   const [role, setRole]             = useState("Guest");
   const [dealerMode, setDealerMode] = useState("existing"); // 'existing' | 'new'
@@ -126,8 +126,8 @@ export default function Login() {
         }
         if (prof?.is_dealer === true) {
           if (prof?.is_blocked) {
+            markBlocked();
             await supabase.auth.signOut();
-            setLocalError("Your account has been blocked. Please contact support.");
             setLocalBusy(false);
             setStep(1);
             return;
@@ -154,8 +154,8 @@ export default function Login() {
             .from("profiles").select("id, is_dealer, is_blocked").eq("id", user.id).maybeSingle();
           if (prof?.is_dealer === true) {
             if (prof?.is_blocked) {
+              markBlocked();
               await supabase.auth.signOut();
-              setLocalError("Your account has been blocked. Please contact support.");
               setLocalBusy(false);
               setStep(1);
               return;

@@ -390,7 +390,8 @@ export function AppProvider({ children }) {
     deactivatedAccount,
     clearDeactivated: () => setDeactivatedAccount(false),
     blockedAccount,
-    clearBlocked: () => setBlockedAccount(false),
+    clearBlocked:  () => setBlockedAccount(false),
+    markBlocked:   () => setBlockedAccount(true),
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
