@@ -1301,27 +1301,22 @@ export default function AdminDealers() {
                   approved:        'Approved',
                   rejected:        'Rejected',
                 };
-                const c = appStatusColors[appStatus] || appStatusColors.pending_details;
+                const isPending = appStatus === 'pending_details' || appStatus === 'under_review';
+                const isBlocked = selected.is_blocked;
+                if (isBlocked) return (
+                  <button onClick={() => handleAction('unblock')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Unblock</button>
+                );
+                if (isPending) return (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => handleAction('approve')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓ Approve</button>
+                    <button onClick={() => handleAction('reject')}  style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✕ Reject</button>
+                  </div>
+                );
                 return (
-                  {(() => {
-                    const isPending = appStatus === 'pending_details' || appStatus === 'under_review';
-                    const isBlocked = selected.is_blocked;
-                    if (isBlocked) return (
-                      <button onClick={() => handleAction('unblock')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Unblock</button>
-                    );
-                    if (isPending) return (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleAction('approve')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓ Approve</button>
-                        <button onClick={() => handleAction('reject')}  style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✕ Reject</button>
-                      </div>
-                    );
-                    return (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button onClick={() => handleAction('downgrade')} style={{ background: 'none', border: '1.5px solid #dc2626', color: '#dc2626', borderRadius: 8, padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Downgrade to Customer</button>
-                        <button onClick={() => handleAction('block')}     style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Block</button>
-                      </div>
-                    );
-                  })()}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={() => handleAction('downgrade')} style={{ background: 'none', border: '1.5px solid #dc2626', color: '#dc2626', borderRadius: 8, padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Downgrade to Customer</button>
+                    <button onClick={() => handleAction('block')}     style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Block</button>
+                  </div>
                 );
               })()}
             </div>
