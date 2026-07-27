@@ -832,7 +832,9 @@ export default function AdminDealers() {
       const prof = allProfiles.find(p => p.id === profileId);
       if (isPlaceholderName(prof?.name)) update = { ...base, name: '' };
     }
-    const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
+    console.log('[handleAction] payload to write:', JSON.stringify(update), 'profileId:', profileId);
+    const { data: updData, error } = await supabase.from('profiles').update(update).eq('id', profileId).select('id,name,is_dealer,dealer_application_status');
+    console.log('[handleAction] supabase response — data:', updData, 'error:', error);
     if (error) { alert('Failed: ' + error.message); return; }
     if (selected?.id === profileId) setSelected(prev => ({ ...prev, ...update }));
     setAllProfiles(prev => prev.map(p => p.id === profileId ? { ...p, ...update } : p));
