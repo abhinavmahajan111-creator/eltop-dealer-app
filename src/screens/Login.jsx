@@ -11,7 +11,7 @@ const STAFF_ROLE_MAP = {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, refreshProfile } = useApp();
+  const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, blockedAccount, clearBlocked, refreshProfile } = useApp();
 
   const [role, setRole]             = useState("Guest");
   const [dealerMode, setDealerMode] = useState("existing"); // 'existing' | 'new'
@@ -151,8 +151,15 @@ export default function Login() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: prof } = await supabase
-            .from("profiles").select("id, is_dealer").eq("id", user.id).maybeSingle();
+            .from("profiles").select("id, is_dealer, is_blocked").eq("id", user.id).maybeSingle();
           if (prof?.is_dealer === true) {
+            if (prof?.is_blocked) {
+              await supabase.auth.signOut();
+              setLocalError("Your account has been blocked. Please contact support.");
+              setLocalBusy(false);
+              setStep(1);
+              return;
+            }
             // Already a full dealer — just log them in, don't overwrite anything
             navigate("/dashboard");
           } else if (prof) {
@@ -223,6 +230,17 @@ export default function Login() {
 
   const formContent = (
     <>
+      {blockedAccount && (
+        <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>Account Blocked</div>
+          Your dealer account has been blocked by admin. Please contact support to resolve this.
+          <div style={{ marginTop: 10 }}>
+            <button onClick={clearBlocked} style={{ background: "none", border: "none", color: "#e74c3c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: 0, textDecoration: "underline" }}>
+              Try a different account
+            </button>
+          </div>
+        </div>
+      )}
       {deactivatedAccount && (
         <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
           <div style={{ fontWeight: 800, marginBottom: 6 }}>Account Deactivated</div>

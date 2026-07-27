@@ -39,6 +39,7 @@ export function AppProvider({ children }) {
   const [adminChecked, setAdminChecked] = useState(false);
 
   const [deactivatedAccount, setDeactivatedAccount] = useState(false);
+  const [blockedAccount,     setBlockedAccount]     = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const [toastShow, setToastShow] = useState(false);
   const toastTimer = useRef(null);
@@ -96,6 +97,15 @@ export function AppProvider({ children }) {
         setDeactivatedAccount(true);
         setIsDealer(false);
         setProfileLoaded(true);
+        return true;
+      }
+      // Blocked dealer — sign out immediately, surface error in Login
+      if (data.is_blocked && data.is_dealer === true) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setIsDealer(false);
+        setProfileLoaded(true);
+        setBlockedAccount(true);
         return true;
       }
       setProfile(data);
@@ -379,6 +389,8 @@ export function AppProvider({ children }) {
     showToast,
     deactivatedAccount,
     clearDeactivated: () => setDeactivatedAccount(false),
+    blockedAccount,
+    clearBlocked: () => setBlockedAccount(false),
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
