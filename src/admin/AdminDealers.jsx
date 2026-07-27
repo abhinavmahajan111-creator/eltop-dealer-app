@@ -444,7 +444,7 @@ export default function AdminDealers() {
       .map(p => ({
         ...p,
         _type:       p.deleted_at ? 'deleted' : 'dealer',
-        _name:       p.shop_name || p.owner_name || p.email || '—',
+        _name:       p.shop_name || p.owner_name || 'New Dealer',
         _phone:      p.phone || '',
         _email:      p.email || '',
         _orderCount: dealerStatsMap[p.id]?.orderCount || 0,
@@ -464,7 +464,7 @@ export default function AdminDealers() {
           .map(p => ({
             ...p,
             _type:       'customer',
-            _name:       p.name  || p.email || '—',
+            _name:       p.name  || 'New Customer',
             _phone:      p.phone || '',
             _email:      p.email || '',
             _orderCount: 0,
