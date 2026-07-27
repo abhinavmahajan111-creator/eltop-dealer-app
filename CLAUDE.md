@@ -284,6 +284,33 @@ SQL recovery. Any row flagged on that page is a **P0 issue** — propose the man
 (INSERT into orders + order_items, or DELETE of the duplicate row) on the spot, do not wait to
 be asked. The page replaces ad-hoc SQL queries for routine reconciliation.
 
+### 15. Per-action usage breakdown — MANDATORY after every individual change
+
+After EVERY individual code change, search, or tool action — not once at the end of a session —
+provide an explicit usage breakdown in the following format:
+
+**Usage breakdown:**
+- File reads/searches: X% — [list specific files or queries]
+- Code edits: X% — [list specific changes made]
+- Build/verify steps: X% — [list any build checks, screenshots, previews]
+- Retries/backtrack: X% — [list any wasted steps; target 0%]
+
+Rules:
+1. **Exact % figures required** — "~30%" is acceptable; "some" or "a lot" is not.
+2. **Per-action, not per-session** — give a breakdown after each distinct change or action block,
+   not a single cumulative summary at the end. If multiple changes are batched in one response,
+   give one breakdown covering that response's actions.
+3. **Active minimization** — before every file read, ask: "Do I already have this in context?"
+   Before every search, ask: "Can I target this more narrowly?" Before every edit, ask: "Can I
+   batch this with another pending change to the same file?" If a breakdown shows >20% retries
+   or >40% reads, explain why and what will be done differently next time.
+4. **No silent omission** — omitting this breakdown is treated the same as omitting an RLS policy
+   on a new table: a rule violation, not an oversight.
+
+This rule exists because usage-consumption breakdowns were requested on 22/7 and 24/7 and were
+added to Rule 11 (session-end only) — but that rule was too weak. The real goal is forcing
+per-action efficiency awareness so inefficiencies are caught immediately, not at session end.
+
 ---
 
 ## Regression Checklist — run after EVERY commit/deploy
