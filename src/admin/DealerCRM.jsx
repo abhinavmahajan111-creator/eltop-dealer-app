@@ -64,8 +64,13 @@ export default function DealerCRM() {
       block:     { is_blocked: true },
       unblock:   { is_blocked: false },
     };
-    const update = updates[action];
-    if (!update) return;
+    const base = updates[action];
+    if (!base) return;
+    let update = base;
+    if (action === 'downgrade') {
+      const name = dealer?.name;
+      if (!name || name === 'New Dealer' || name === 'New Customer') update = { ...base, name: '' };
+    }
     setAppStatusBusy(true);
     const { error } = await supabase.from('profiles').update(update).eq('id', dealerId);
     if (error) { alert('Failed: ' + error.message); }

@@ -42,8 +42,13 @@ export default function CustomerCRM() {
       block:     { is_blocked: true },
       unblock:   { is_blocked: false },
     };
-    const update = updates[action];
-    if (!update) return;
+    const base = updates[action];
+    if (!base) return;
+    let update = base;
+    if (action === 'promote' || action === 'downgrade') {
+      const name = profile?.name;
+      if (!name || name === 'New Dealer' || name === 'New Customer') update = { ...base, name: '' };
+    }
     setAppStatusBusy(true);
     const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); }

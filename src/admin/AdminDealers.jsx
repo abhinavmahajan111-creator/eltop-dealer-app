@@ -821,9 +821,17 @@ export default function AdminDealers() {
     setNewTerritory("");
   };
 
+  // Returns true when a name is a system-generated placeholder, not something the user typed.
+  const isPlaceholderName = (name) => !name || name === 'New Dealer' || name === 'New Customer';
+
   const handleAction = async (action, profileId = selected?.id) => {
-    const update = actionUpdate(action);
-    if (!update || !profileId) return;
+    const base = actionUpdate(action);
+    if (!base || !profileId) return;
+    let update = base;
+    if (action === 'promote' || action === 'downgrade') {
+      const prof = allProfiles.find(p => p.id === profileId);
+      if (isPlaceholderName(prof?.name)) update = { ...base, name: '' };
+    }
     const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
     if (error) { alert('Failed: ' + error.message); return; }
     if (selected?.id === profileId) setSelected(prev => ({ ...prev, ...update }));
@@ -834,13 +842,37 @@ export default function AdminDealers() {
     if (!selectedRows.size || bulkBusy) return;
     setBulkBusy(true);
     const ids = [...selectedRows];
-    const update = actionUpdate(bulkStatus);
-    if (!update) { setBulkBusy(false); return; }
-    const { error } = await supabase.from('profiles').update(update).in('id', ids);
-    if (error) { alert('Bulk update failed: ' + error.message); }
-    else {
-      setAllProfiles(prev => prev.map(p => ids.includes(p.id) ? { ...p, ...update } : p));
-      setSelectedRows(new Set());
+    const base = actionUpdate(bulkStatus);
+    if (!base) { setBulkBusy(false); return; }
+
+    let failed = false;
+    if (bulkStatus === 'promote' || bulkStatus === 'downgrade') {
+      // Split: profiles with placeholder names also get name:'', real names are untouched
+      const phIds   = ids.filter(id => isPlaceholderName(allProfiles.find(p => p.id === id)?.name));
+      const realIds = ids.filter(id => !phIds.includes(id));
+      if (phIds.length) {
+        const { error } = await supabase.from('profiles').update({ ...base, name: '' }).in('id', phIds);
+        if (error) { alert('Bulk update failed: ' + error.message); failed = true; }
+      }
+      if (!failed && realIds.length) {
+        const { error } = await supabase.from('profiles').update(base).in('id', realIds);
+        if (error) { alert('Bulk update failed: ' + error.message); failed = true; }
+      }
+      if (!failed) {
+        setAllProfiles(prev => prev.map(p => {
+          if (!ids.includes(p.id)) return p;
+          const upd = isPlaceholderName(p.name) ? { ...base, name: '' } : base;
+          return { ...p, ...upd };
+        }));
+        setSelectedRows(new Set());
+      }
+    } else {
+      const { error } = await supabase.from('profiles').update(base).in('id', ids);
+      if (error) { alert('Bulk update failed: ' + error.message); }
+      else {
+        setAllProfiles(prev => prev.map(p => ids.includes(p.id) ? { ...p, ...base } : p));
+        setSelectedRows(new Set());
+      }
     }
     setBulkBusy(false);
   };
