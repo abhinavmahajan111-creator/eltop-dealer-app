@@ -1747,12 +1747,20 @@ export default function AdminDealers() {
   // ─── MASTER LIST ─────────────────────────────────────────────────────────────
   const dealerCount   = allProfiles.filter(p => !p.deleted_at && p.is_dealer === true).length;
   const customerCount = allProfiles.filter(p => !p.deleted_at && p.is_dealer === false).length;
-  const deletedCount  = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
-  const guestCount    = guestRows.filter(g => !g._isDeletedGuest).length;
+  const deletedCount    = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
+  const guestCount      = guestRows.filter(g => !g._isDeletedGuest).length;
 
-  // DEBUG — remove after confirming dropdown renders correctly
-  console.log('[AdminDealers] counts', { dealerCount, customerCount, guestCount, deletedCount, allProfilesLen: allProfiles.length });
-  console.log('[AdminDealers] dropdown options', ['all','dealer','customer','guest','deleted']);
+  const [showUnverified, setShowUnverified] = useState(false);
+
+  const unverifiedCount = useMemo(
+    () => unifiedRows.filter(r => r.email_verified === false).length,
+    [unifiedRows]
+  );
+  // Default view hides unverified (incomplete signups); toggle reveals them.
+  const displayRows = useMemo(
+    () => showUnverified ? unifiedRows : unifiedRows.filter(r => r.email_verified !== false),
+    [unifiedRows, showUnverified]
+  );
 
   return (
     <div className="admin-page">
@@ -1809,6 +1817,19 @@ export default function AdminDealers() {
           </button>
           <button
             className="btn small outline"
+            onClick={() => setShowUnverified(v => !v)}
+            style={{
+              whiteSpace: 'nowrap',
+              ...(showUnverified
+                ? { background: '#f3f4f6', color: '#374151', borderColor: '#9ca3af', fontWeight: 700 }
+                : { borderColor: 'var(--muted)', color: 'var(--muted)' }),
+            }}
+            title="Rows where email OTP was never completed"
+          >
+            {showUnverified ? '✓ ' : ''}Unverified{unverifiedCount > 0 ? ` (${unverifiedCount})` : ''}
+          </button>
+          <button
+            className="btn small outline"
             onClick={handleExport}
             disabled={exporting || loading}
             style={{ display: "flex", alignItems: "center", gap: 6, borderColor: "var(--red-dark)", color: "var(--red-dark)", fontWeight: 700, whiteSpace: "nowrap" }}
@@ -1845,9 +1866,13 @@ export default function AdminDealers() {
 
       {loading ? (
         <div className="admin-loading">Loading…</div>
-      ) : unifiedRows.length === 0 ? (
+      ) : displayRows.length === 0 ? (
         <div className="admin-empty">
-          {searchQuery || typeFilter !== 'all' ? 'No results match your filter.' : 'No dealers or customers yet.'}
+          {searchQuery || typeFilter !== 'all'
+            ? 'No results match your filter.'
+            : unverifiedCount > 0
+              ? `No verified rows yet. ${unverifiedCount} unverified signup${unverifiedCount > 1 ? 's' : ''} hidden — click "Unverified" above to show.`
+              : 'No dealers or customers yet.'}
         </div>
       ) : (
         <>
@@ -1894,7 +1919,7 @@ export default function AdminDealers() {
         </div>
         <ScrollFade className="admin-table-wrap" bg="#fff">
           {(() => {
-            const selectableRows = unifiedRows.filter(r => getRowActions(r).length > 0);
+            const selectableRows = displayRows.filter(r => getRowActions(r).length > 0);
             const allSelected = selectableRows.length > 0 && selectableRows.every(r => selectedRows.has(r.id));
             const toggleAll = () => allSelected
               ? setSelectedRows(new Set())
@@ -1975,7 +2000,7 @@ export default function AdminDealers() {
               </tr>
             </thead>
             <tbody>
-              {unifiedRows.map((row, idx) => {
+              {displayRows.map((row, idx) => {
                 const appStatus = row.dealer_application_status;
                 // Show status dropdown for: (a) dealer rows always, or (b) customer rows
                 const rowActions = getRowActions(row);
@@ -2000,7 +2025,14 @@ export default function AdminDealers() {
                     )}
                   </td>
                   <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
-                  <td><TypeBadge type={row._type} /></td>
+                  <td>
+                    <TypeBadge type={row._type} />
+                    {row.email_verified === false && (
+                      <div style={{ fontSize: 9, color: '#9ca3af', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '1px 5px', marginTop: 3, display: 'inline-block', fontWeight: 600, letterSpacing: '0.2px' }}>
+                        Unverified
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{row._name}</div>
                     {row._type !== 'guest' && row.dealer_code && (

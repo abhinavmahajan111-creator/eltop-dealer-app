@@ -91,6 +91,16 @@ export default function Login() {
     // login screen never flashes stale state while async work is in progress.
     setLocalBusy(true);
 
+    // OTP verified → mark this profile's email as confirmed.
+    // The on_auth_user_created trigger creates the profiles row at signInWithOtp time
+    // (before OTP verification), so we mark it verified here when the OTP actually succeeds.
+    if (isSupabaseConfigured) {
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user) {
+        await supabase.from('profiles').update({ email_verified: true }).eq('id', authData.user.id);
+      }
+    }
+
     // ── Customer ──
     if (isCustomer) {
       if (isSupabaseConfigured) {
