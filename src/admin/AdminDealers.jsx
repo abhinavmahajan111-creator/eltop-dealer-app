@@ -2035,7 +2035,7 @@ export default function AdminDealers() {
                   </td>
                   <td>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{row._name}</div>
-                    {row._type !== 'guest' && row.dealer_code && (
+                    {row._type === 'dealer' && row.dealer_code && (
                       <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{row.dealer_code}</div>
                     )}
                   </td>
