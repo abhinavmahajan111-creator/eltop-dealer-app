@@ -306,6 +306,48 @@ export default function AdminDealers() {
   const typeDropdownPortalRef = useRef(null);  // ref on the portal div — kept out of the <th> DOM tree
   const [deletedGuests, setDeletedGuests]     = useState([]);
 
+  // ── Column-resize state ──────────────────────────────────────────────────────
+  // Indices: 0=checkbox 1=# 2=Type 3=Name 4=AppStatus 5=Phone 6=Email 7=Orders 8=Spent 9=LastOrder 10=Actions
+  const COL_WIDTHS_KEY = 'admin-col-widths-v1';
+  const COL_DEFAULTS   = [32, 36, 90, 150, 130, 110, 160, 70, 90, 100, 40];
+  const RESIZABLE_COLS = new Set([2, 3, 4, 5, 6, 7, 8, 9]); // checkbox/# /actions are fixed
+  const [colWidths, setColWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY));
+      if (Array.isArray(saved) && saved.length === COL_DEFAULTS.length) return saved;
+    } catch {}
+    return COL_DEFAULTS;
+  });
+  const colDragRef = useRef(null); // { colIndex, startX, startWidth }
+  const colWidthsRef = useRef(colWidths);
+  colWidthsRef.current = colWidths;
+
+  useEffect(() => {
+    try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(colWidths)); } catch {}
+  }, [colWidths]);
+
+  const onColResizeStart = (e, colIndex) => {
+    e.preventDefault();
+    e.stopPropagation();
+    colDragRef.current = { colIndex, startX: e.clientX, startWidth: colWidthsRef.current[colIndex] };
+    const onMove = (me) => {
+      if (!colDragRef.current) return;
+      const { colIndex: ci, startX, startWidth } = colDragRef.current;
+      setColWidths(prev => {
+        const next = [...prev];
+        next[ci] = Math.max(50, startWidth + me.clientX - startX);
+        return next;
+      });
+    };
+    const onUp = () => {
+      colDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   // ── Bulk-edit state ──────────────────────────────────────────────────────────
   const [selectedRows, setSelectedRows] = useState(new Set()); // Set of profile IDs
   const [bulkStatus,   setBulkStatus]   = useState('approve');
@@ -1841,6 +1883,15 @@ export default function AdminDealers() {
             </button>
           </div>
         )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+          <button
+            onClick={() => setColWidths(COL_DEFAULTS)}
+            style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 11, cursor: 'pointer', padding: '2px 4px', textDecoration: 'underline', fontFamily: 'inherit' }}
+            title="Reset all column widths to default"
+          >
+            Reset column widths
+          </button>
+        </div>
         <ScrollFade className="admin-table-wrap" bg="#fff">
           {(() => {
             const selectableRows = unifiedRows.filter(r => getRowActions(r).length > 0);
@@ -1860,14 +1911,20 @@ export default function AdminDealers() {
               rejected:        { bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
             };
             return (
-          <table className="admin-table">
+          <table className="admin-table" style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              {colWidths.map((w, i) => <col key={i} style={{ width: w }} />)}
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: 32, textAlign: 'center' }}>
+                {/* col 0 — checkbox, fixed */}
+                <th style={{ width: colWidths[0], textAlign: 'center', position: 'relative' }}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer', accentColor: '#7B2D8B' }} title="Select all" />
                 </th>
-                <th style={{ width: 36 }}>#</th>
-                <th style={{ width: 90 }} ref={typeDropdownRef}>
+                {/* col 1 — #, fixed */}
+                <th style={{ width: colWidths[1], position: 'relative' }}>#</th>
+                {/* col 2 — Type, resizable + filter button */}
+                <th style={{ width: colWidths[2], position: 'relative' }} ref={typeDropdownRef}>
                   <button
                     ref={typeDropdownBtnRef}
                     onClick={() => {
@@ -1892,15 +1949,29 @@ export default function AdminDealers() {
                      : 'Type: Deleted'}
                     {' '}▾
                   </button>
+                  <div onMouseDown={e => onColResizeStart(e, 2)} style={{ position: 'absolute', top: 0, right: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 1 }} />
                 </th>
-                <th>Name</th>
-                <th>App Status</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th style={{ textAlign: 'right' }}>Orders</th>
-                <th style={{ textAlign: 'right' }}>Spent</th>
-                <th>Last Order</th>
-                <th style={{ width: 40 }}></th>
+                {/* cols 3–9 — resizable */}
+                {[['Name', 3], ['App Status', 4], ['Phone', 5], ['Email', 6]].map(([label, ci]) => (
+                  <th key={ci} style={{ width: colWidths[ci], position: 'relative', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {label}
+                    <div onMouseDown={e => onColResizeStart(e, ci)} style={{ position: 'absolute', top: 0, right: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 1 }} />
+                  </th>
+                ))}
+                <th style={{ width: colWidths[7], textAlign: 'right', position: 'relative', overflow: 'hidden' }}>
+                  Orders
+                  <div onMouseDown={e => onColResizeStart(e, 7)} style={{ position: 'absolute', top: 0, right: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 1 }} />
+                </th>
+                <th style={{ width: colWidths[8], textAlign: 'right', position: 'relative', overflow: 'hidden' }}>
+                  Spent
+                  <div onMouseDown={e => onColResizeStart(e, 8)} style={{ position: 'absolute', top: 0, right: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 1 }} />
+                </th>
+                <th style={{ width: colWidths[9], position: 'relative', overflow: 'hidden' }}>
+                  Last Order
+                  <div onMouseDown={e => onColResizeStart(e, 9)} style={{ position: 'absolute', top: 0, right: 0, width: 6, height: '100%', cursor: 'col-resize', zIndex: 1 }} />
+                </th>
+                {/* col 10 — actions, fixed */}
+                <th style={{ width: colWidths[10] }}></th>
               </tr>
             </thead>
             <tbody>
