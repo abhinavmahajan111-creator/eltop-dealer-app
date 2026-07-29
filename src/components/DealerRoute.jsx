@@ -17,7 +17,13 @@ export default function DealerRoute() {
     );
   }
 
-  if (isDealer)    return <Outlet />;
+  if (isDealer) {
+    // Mirror the same approved-or-legacy check used in Store.jsx's isApprovedDealer.
+    // Pending dealers (pending_details / under_review / rejected) land on /store
+    // where the existing "application incomplete" banner handles the UX.
+    const isApproved = dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none';
+    return isApproved ? <Outlet /> : <Navigate to="/store" replace />;
+  }
   if (isAdmin)     return <Navigate to="/admin" replace />;
   if (isCustomer)  return <Navigate to="/store" replace />;
   return <Navigate to="/login" replace />;
