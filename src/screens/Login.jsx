@@ -125,7 +125,7 @@ export default function Login() {
       if (isSupabaseConfigured) {
         const { data: { user } } = await supabase.auth.getUser();
         const { data: prof, error: profErr } = await supabase
-          .from("profiles").select("is_dealer, is_blocked").eq("id", user.id).maybeSingle();
+          .from("profiles").select("is_dealer, is_blocked, dealer_application_status").eq("id", user.id).maybeSingle();
         // Non-PGRST116 error = actual query failure (network/RLS) — do not treat as "not a dealer"
         if (profErr && profErr.code !== "PGRST116") {
           setLocalError("Unable to verify your dealer account. Please try again.");
@@ -142,7 +142,9 @@ export default function Login() {
             setStep(1);
             return;
           }
-          navigate("/dashboard");
+          const das = prof?.dealer_application_status;
+          const isApproved = das === 'approved' || das === 'none' || !das;
+          navigate(isApproved ? "/dashboard" : "/store");
         } else {
           await supabase.auth.signOut();
           setDealerMismatch(true);
