@@ -552,6 +552,18 @@ export default function AdminDealers() {
     );
   }, [allProfiles, guestRows, dealerStatsMap, typeFilter, searchQuery]);
 
+  // Must live here — before any conditional early return — to satisfy Rules of Hooks.
+  const [showUnverified, setShowUnverified] = useState(false);
+  const unverifiedCount = useMemo(
+    () => unifiedRows.filter(r => r.email_verified === false).length,
+    [unifiedRows]
+  );
+  // Default view hides unverified (incomplete signups); toggle reveals them.
+  const displayRows = useMemo(
+    () => showUnverified ? unifiedRows : unifiedRows.filter(r => r.email_verified !== false),
+    [unifiedRows, showUnverified]
+  );
+
   // ─── Export ─────────────────────────────────────────────────────────────────
   const handleExport = async () => {
     if (!isSupabaseConfigured) return;
@@ -1749,18 +1761,6 @@ export default function AdminDealers() {
   const customerCount = allProfiles.filter(p => !p.deleted_at && p.is_dealer === false).length;
   const deletedCount    = allProfiles.filter(p =>  p.deleted_at).length + guestRows.filter(g => g._isDeletedGuest).length;
   const guestCount      = guestRows.filter(g => !g._isDeletedGuest).length;
-
-  const [showUnverified, setShowUnverified] = useState(false);
-
-  const unverifiedCount = useMemo(
-    () => unifiedRows.filter(r => r.email_verified === false).length,
-    [unifiedRows]
-  );
-  // Default view hides unverified (incomplete signups); toggle reveals them.
-  const displayRows = useMemo(
-    () => showUnverified ? unifiedRows : unifiedRows.filter(r => r.email_verified !== false),
-    [unifiedRows, showUnverified]
-  );
 
   return (
     <div className="admin-page">
