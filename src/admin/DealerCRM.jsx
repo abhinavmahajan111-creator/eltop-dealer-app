@@ -129,6 +129,9 @@ export default function DealerCRM() {
   if (loading) return <div style={{ padding: 40, textAlign: "center", fontFamily: "Arial, sans-serif" }}>Loading CRM…</div>;
   if (!dealer) return <div style={{ padding: 40, color: "red", fontFamily: "Arial, sans-serif" }}>Dealer not found.</div>;
 
+  const rawDealerName = dealer.name && dealer.name !== 'New Dealer' ? dealer.name : null;
+  const dealerAvatarInitials = (rawDealerName || dealer.email || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
   // ── Computed stats ──
   const totalRevenue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
   const avgOrder = orders.length ? totalRevenue / orders.length : 0;
@@ -303,15 +306,25 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
   return (
     <div style={{ fontFamily: "Arial, sans-serif", position: "fixed", inset: 0, zIndex: 1000, overflowY: "auto", background: "#f5f0f5", color: "#222" }}>
       {/* ── Header ── */}
-      <div style={{ background: "var(--red-dark)", color: "#fff", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16 }}>
+      <div style={{ background: "var(--red-dark)", color: "#fff", padding: "16px 24px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <button
           onClick={() => navigate("/admin/dealers")}
           style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontWeight: 600, fontSize: 13 }}
         >
           ← Dealers
         </button>
-        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
-          <div style={{ fontWeight: 700, fontSize: 17 }}>{dealer.name && dealer.name !== "New Dealer" ? dealer.name : dealer.email}</div>
+        <div style={{
+          width: 44, height: 44, borderRadius: "50%", background: "rgba(255,255,255,0.2)",
+          border: "2px solid rgba(255,255,255,0.5)", color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 16, fontWeight: 800, flexShrink: 0, letterSpacing: "0.5px",
+        }}>{dealerAvatarInitials}</div>
+        <div style={{ flex: 1, minWidth: 160, overflowWrap: 'break-word' }}>
+          <div style={{ fontWeight: 700, fontSize: 17 }}>
+            {rawDealerName
+              ? rawDealerName
+              : <span style={{ fontStyle: "italic", opacity: 0.7, fontWeight: 400 }}>Unnamed dealer</span>}
+          </div>
           <div style={{ fontSize: 12, opacity: 0.8 }}>{dealer.dealer_code || "No Code"} · {dealer.email}</div>
         </div>
         <div style={{ background: health.bg, color: health.color, padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
@@ -373,7 +386,7 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
         {/* ══ TAB 0: OVERVIEW ══ */}
         {tab === 0 && (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
               <StatCard label="Total Orders" value={orders.length} />
               <StatCard label="Total Revenue" value={`₹${fmt(totalRevenue)}`} />
               <StatCard label="Avg Order Value" value={`₹${fmt(avgOrder)}`} />

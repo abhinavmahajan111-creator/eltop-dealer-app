@@ -98,18 +98,29 @@ export default function CustomerCRM() {
   const val  = { fontSize: 14, fontWeight: 500 };
   const card = { background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 18 };
 
-  if (loading) return <div className="admin-app"><div className="admin-loading">Loading…</div></div>;
-  if (!profile) return <div className="admin-app"><div className="admin-loading">Customer not found.</div></div>;
+  if (loading) return <div style={{ padding: 40, textAlign: "center", fontFamily: "'Segoe UI', Arial, sans-serif" }}>Loading…</div>;
+  if (!profile) return <div style={{ padding: 40, color: "red", fontFamily: "'Segoe UI', Arial, sans-serif" }}>Customer not found.</div>;
+
+  const rawName = profile.name && profile.name !== 'New Customer' && profile.name !== 'New Dealer' ? profile.name : null;
+  const displayName = rawName
+    ? <span>{rawName}</span>
+    : <span style={{ color: "var(--muted)", fontStyle: "italic", fontWeight: 500 }}>Unnamed customer</span>;
+  const avatarInitials = (rawName || profile.email || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
   return (
-    <div className="admin-app">
+    <div style={{ fontFamily: "'Segoe UI', Arial, sans-serif", position: "fixed", inset: 0, zIndex: 1000, overflowY: "auto", background: "#f5f0f5", color: "#222" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={{ background: "#fff", borderBottom: "1px solid var(--border)", padding: "16px 24px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <button className="btn small outline" onClick={() => navigate("/admin/dealers")} style={{ whiteSpace: "nowrap" }}>
           ← Back
         </button>
+        <div style={{
+          width: 48, height: 48, borderRadius: "50%", background: "#7B2D8B",
+          color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 17, fontWeight: 800, flexShrink: 0, letterSpacing: "0.5px",
+        }}>{avatarInitials}</div>
         <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>{profile.name || profile.email || "Customer"}</div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>{displayName}</div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#f0fdf4", color: "#15803d", marginRight: 8 }}>
               Registered Customer
@@ -162,22 +173,24 @@ export default function CustomerCRM() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", borderBottom: "2px solid var(--border)", marginBottom: 20, overflowX: "auto" }}>
+      <div style={{ background: "#fff", borderBottom: "1px solid var(--border)", display: "flex", gap: 0, paddingLeft: 16, overflowX: "auto" }}>
         {TABS.map((t, i) => (
           <button key={t} onClick={() => setTab(i)} style={{
-            padding: "10px 20px", border: "none", background: "none", cursor: "pointer",
-            fontWeight: tab === i ? 800 : 500, fontSize: 13,
-            color: tab === i ? "var(--red-dark)" : "var(--muted)",
+            padding: "12px 20px", border: "none", background: "none", cursor: "pointer",
+            fontWeight: tab === i ? 700 : 400, fontSize: 13,
+            color: tab === i ? "var(--red-dark)" : "#555",
             borderBottom: tab === i ? "2px solid var(--red-dark)" : "2px solid transparent",
-            marginBottom: -2, whiteSpace: "nowrap", fontFamily: "inherit",
+            whiteSpace: "nowrap", fontFamily: "inherit",
           }}>{t}</button>
         ))}
       </div>
 
+      <div style={{ padding: "20px 24px", maxWidth: 900, margin: "0 auto" }}>
+
       {/* TAB 0: OVERVIEW */}
       {tab === 0 && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 20 }}>
             <StatCard label="Total Orders"    value={orders.length} />
             <StatCard label="Total Spent"     value={`₹${fmt(totalSpent)}`} />
             <StatCard label="Avg Order Value" value={`₹${fmt(avgOrder)}`} />
@@ -305,6 +318,8 @@ export default function CustomerCRM() {
           </div>
         )
       )}
+
+      </div>{/* end content wrapper */}
     </div>
   );
 }
