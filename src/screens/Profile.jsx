@@ -7,7 +7,8 @@ export default function Profile() {
   const navigate = useNavigate();
   const { dealer, email, signOut, session, isLoggedIn, dealerApplicationStatus } = useApp();
 
-  // toastKey > 0 means toast is visible. Incrementing restarts animation + dismiss timer.
+  // toastKey > 0 = toast visible. Incrementing remounts the element (restarts animation)
+  // and resets the 2.5s dismiss timer via useEffect.
   const [toastKey, setToastKey] = useState(0);
 
   useEffect(() => {
@@ -42,18 +43,16 @@ export default function Profile() {
     setToastKey(k => k + 1);
   }
 
-  // Chevron used by all unlocked rows.
   const chevron = <span className="arrow">&#8250;</span>;
-  // Lock icon used in place of chevron for locked rows.
   const lockIcon = <span style={{ fontSize: 14, color: "#94a3b8" }}>&#128274;</span>;
 
   return (
     <div className="screen" id="screen-profile">
       <style>{`
         @keyframes pendingToastIn {
-          0%   { transform: translateY(18px) scale(0.93); opacity: 0; }
-          60%  { transform: translateY(-4px) scale(1.03); opacity: 1; }
-          80%  { transform: translateY(2px) scale(0.98); }
+          0%   { transform: translateY(12px) scale(0.93); opacity: 0; }
+          60%  { transform: translateY(-3px) scale(1.03); opacity: 1; }
+          80%  { transform: translateY(1px) scale(0.98); }
           100% { transform: translateY(0) scale(1); opacity: 1; }
         }
         .pending-toast {
@@ -91,7 +90,8 @@ export default function Profile() {
           <div className="list-row"><span className="ic">&#127970;</span><span>GSTIN: {dealer.gstin}</span></div>
         </div>
 
-        <div className="list-card" style={{ position: "relative" }}>
+        {/* Navigation card — four rows that are locked for pending dealers */}
+        <div className="list-card">
           <div
             className="list-row"
             onClick={isPending ? handleLockedClick : () => navigate("/ledger")}
@@ -120,25 +120,27 @@ export default function Profile() {
           >
             <span className="ic">&#9742;</span><span>Support</span>{isPending ? lockIcon : chevron}
           </div>
-
-          {toastKey > 0 && (
-            <div
-              key={toastKey}
-              className="pending-toast"
-              style={{
-                position: "absolute", left: 12, right: 12, bottom: -48,
-                background: "#fef3c7", color: "#b45309",
-                border: "1.5px solid #b45309", borderRadius: 10,
-                padding: "9px 14px", fontSize: 13, fontWeight: 600,
-                textAlign: "center", pointerEvents: "none",
-              }}
-            >
-              Available once your application is approved.
-            </div>
-          )}
         </div>
 
-        <button className="btn outline" style={{ marginTop: 56 }} onClick={handleLogout}>Logout</button>
+        {/* Toast rendered in normal flow AFTER the card so .list-card's overflow:hidden can't clip it */}
+        {toastKey > 0 && (
+          <div
+            key={toastKey}
+            className="pending-toast"
+            style={{
+              marginTop: -8,
+              marginBottom: 8,
+              background: "#fef3c7", color: "#b45309",
+              border: "1.5px solid #b45309", borderRadius: 10,
+              padding: "9px 14px", fontSize: 13, fontWeight: 600,
+              textAlign: "center",
+            }}
+          >
+            Available once your application is approved.
+          </div>
+        )}
+
+        <button className="btn outline" onClick={handleLogout}>Logout</button>
       </div>
       <BottomNav />
     </div>
