@@ -2025,7 +2025,7 @@ export default function AdminDealers() {
                     )}
                   </td>
                   <td style={{ color: 'var(--muted)', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
-                  <td>
+                  <td style={{ overflow: 'hidden', maxWidth: 0 }}>
                     <TypeBadge type={row._type} />
                     {row.email_verified === false && (
                       <div style={{ fontSize: 9, color: '#9ca3af', background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '1px 5px', marginTop: 3, display: 'inline-block', fontWeight: 600, letterSpacing: '0.2px' }}>
@@ -2033,26 +2033,26 @@ export default function AdminDealers() {
                       </div>
                     )}
                   </td>
-                  <td>
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{row._name}</div>
+                  <td style={{ overflow: 'hidden', maxWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._name}</div>
                     {row._type === 'dealer' && row.dealer_code && (
-                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{row.dealer_code}</div>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.dealer_code}</div>
                     )}
                   </td>
-                  <td onClick={e => e.stopPropagation()}>
+                  <td onClick={e => e.stopPropagation()} style={{ overflow: 'hidden', maxWidth: 0 }}>
                     {showStatusDropdown ? (
                       <select
                         defaultValue=""
                         onChange={e => { if (e.target.value) { handleAction(e.target.value, row.id); e.target.value = ''; } }}
-                        style={{ background: '#f5f3ff', color: '#5b21b6', border: '1.5px solid #c4b5fd', borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none', fontFamily: 'inherit' }}
+                        style={{ background: '#f5f3ff', color: '#5b21b6', border: '1.5px solid #c4b5fd', borderRadius: 20, padding: '3px 8px', fontSize: 11, fontWeight: 700, cursor: 'pointer', outline: 'none', fontFamily: 'inherit', maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}
                       >
                         <option value="" disabled>{rowCurrentStatus(row)}</option>
                         {rowActions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                       </select>
                     ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
-                  <td style={{ fontSize: 12 }}>{row._phone || '—'}</td>
-                  <td style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._email || '—'}</td>
+                  <td style={{ fontSize: 12, overflow: 'hidden', maxWidth: 0, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._phone || '—'}</td>
+                  <td style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', maxWidth: 0, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row._email || '—'}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, fontSize: 13 }}>{row._orderCount || '—'}</td>
                   <td style={{ textAlign: 'right', fontSize: 12 }}>
                     {row._totalSpent ? `₹${Number(row._totalSpent).toLocaleString('en-IN')}` : '—'}
