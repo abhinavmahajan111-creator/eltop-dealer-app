@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import PhoneFrame from "./components/PhoneFrame";
 import AdminRoute from "./components/AdminRoute";
 import DealerRoute from "./components/DealerRoute";
+import DealerProfileRoute from "./components/DealerProfileRoute";
 import CustomerRoute from "./components/CustomerRoute";
 import Store from "./pages/Store";
 import MyAccount from "./pages/MyAccount";
@@ -54,9 +55,11 @@ export default function App() {
           <Route path="/cart" element={<Cart />} />
           <Route path="/confirm" element={<OrderConfirm />} />
           <Route path="/tracking" element={<OrderTracking />} />
-          <Route path="/profile" element={<Profile />} />
           <Route path="/schemes" element={<Schemes />} />
           <Route path="/support" element={<Support />} />
+        </Route>
+        <Route element={<DealerProfileRoute />}>
+          <Route path="/profile" element={<Profile />} />
         </Route>
       </Route>
 

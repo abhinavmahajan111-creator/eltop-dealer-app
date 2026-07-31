@@ -5,7 +5,7 @@ import { useApp } from "../context/AppContext";
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { dealer, email, signOut, session, isLoggedIn } = useApp();
+  const { dealer, email, signOut, session, isLoggedIn, dealerApplicationStatus } = useApp();
 
   useEffect(() => {
     if (isLoggedIn === false) navigate("/login", { replace: true });
@@ -34,7 +34,19 @@ export default function Profile() {
       <div className="content">
         <div className="profile-head">
           <div className="avatar">{initials}</div>
-          <div className="profile-name">{dealer.name}</div>
+          <div className="profile-name" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexWrap: "wrap" }}>
+            {dealer.name}
+            {dealerApplicationStatus && dealerApplicationStatus !== 'approved' && dealerApplicationStatus !== 'none' && (
+              <span style={{
+                display: "inline-flex", alignItems: "center",
+                background: "#fef3c7", color: "#b45309",
+                fontSize: 11, fontWeight: 700, padding: "2px 9px",
+                borderRadius: 20, border: "1.5px solid #b45309",
+              }}>
+                Application pending
+              </span>
+            )}
+          </div>
           <div className="profile-sub">Dealer ID: {dealer.dealer_code}</div>
         </div>
         <div className="list-card">
