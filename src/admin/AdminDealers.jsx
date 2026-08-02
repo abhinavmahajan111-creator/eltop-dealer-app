@@ -1351,7 +1351,7 @@ export default function AdminDealers() {
 
         <div style={{ background: "#fff", borderRadius: 16, padding: 28, boxShadow: "0 2px 12px rgba(0,0,0,.07)", maxWidth: 760 }}>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 4, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 4, paddingBottom: 20, borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
             <div style={{
               width: 56, height: 56, borderRadius: "50%", flexShrink: 0,
               background: "var(--red-light)", display: "flex", alignItems: "center",
@@ -1368,7 +1368,7 @@ export default function AdminDealers() {
                 {selected.dealer_code || "No Code"} · Member since {memberSince}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", width: '100%' }}>
               <TypeBadge type={isDeleted ? 'deleted' : 'dealer'} />
               {!isDeleted && (
                 <span className={`badge ${selected.is_blocked ? "pending" : "delivered"}`}>
