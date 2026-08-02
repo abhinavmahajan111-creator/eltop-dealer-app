@@ -119,7 +119,7 @@ export default function CustomerCRM() {
           color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 17, fontWeight: 800, flexShrink: 0, letterSpacing: "0.5px",
         }}>{avatarInitials}</div>
-        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'break-word', wordBreak: 'break-all' }}>
+        <div style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
           <div style={{ fontSize: 20, fontWeight: 800 }}>{displayName}</div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: "#f0fdf4", color: "#15803d", marginRight: 8 }}>
