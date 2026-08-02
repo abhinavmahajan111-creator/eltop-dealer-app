@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React from 'react';
 
 /**
  * PDF action sheet — shown after PDF is ready in Supabase Storage.
@@ -9,30 +9,17 @@ import { useState } from 'react';
  *   onClose  — called when dismissed
  */
 export default function PdfViewerModal({ url, filename, onClose }) {
-  const [downloading, setDownloading] = useState(false);
-
   function handleOpen() {
     window.open(url, '_blank');
   }
 
-  async function handleDownload() {
-    setDownloading(true);
-    try {
-      const resp = await fetch(url);
-      const blob = await resp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-      alert('Download failed: ' + err.message);
-    } finally {
-      setDownloading(false);
-    }
+  function handleDownload() {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   async function handleShare() {
@@ -102,16 +89,14 @@ export default function PdfViewerModal({ url, filename, onClose }) {
         <div style={{ display: 'flex', gap: 10 }}>
           <button
             onClick={handleDownload}
-            disabled={downloading}
             style={{
               flex: 1, padding: '12px',
               background: 'none', border: '1.5px solid #7B2D8B', borderRadius: 10,
               color: '#7B2D8B', fontWeight: 700, fontSize: 14,
-              cursor: downloading ? 'wait' : 'pointer',
-              opacity: downloading ? 0.6 : 1, fontFamily: 'inherit',
+              cursor: 'pointer', fontFamily: 'inherit',
             }}
           >
-            {downloading ? '…' : '⬇ Download'}
+            ⬇ Download
           </button>
           <button
             onClick={handleShare}
