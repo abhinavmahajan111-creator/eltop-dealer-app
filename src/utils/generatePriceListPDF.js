@@ -734,24 +734,42 @@ export async function generatePriceListPDF({ role = 'customer', discountCols = [
     // Core upload logic — shared between immediate (waitForUpload) and background paths.
     const uploadStart = Date.now();
     // Returns { publicUrl } on success or throws with a descriptive message on failure.
+    // Uses a server-side signed URL so the upload bypasses Storage RLS without
+    // exposing the service-role key in frontend code.
     async function doUpload() {
       onDebug?.({ step: 'upload-start', elapsed: Date.now() - _t0 });
 
-      const { error: storageErr } = await supabaseClient.storage
-        .from('price-lists')
-        .upload(storagePath, blob, { contentType: 'application/pdf', upsert: true });
+      // Step 1: Ask the server (Vercel function) for a service-role signed upload URL.
+      const urlRes = await fetch('/api/upload-pdf-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath, role }),
+      });
       const uploadMs = Date.now() - uploadStart;
 
-      if (storageErr) {
-        console.error('[PDF] Storage upload error:', storageErr);
-        onDebug?.({ step: 'upload-error', error: storageErr.message, uploadMs });
-        throw new Error('Storage upload failed: ' + (storageErr.message || JSON.stringify(storageErr)));
+      if (!urlRes.ok) {
+        const errData = await urlRes.json().catch(() => ({}));
+        const msg = errData.error || `HTTP ${urlRes.status}`;
+        console.error('[PDF] upload-pdf-url API error:', msg);
+        onDebug?.({ step: 'upload-error', error: msg, uploadMs });
+        throw new Error('Storage upload failed: ' + msg);
       }
 
-      const { data: { publicUrl } } = supabaseClient.storage
-        .from('price-lists')
-        .getPublicUrl(storagePath);
+      const { token, path: signedPath, publicUrl } = await urlRes.json();
 
+      // Step 2: Upload blob directly from browser to Supabase using the signed token.
+      // uploadToSignedUrl uses the token for auth — RLS is not checked on signed uploads.
+      const { error: uploadErr } = await supabaseClient.storage
+        .from('price-lists')
+        .uploadToSignedUrl(signedPath, token, blob, { contentType: 'application/pdf', upsert: true });
+
+      if (uploadErr) {
+        console.error('[PDF] uploadToSignedUrl error:', uploadErr);
+        onDebug?.({ step: 'upload-error', error: uploadErr.message });
+        throw new Error('Storage upload failed: ' + (uploadErr.message || JSON.stringify(uploadErr)));
+      }
+
+      // Step 3: Upsert price_list_cache (admin session client, as before).
       const { error: cacheErr } = await supabaseClient.from('price_list_cache').upsert({
         role,
         storage_path: storagePath,

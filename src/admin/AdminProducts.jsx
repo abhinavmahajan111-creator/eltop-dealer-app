@@ -1251,8 +1251,10 @@ export default function AdminProducts() {
                       includeDiscountCols: includePdfDiscountCols,
                       returnBlob: true,
                     });
-                    const blobUrl = URL.createObjectURL(result.blob);
-                    setPdfViewer({ blobUrl, filename: result.filename });
+                    // result.publicUrl is already a blob: URL (generatePriceListPDF creates
+                    // it internally); calling createObjectURL again on result.blob is wrong
+                    // — result.blob is undefined in the returnBlob=true path.
+                    setPdfViewer({ blobUrl: result.publicUrl, filename: result.filename });
                   } catch (err) {
                     alert('Could not generate PDF: ' + err.message);
                   } finally {
