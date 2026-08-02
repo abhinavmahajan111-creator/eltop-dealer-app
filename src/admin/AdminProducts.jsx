@@ -1201,7 +1201,7 @@ export default function AdminProducts() {
     <div className="admin-page">
       {pdfViewer && (
         <PdfViewerModal
-          blobUrl={pdfViewer.blobUrl}
+          url={pdfViewer.blobUrl}
           filename={pdfViewer.filename}
           onClose={() => { URL.revokeObjectURL(pdfViewer.blobUrl); setPdfViewer(null); }}
         />
