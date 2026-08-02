@@ -357,7 +357,7 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
             actions.push(btn('block',     'Block Dealer',           { background: '#dc2626' }));
           }
           return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}>
               <span style={{ background: badge.bg, color: badge.color, border: `1.5px solid ${badge.border}`, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>
                 {badge.text}
               </span>
