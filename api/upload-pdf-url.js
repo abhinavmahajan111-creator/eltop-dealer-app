@@ -21,14 +21,19 @@ export default async function handler(req, res) {
   const anonKey     = process.env.VITE_SUPABASE_KEY;
 
   // ── DIAGNOSTIC LOGGING (temporary) ────────────────────────────────────────
+  function jwtRole(jwt) {
+    try {
+      const payload = jwt.split('.')[1];
+      const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'));
+      return decoded.role ?? '(role field missing)';
+    } catch { return '(decode failed)'; }
+  }
   console.log('[upload-pdf-url] DIAG env check:', {
-    urlSource:       process.env.SUPABASE_URL ? 'SUPABASE_URL' : (process.env.VITE_SUPABASE_URL ? 'VITE_SUPABASE_URL' : 'MISSING'),
-    urlPrefix:       supabaseUrl?.slice(0, 30) ?? 'undefined',
-    serviceKeyLen:   serviceKey?.length ?? 'undefined',
-    serviceKeyStart: serviceKey?.slice(0, 6) ?? 'undefined',
-    anonKeyStart:    anonKey?.slice(0, 6) ?? 'undefined',
-    // If serviceKeyStart === anonKeyStart they are likely the same key (wrong value set)
-    keysMatch:       serviceKey && anonKey ? serviceKey === anonKey : 'n/a',
+    urlSource:      process.env.SUPABASE_URL ? 'SUPABASE_URL' : (process.env.VITE_SUPABASE_URL ? 'VITE_SUPABASE_URL' : 'MISSING'),
+    urlPrefix:      supabaseUrl?.slice(0, 30) ?? 'undefined',
+    serviceKeyLen:  serviceKey?.length ?? 'undefined',
+    serviceKeyRole: serviceKey ? jwtRole(serviceKey) : 'undefined',
+    anonKeyRole:    anonKey    ? jwtRole(anonKey)    : 'undefined',
   });
   // ──────────────────────────────────────────────────────────────────────────
 
