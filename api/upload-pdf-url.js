@@ -18,6 +18,19 @@ export default async function handler(req, res) {
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey     = process.env.VITE_SUPABASE_KEY;
+
+  // ── DIAGNOSTIC LOGGING (temporary) ────────────────────────────────────────
+  console.log('[upload-pdf-url] DIAG env check:', {
+    urlSource:       process.env.SUPABASE_URL ? 'SUPABASE_URL' : (process.env.VITE_SUPABASE_URL ? 'VITE_SUPABASE_URL' : 'MISSING'),
+    urlPrefix:       supabaseUrl?.slice(0, 30) ?? 'undefined',
+    serviceKeyLen:   serviceKey?.length ?? 'undefined',
+    serviceKeyStart: serviceKey?.slice(0, 6) ?? 'undefined',
+    anonKeyStart:    anonKey?.slice(0, 6) ?? 'undefined',
+    // If serviceKeyStart === anonKeyStart they are likely the same key (wrong value set)
+    keysMatch:       serviceKey && anonKey ? serviceKey === anonKey : 'n/a',
+  });
+  // ──────────────────────────────────────────────────────────────────────────
 
   if (!supabaseUrl || !serviceKey) {
     console.error('[upload-pdf-url] missing env vars — SUPABASE_SERVICE_ROLE_KEY not configured');
@@ -35,8 +48,10 @@ export default async function handler(req, res) {
       .createSignedUploadUrl(storagePath, { upsert: true });
 
     if (error) {
-      console.error('[upload-pdf-url] createSignedUploadUrl error:', error);
-      return res.status(500).json({ error: error.message });
+      // Log the full error object — not just .message — to expose status/code fields
+      console.error('[upload-pdf-url] createSignedUploadUrl FULL error:', JSON.stringify(error, null, 2));
+      console.error('[upload-pdf-url] error.name:', error.name, '| error.status:', error.status, '| error.statusCode:', error.statusCode);
+      return res.status(500).json({ error: error.message, errorName: error.name, errorStatus: error.status });
     }
 
     const { data: { publicUrl } } = admin.storage
