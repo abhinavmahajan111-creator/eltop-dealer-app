@@ -200,7 +200,7 @@ export default function CustomerCRM() {
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Account Info</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 24px" }}>
               {[
-                ["Name",             profile.name  || "—"],
+                ["Name",             rawName || "—"],
                 ["Phone",            profile.phone || "—"],
                 ["Email",            profile.email || "—"],
                 ["Account Type",     "Verified Customer"],
