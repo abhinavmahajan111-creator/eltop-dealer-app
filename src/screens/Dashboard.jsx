@@ -144,7 +144,7 @@ export default function Dashboard() {
           .or(orFilter).neq("status", "cancelled")
           .gte("created_at", lastYearStart).lt("created_at", lastYearEnd),
 
-        supabase.from("dealer_ledger").select("type, amount").eq("dealer_id", uid),
+        supabase.from("dealer_ledger").select("type, amount").or(`dealer_id.eq.${uid},profile_id.eq.${uid}`),
 
         supabase.from("orders").select("id, total, status, created_at")
           .or(orFilter).order("created_at", { ascending: false }).limit(5),
