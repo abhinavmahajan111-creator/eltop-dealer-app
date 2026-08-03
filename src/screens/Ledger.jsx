@@ -18,7 +18,7 @@ export default function Ledger() {
       const { data } = await supabase
         .from("dealer_ledger")
         .select("id, type, amount, notes, reference_no, created_at")
-        .or(`dealer_id.eq.${uid},profile_id.eq.${uid}`)
+        .eq("dealer_id", uid)
         .order("created_at", { ascending: false });
       setLedger(data || []);
       setLoading(false);
