@@ -83,10 +83,12 @@ export default function DealerCRM() {
   const [actOpen, setActOpen] = useState(false);
   const [actSaving, setActSaving] = useState(false);
 
-  // Ledger form
-  const [ledForm, setLedForm] = useState({ type: "payment", amount: "", notes: "", reference_no: "" });
-  const [ledOpen, setLedOpen] = useState(false);
+  // Ledger
+  const [ledPeriod, setLedPeriod] = useState({ from: '', to: '' });
+  const [ledVoucherMode, setLedVoucherMode] = useState(null); // null | 'picker' | voucher-type string
+  const [ledVoucherForm, setLedVoucherForm] = useState({});
   const [ledSaving, setLedSaving] = useState(false);
+  const [expandedLedgerId, setExpandedLedgerId] = useState(null);
 
   // AI chat
   const [messages, setMessages] = useState([]);
@@ -147,18 +149,57 @@ export default function DealerCRM() {
   const d2 = Number(dealer.discount2 || 0);
   const netPct = ((1 - d1 / 100) * (1 - d2 / 100) * 100).toFixed(2);
 
-  // Ledger totals
-  const totalBilled = ledger.filter(l => l.type === "order").reduce((s, l) => s + Number(l.amount), 0);
-  const totalPaid = ledger.filter(l => l.type === "payment").reduce((s, l) => s + Number(l.amount), 0);
-  const outstanding = totalBilled - totalPaid;
+  // ── Ledger computed values ─────────────────────────────────────────────────
+  const isDealerAccount = (name) => {
+    if (!name) return false;
+    const n = name.toLowerCase().trim();
+    const targets = [dealer.shop_name, dealer.owner_name, dealer.name, dealer.dealer_code]
+      .filter(Boolean).map(s => s.toLowerCase().trim());
+    return targets.some(t => t && (n === t || n.includes(t) || t.includes(n)));
+  };
 
-  // Running balance for ledger table
-  let runBalance = 0;
-  const ledgerWithBalance = [...ledger].reverse().map(row => {
-    if (row.type === "payment") runBalance -= Number(row.amount);
-    else runBalance += Number(row.amount);
-    return { ...row, balance: runBalance };
+  const entryDr = (row) => row.type === "order" || (row.type === "journal" && row.dr_dealer);
+  const entryCr = (row) => row.type === "payment" || row.type === "credit_note" || (row.type === "journal" && row.cr_dealer);
+
+  // All-time outstanding (independent of period filter)
+  const outstanding = ledger.reduce((s, row) => {
+    if (entryDr(row)) return s + Number(row.amount);
+    if (entryCr(row)) return s - Number(row.amount);
+    return s;
+  }, 0);
+
+  // Period filter
+  const periodFrom = ledPeriod.from ? new Date(ledPeriod.from) : null;
+  const periodTo   = ledPeriod.to   ? new Date(ledPeriod.to + 'T23:59:59') : null;
+
+  const entryDate = (row) => new Date(row.voucher_date || row.created_at);
+
+  // Opening balance = all entries BEFORE the From date
+  const openingBalance = periodFrom
+    ? ledger.reduce((s, row) => {
+        if (entryDate(row) >= periodFrom) return s;
+        if (entryDr(row)) return s + Number(row.amount);
+        if (entryCr(row)) return s - Number(row.amount);
+        return s;
+      }, 0)
+    : 0;
+
+  const filteredLedger = ledger.filter(row => {
+    const d = entryDate(row);
+    if (periodFrom && d < periodFrom) return false;
+    if (periodTo   && d > periodTo)   return false;
+    return true;
+  });
+
+  // Running balance oldest→newest, then flip for display (newest first)
+  let runBal = openingBalance;
+  const filteredWithBalance = [...filteredLedger].reverse().map(row => {
+    const drAmt = entryDr(row) ? Number(row.amount) : 0;
+    const crAmt = entryCr(row) ? Number(row.amount) : 0;
+    runBal += drAmt - crAmt;
+    return { ...row, balance: runBal, drAmt, crAmt };
   }).reverse();
+  const closingBalance = runBal;
 
   // ── Activity actions ──
   const saveActivity = async () => {
@@ -173,17 +214,53 @@ export default function DealerCRM() {
     setActForm({ type: "call", notes: "", date: new Date().toISOString().slice(0, 10) });
   };
 
-  // ── Ledger actions ──
-  const saveLedger = async () => {
+  // ── Ledger voucher actions ─────────────────────────────────────────────────
+  const generateVoucherNo = async (vType) => {
+    const prefixes = { sales_invoice: 'SI', payment_received: 'PR', credit_note: 'CN', journal: 'JV' };
+    const prefix = prefixes[vType] || 'VCH';
+    const dbType = vType === 'sales_invoice' ? 'order' : vType === 'payment_received' ? 'payment' : vType;
+    const { count } = await supabase.from('dealer_ledger')
+      .select('id', { count: 'exact', head: true })
+      .eq('dealer_id', dealerId).eq('type', dbType);
+    const seq = String((count || 0) + 1).padStart(4, '0');
+    return `EEIPL/${prefix}/${seq}`;
+  };
+
+  const saveLedgerVoucher = async () => {
     setLedSaving(true);
-    const { data } = await supabase.from("dealer_ledger").insert({
-      dealer_id: dealerId, type: ledForm.type,
-      amount: Number(ledForm.amount), notes: ledForm.notes, reference_no: ledForm.reference_no,
-    }).select().single();
-    if (data) setLedger(prev => [data, ...prev]);
+    const f = ledVoucherForm;
+    const vType = ledVoucherMode;
+    const voucherNo = await generateVoucherNo(vType);
+    const row = {
+      dealer_id:    dealerId,
+      voucher_no:   voucherNo,
+      voucher_type: vType,
+      voucher_date: f.date || new Date().toISOString().slice(0, 10),
+      narration:    f.narration || '',
+      amount:       Number(f.amount || 0),
+    };
+    if (vType === 'sales_invoice') {
+      row.type = 'order';
+    } else if (vType === 'payment_received') {
+      row.type = 'payment';
+      row.method = f.method || 'Cash';
+      row.reference_no = f.reference_no || '';
+    } else if (vType === 'credit_note') {
+      row.type = 'credit_note';
+      row.reason = f.reason || '';
+    } else if (vType === 'journal') {
+      row.type = 'journal';
+      row.dr_account = f.dr_account || '';
+      row.cr_account = f.cr_account || '';
+      row.dr_dealer  = isDealerAccount(f.dr_account);
+      row.cr_dealer  = isDealerAccount(f.cr_account);
+    }
+    const { data, error } = await supabase.from('dealer_ledger').insert(row).select().single();
+    if (error) { alert('Save failed: ' + error.message); }
+    else { setLedger(prev => [data, ...prev]); }
     setLedSaving(false);
-    setLedOpen(false);
-    setLedForm({ type: "payment", amount: "", notes: "", reference_no: "" });
+    setLedVoucherMode(null);
+    setLedVoucherForm({});
   };
 
   // ── Order expand ──
@@ -578,93 +655,354 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
         )}
 
         {/* ══ TAB 3: LEDGER ══ */}
-        {tab === 3 && (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
-              <StatCard label="Total Billed" value={`₹${fmt(totalBilled)}`} />
-              <StatCard label="Total Paid" value={`₹${fmt(totalPaid)}`} />
-              <StatCard label="Outstanding" value={`₹${fmt(outstanding)}`}
-                sub={outstanding > 0 ? "Balance due" : "Fully paid"} />
+        {tab === 3 && (() => {
+          const iStyle = { width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit", marginBottom: 0 };
+          const fld = (lbl, children) => (
+            <div key={lbl}>
+              <div style={label}>{lbl}</div>
+              {children}
             </div>
+          );
+          const vf = ledVoucherForm;
+          const setVf = (patch) => setLedVoucherForm(p => ({ ...p, ...patch }));
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-              <button className="btn small" onClick={() => setLedOpen(v => !v)}>+ Add Entry</button>
-            </div>
+          const VOUCHER_TYPES = [
+            { key: 'sales_invoice',    icon: '🧾', title: 'Sales Invoice',     desc: 'Record a sale / bill to dealer' },
+            { key: 'payment_received', icon: '💰', title: 'Payment Received',  desc: 'Record cash, UPI, cheque, NEFT' },
+            { key: 'credit_note',      icon: '📋', title: 'Credit Note',       desc: 'Deduct from outstanding balance' },
+            { key: 'journal',          icon: '📒', title: 'Journal Voucher',   desc: 'Free Dr/Cr double-entry posting' },
+          ];
 
-            {ledOpen && (
-              <div style={{ ...card, border: "1.5px solid var(--red-light)" }}>
-                <div style={{ fontWeight: 700, marginBottom: 12 }}>New Ledger Entry</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                  <div>
-                    <div style={label}>Type</div>
-                    <select value={ledForm.type} onChange={e => setLedForm(p => ({ ...p, type: e.target.value }))}
-                      style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13 }}>
-                      {["payment", "order", "credit_note"].map(t => <option key={t} value={t}>{t.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <div style={label}>Amount (₹)</div>
-                    <input type="number" value={ledForm.amount} onChange={e => setLedForm(p => ({ ...p, amount: e.target.value }))}
-                      placeholder="0" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                  </div>
-                  <div>
-                    <div style={label}>Reference No.</div>
-                    <input value={ledForm.reference_no} onChange={e => setLedForm(p => ({ ...p, reference_no: e.target.value }))}
-                      placeholder="Cheque / UPI ref" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
-                  </div>
-                  <div>
-                    <div style={label}>Notes</div>
-                    <input value={ledForm.notes} onChange={e => setLedForm(p => ({ ...p, notes: e.target.value }))}
-                      placeholder="Optional" style={{ width: "100%", boxSizing: "border-box", marginBottom: 0 }} />
+          const voucherTypeLabel = { sales_invoice: 'Sales Invoice', payment_received: 'Payment Received', credit_note: 'Credit Note', journal: 'Journal Voucher' };
+          const voucherTypeBadgeStyle = {
+            sales_invoice:    { bg: '#fdecea', color: '#c0392b' },
+            payment_received: { bg: '#eafaf1', color: '#27ae60' },
+            credit_note:      { bg: '#fef9e7', color: '#e67e22' },
+            journal:          { bg: '#eef2ff', color: '#3730a3' },
+            order:            { bg: '#fdecea', color: '#c0392b' },
+            payment:          { bg: '#eafaf1', color: '#27ae60' },
+          };
+
+          const effectiveType = (row) => row.voucher_type || (row.type === 'order' ? 'sales_invoice' : row.type === 'payment' ? 'payment_received' : row.type);
+          const badgeStyle = (row) => voucherTypeBadgeStyle[effectiveType(row)] || { bg: '#f3f4f6', color: '#555' };
+
+          const thS = { textAlign: "left", padding: "7px 10px", color: "var(--muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" };
+          const tdS = { padding: "9px 10px", fontSize: 13, borderBottom: "1px solid var(--border)", verticalAlign: "middle" };
+          const amtTdS = { ...tdS, fontWeight: 700, textAlign: "right" };
+          const balStyle = (bal) => ({ ...amtTdS, color: bal > 0 ? "#c0392b" : "#27ae60", whiteSpace: "nowrap" });
+
+          return (
+            <>
+              {/* ── Voucher overlay ── */}
+              {ledVoucherMode && ledVoucherMode !== 'picker' && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                  <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,.18)" }}>
+                    {/* Voucher header */}
+                    <div style={{ background: "var(--red-dark)", color: "#fff", borderRadius: "16px 16px 0 0", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: 15 }}>{voucherTypeLabel[ledVoucherMode]}</div>
+                        <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>
+                          {vf.voucher_no_preview || 'EEIPL/…/…'} · {vf.date || new Date().toISOString().slice(0, 10)}
+                        </div>
+                      </div>
+                      <button onClick={() => { setLedVoucherMode(null); setLedVoucherForm({}); }}
+                        style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                        Cancel
+                      </button>
+                    </div>
+
+                    <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+                      {/* Date — common */}
+                      {fld("Voucher Date",
+                        <input type="date" value={vf.date || new Date().toISOString().slice(0, 10)}
+                          onChange={e => setVf({ date: e.target.value })} style={iStyle} />
+                      )}
+
+                      {/* Sales Invoice */}
+                      {ledVoucherMode === 'sales_invoice' && (<>
+                        <div style={{ background: "#fdf4ff", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--red-dark)" }}>Particulars</div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>{dealer.shop_name || dealer.owner_name || dealer.name} A/c</span>
+                            <span style={{ fontWeight: 700, color: "#c0392b" }}>Dr</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To Sales A/c</div>
+                        </div>
+                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
+                        {fld("Narration", <input placeholder="e.g. Invoice for fans — batch May 2026" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                      </>)}
+
+                      {/* Payment Received */}
+                      {ledVoucherMode === 'payment_received' && (<>
+                        <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4, color: "#27ae60" }}>Particulars</div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>Cash / Bank A/c</span>
+                            <span style={{ fontWeight: 700, color: "#27ae60" }}>Dr</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To {dealer.shop_name || dealer.owner_name || dealer.name} A/c (Cr)</div>
+                        </div>
+                        {fld("Method",
+                          <select value={vf.method || 'Cash'} onChange={e => setVf({ method: e.target.value })} style={iStyle}>
+                            {["Cash", "UPI", "Cheque", "RTGS-NEFT"].map(m => <option key={m}>{m}</option>)}
+                          </select>
+                        )}
+                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
+                        {fld("Reference No.", <input placeholder="Cheque no. / UTR / UPI ref" value={vf.reference_no || ''} onChange={e => setVf({ reference_no: e.target.value })} style={iStyle} />)}
+                        {fld("Narration", <input placeholder="e.g. Payment received via NEFT" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                      </>)}
+
+                      {/* Credit Note */}
+                      {ledVoucherMode === 'credit_note' && (<>
+                        <div style={{ background: "#fef9e7", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4, color: "#e67e22" }}>Particulars</div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>Sales Returns / Allowance A/c</span>
+                            <span style={{ fontWeight: 700, color: "#e67e22" }}>Dr</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To {dealer.shop_name || dealer.owner_name || dealer.name} A/c (Cr)</div>
+                        </div>
+                        {fld("Reason", <input placeholder="e.g. Goods returned — damaged in transit" value={vf.reason || ''} onChange={e => setVf({ reason: e.target.value })} style={iStyle} />)}
+                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
+                        {fld("Narration", <input placeholder="Optional note" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                      </>)}
+
+                      {/* Journal Voucher */}
+                      {ledVoucherMode === 'journal' && (<>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          {fld("Dr Account (Debit)",
+                            <input placeholder="Account name (e.g. dealer name or 'Bad Debts')" value={vf.dr_account || ''} onChange={e => setVf({ dr_account: e.target.value })} style={iStyle} />
+                          )}
+                          {fld("Cr Account (Credit)",
+                            <input placeholder="Account name" value={vf.cr_account || ''} onChange={e => setVf({ cr_account: e.target.value })} style={iStyle} />
+                          )}
+                        </div>
+                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
+
+                        {/* Live Dr/Cr preview table */}
+                        {(vf.dr_account || vf.cr_account) && Number(vf.amount) > 0 && (
+                          <div style={{ borderRadius: 10, border: "1.5px solid #c7d2fe", overflow: "hidden" }}>
+                            <div style={{ background: "#eef2ff", padding: "7px 12px", fontSize: 11, fontWeight: 700, color: "#3730a3" }}>Journal Entry Preview</div>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ borderBottom: "1px solid #c7d2fe" }}>
+                                  {["Particulars", "Debit (Dr)", "Credit (Cr)"].map(h => (
+                                    <th key={h} style={{ padding: "6px 12px", textAlign: h === "Particulars" ? "left" : "right", fontSize: 11, color: "#555", fontWeight: 600 }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td style={{ padding: "7px 12px" }}>{vf.dr_account || "—"} A/c {isDealerAccount(vf.dr_account) && <span style={{ fontSize: 10, color: "var(--red-dark)", fontWeight: 700 }}>★ Dealer</span>}</td>
+                                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: "#c0392b" }}>₹{fmt(vf.amount)}</td>
+                                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--muted)" }}>—</td>
+                                </tr>
+                                <tr style={{ borderTop: "1px solid #e0e7ff" }}>
+                                  <td style={{ padding: "7px 12px 7px 24px", color: "var(--muted)" }}>To {vf.cr_account || "—"} A/c {isDealerAccount(vf.cr_account) && <span style={{ fontSize: 10, color: "var(--red-dark)", fontWeight: 700 }}>★ Dealer</span>}</td>
+                                  <td style={{ padding: "7px 12px", textAlign: "right", color: "var(--muted)" }}>—</td>
+                                  <td style={{ padding: "7px 12px", textAlign: "right", fontWeight: 700, color: "#27ae60" }}>₹{fmt(vf.amount)}</td>
+                                </tr>
+                                <tr style={{ borderTop: "2px solid #c7d2fe", background: "#f5f7ff" }}>
+                                  <td style={{ padding: "6px 12px", fontSize: 11, color: "#555", fontWeight: 600 }}>Balance Effect on Dealer</td>
+                                  <td style={{ padding: "6px 12px", textAlign: "right", fontSize: 11, color: "#c0392b", fontWeight: 700 }}>
+                                    {isDealerAccount(vf.dr_account) ? `+₹${fmt(vf.amount)} Dr` : "—"}
+                                  </td>
+                                  <td style={{ padding: "6px 12px", textAlign: "right", fontSize: 11, color: "#27ae60", fontWeight: 700 }}>
+                                    {isDealerAccount(vf.cr_account) ? `−₹${fmt(vf.amount)} Cr` : "—"}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {fld("Narration", <input placeholder="e.g. Adjustment for excess billing" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                      </>)}
+
+                      {/* Accept button */}
+                      <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
+                        <button className="btn small"
+                          disabled={ledSaving || !Number(vf.amount)}
+                          onClick={saveLedgerVoucher}
+                          style={{ flex: 1, background: "var(--red-dark)", color: "#fff", border: "none" }}>
+                          {ledSaving ? "Saving…" : "✓ Accept"}
+                        </button>
+                        <button className="btn small outline" onClick={() => { setLedVoucherMode(null); setLedVoucherForm({}); }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn small" disabled={ledSaving || !ledForm.amount} onClick={saveLedger}>{ledSaving ? "Saving…" : "Save"}</button>
-                  <button className="btn small outline" onClick={() => setLedOpen(false)}>Cancel</button>
+              )}
+
+              {/* ── Type picker overlay ── */}
+              {ledVoucherMode === 'picker' && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                  <div style={{ background: "#fff", borderRadius: 16, width: "100%", maxWidth: 400, boxShadow: "0 8px 40px rgba(0,0,0,.18)" }}>
+                    <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>Select Voucher Type</div>
+                      <button onClick={() => setLedVoucherMode(null)} style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--muted)" }}>✕</button>
+                    </div>
+                    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                      {VOUCHER_TYPES.map(v => (
+                        <button key={v.key} onClick={() => setLedVoucherMode(v.key)}
+                          style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", background: "#fdf8fd", border: "1.5px solid var(--border)", borderRadius: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                          <span style={{ fontSize: 24 }}>{v.icon}</span>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{v.title}</div>
+                            <div style={{ fontSize: 12, color: "var(--muted)" }}>{v.desc}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Controls row ── */}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ ...label, marginBottom: 4 }}>From</div>
+                  <input type="date" value={ledPeriod.from} onChange={e => setLedPeriod(p => ({ ...p, from: e.target.value }))}
+                    style={{ padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ ...label, marginBottom: 4 }}>To</div>
+                  <input type="date" value={ledPeriod.to} onChange={e => setLedPeriod(p => ({ ...p, to: e.target.value }))}
+                    style={{ padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }} />
+                </div>
+                {(ledPeriod.from || ledPeriod.to) && (
+                  <button className="btn small outline" onClick={() => setLedPeriod({ from: '', to: '' })}>Clear</button>
+                )}
+                <div style={{ marginLeft: "auto" }}>
+                  <button className="btn small" onClick={() => setLedVoucherMode('picker')}
+                    style={{ background: "var(--red-dark)", color: "#fff", border: "none" }}>
+                    + Add Voucher
+                  </button>
                 </div>
               </div>
-            )}
 
-            <div style={card}>
-              {ledger.length === 0 ? (
-                <div style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No ledger entries yet.</div>
-              ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                      {["Date", "Type", "Reference", "Amount", "Balance"].map(h => (
-                        <th key={h} style={{ textAlign: "left", padding: "6px 8px", color: "var(--muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledgerWithBalance.map(row => (
-                      <tr key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <td style={{ padding: "8px" }}>{fmtDateOnly(row.created_at)}</td>
-                        <td style={{ padding: "8px" }}>
-                          <span style={{
-                            fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10,
-                            background: row.type === "payment" ? "#eafaf1" : row.type === "credit_note" ? "#fef9e7" : "#fdecea",
-                            color: row.type === "payment" ? "#27ae60" : row.type === "credit_note" ? "#e67e22" : "#c0392b",
-                          }}>
-                            {row.type.replace("_", " ")}
-                          </span>
-                        </td>
-                        <td style={{ padding: "8px", color: "var(--muted)", fontSize: 12 }}>{row.reference_no || "—"}</td>
-                        <td style={{ padding: "8px", fontWeight: 600, color: row.type === "payment" ? "#27ae60" : "#c0392b" }}>
-                          {row.type === "payment" ? "−" : "+"}₹{fmt(row.amount)}
-                        </td>
-                        <td style={{ padding: "8px", fontWeight: 700, color: row.balance > 0 ? "#c0392b" : "#27ae60" }}>
-                          ₹{fmt(Math.abs(row.balance))} {row.balance > 0 ? "DR" : "CR"}
-                        </td>
+              {/* ── All-time Total Due ── */}
+              <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                <StatCard label="Total Due (all-time)" value={`₹${fmt(Math.abs(outstanding))}`}
+                  sub={outstanding > 0 ? "Dr — balance payable" : outstanding < 0 ? "Cr — overpaid" : "Nil"} />
+                {(ledPeriod.from || ledPeriod.to) && (
+                  <StatCard label="Period Opening" value={`₹${fmt(Math.abs(openingBalance))}`}
+                    sub={openingBalance > 0 ? "Dr" : openingBalance < 0 ? "Cr" : "Nil"} />
+                )}
+              </div>
+
+              {/* ── Ledger table ── */}
+              <div style={card}>
+                {ledger.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>No vouchers yet — click "+ Add Voucher" to begin.</div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={thS}>Date</th>
+                        <th style={thS}>Vch No.</th>
+                        <th style={thS}>Type</th>
+                        <th style={thS}>Particulars</th>
+                        <th style={{ ...thS, textAlign: "right" }}>Dr (₹)</th>
+                        <th style={{ ...thS, textAlign: "right" }}>Cr (₹)</th>
+                        <th style={{ ...thS, textAlign: "right" }}>Balance</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        )}
+                    </thead>
+                    <tbody>
+                      {/* Opening balance row */}
+                      {(ledPeriod.from || ledPeriod.to) && (
+                        <tr style={{ background: "#f8f4f8" }}>
+                          <td style={tdS}>{ledPeriod.from ? fmtDateOnly(ledPeriod.from) : "—"}</td>
+                          <td colSpan={3} style={{ ...tdS, fontWeight: 700, color: "var(--muted)", fontStyle: "italic" }}>Opening Balance b/f</td>
+                          <td style={amtTdS}>{openingBalance > 0 ? `₹${fmt(openingBalance)}` : "—"}</td>
+                          <td style={amtTdS}>{openingBalance < 0 ? `₹${fmt(Math.abs(openingBalance))}` : "—"}</td>
+                          <td style={balStyle(openingBalance)}>₹{fmt(Math.abs(openingBalance))} {openingBalance > 0 ? "Dr" : openingBalance < 0 ? "Cr" : "Nil"}</td>
+                        </tr>
+                      )}
+
+                      {filteredWithBalance.length === 0 && (ledPeriod.from || ledPeriod.to) && (
+                        <tr><td colSpan={7} style={{ ...tdS, textAlign: "center", color: "var(--muted)" }}>No vouchers in this period.</td></tr>
+                      )}
+
+                      {filteredWithBalance.map(row => {
+                        const isExpanded = expandedLedgerId === row.id;
+                        const bs = badgeStyle(row);
+                        const typeLabel = voucherTypeLabel[effectiveType(row)] || row.type;
+                        const particulars = row.type === "journal"
+                          ? `${row.dr_account || "?"} A/c Dr / To ${row.cr_account || "?"} A/c`
+                          : row.narration || row.notes || (row.type === "payment" ? `${row.method || "Cash"} · ${row.reference_no || ""}` : "—");
+                        return [
+                          <tr key={row.id} onClick={() => setExpandedLedgerId(isExpanded ? null : row.id)}
+                            style={{ borderBottom: isExpanded ? "none" : "1px solid var(--border)", cursor: "pointer", background: isExpanded ? "#fdf8fd" : undefined }}
+                            className="admin-dealer-row">
+                            <td style={tdS}>{fmtDateOnly(row.voucher_date || row.created_at)}</td>
+                            <td style={{ ...tdS, fontFamily: "monospace", fontSize: 11, color: "var(--muted)" }}>{row.voucher_no || "—"}</td>
+                            <td style={tdS}>
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: bs.bg, color: bs.color }}>
+                                {typeLabel}
+                              </span>
+                            </td>
+                            <td style={{ ...tdS, color: "var(--muted)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{particulars}</td>
+                            <td style={amtTdS}>{row.drAmt > 0 ? `₹${fmt(row.drAmt)}` : "—"}</td>
+                            <td style={amtTdS}>{row.crAmt > 0 ? `₹${fmt(row.crAmt)}` : "—"}</td>
+                            <td style={balStyle(row.balance)}>₹{fmt(Math.abs(row.balance))} {row.balance > 0 ? "Dr" : row.balance < 0 ? "Cr" : "Nil"}</td>
+                          </tr>,
+                          isExpanded && (
+                            <tr key={`${row.id}-detail`} style={{ borderBottom: "1px solid var(--border)", background: "#fdf8fd" }}>
+                              <td colSpan={7} style={{ padding: "12px 16px" }}>
+                                {row.type === "journal" ? (
+                                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                                        {["Particulars", "Dr (₹)", "Cr (₹)"].map(h => (
+                                          <th key={h} style={{ padding: "4px 8px", textAlign: h === "Particulars" ? "left" : "right", fontWeight: 600, color: "var(--muted)" }}>{h}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <tr>
+                                        <td style={{ padding: "5px 8px" }}>{row.dr_account} A/c {row.dr_dealer && <span style={{ fontSize: 10, color: "var(--red-dark)", fontWeight: 700 }}>★ Dealer</span>}</td>
+                                        <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "#c0392b" }}>₹{fmt(row.amount)}</td>
+                                        <td style={{ padding: "5px 8px", textAlign: "right", color: "var(--muted)" }}>—</td>
+                                      </tr>
+                                      <tr>
+                                        <td style={{ padding: "5px 8px 5px 20px", color: "var(--muted)" }}>To {row.cr_account} A/c {row.cr_dealer && <span style={{ fontSize: 10, color: "var(--red-dark)", fontWeight: 700 }}>★ Dealer</span>}</td>
+                                        <td style={{ padding: "5px 8px", textAlign: "right", color: "var(--muted)" }}>—</td>
+                                        <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, color: "#27ae60" }}>₹{fmt(row.amount)}</td>
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "6px 24px", fontSize: 12 }}>
+                                    {row.voucher_no   && <div><span style={{ color: "var(--muted)" }}>Vch No: </span>{row.voucher_no}</div>}
+                                    {row.method       && <div><span style={{ color: "var(--muted)" }}>Method: </span>{row.method}</div>}
+                                    {row.reference_no && <div><span style={{ color: "var(--muted)" }}>Ref: </span>{row.reference_no}</div>}
+                                    {row.reason       && <div><span style={{ color: "var(--muted)" }}>Reason: </span>{row.reason}</div>}
+                                    {(row.narration || row.notes) && <div style={{ gridColumn: "1/-1" }}><span style={{ color: "var(--muted)" }}>Narration: </span>{row.narration || row.notes}</div>}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ),
+                        ];
+                      })}
+
+                      {/* Closing balance row */}
+                      <tr style={{ background: "#f8f4f8", borderTop: "2px solid var(--border)" }}>
+                        <td style={tdS}>{ledPeriod.to ? fmtDateOnly(ledPeriod.to) : "—"}</td>
+                        <td colSpan={3} style={{ ...tdS, fontWeight: 700, color: "var(--muted)", fontStyle: "italic" }}>Closing Balance c/f</td>
+                        <td style={amtTdS}>—</td>
+                        <td style={amtTdS}>—</td>
+                        <td style={balStyle(closingBalance)}>₹{fmt(Math.abs(closingBalance))} {closingBalance > 0 ? "Dr" : closingBalance < 0 ? "Cr" : "Nil"}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         {/* ══ TAB 4: AI ASSISTANT ══ */}
         {tab === 4 && (
