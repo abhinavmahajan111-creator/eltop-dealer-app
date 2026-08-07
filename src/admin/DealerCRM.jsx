@@ -216,9 +216,9 @@ export default function DealerCRM() {
 
   // ── Ledger voucher actions ─────────────────────────────────────────────────
   const generateVoucherNo = async (vType) => {
-    const prefixes = { sales_invoice: 'SI', payment_received: 'PR', credit_note: 'CN', journal: 'JV' };
+    const prefixes = { sales_invoice: 'SI', receipt: 'RC', payment_out: 'PO', credit_note: 'CN', journal: 'JV' };
     const prefix = prefixes[vType] || 'VCH';
-    const dbType = vType === 'sales_invoice' ? 'order' : vType === 'payment_received' ? 'payment' : vType;
+    const dbType = vType === 'sales_invoice' ? 'order' : (vType === 'receipt' || vType === 'payment_out') ? 'payment' : vType;
     const { count } = await supabase.from('dealer_ledger')
       .select('id', { count: 'exact', head: true })
       .eq('dealer_id', dealerId).eq('type', dbType);
@@ -241,7 +241,11 @@ export default function DealerCRM() {
     };
     if (vType === 'sales_invoice') {
       row.type = 'order';
-    } else if (vType === 'payment_received') {
+    } else if (vType === 'receipt') {
+      row.type = 'payment';
+      row.method = f.method || 'Cash';
+      row.reference_no = f.reference_no || '';
+    } else if (vType === 'payment_out') {
       row.type = 'payment';
       row.method = f.method || 'Cash';
       row.reference_no = f.reference_no || '';
@@ -667,23 +671,26 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
           const setVf = (patch) => setLedVoucherForm(p => ({ ...p, ...patch }));
 
           const VOUCHER_TYPES = [
-            { key: 'sales_invoice',    icon: '🧾', title: 'Sales Invoice',     desc: 'Record a sale / bill to dealer' },
-            { key: 'payment_received', icon: '💰', title: 'Payment Received',  desc: 'Record cash, UPI, cheque, NEFT' },
-            { key: 'credit_note',      icon: '📋', title: 'Credit Note',       desc: 'Deduct from outstanding balance' },
-            { key: 'journal',          icon: '📒', title: 'Journal Voucher',   desc: 'Free Dr/Cr double-entry posting' },
+            { key: 'sales_invoice', icon: '🧾', title: 'Sales Invoice',      desc: 'Record a sale / bill to dealer' },
+            { key: 'receipt',       icon: '💰', title: 'Receipt (Pymt In)',  desc: 'Cash, UPI, cheque, NEFT received from dealer' },
+            { key: 'payment_out',   icon: '💸', title: 'Payment (Pymt Out)', desc: 'Incentive / rebate / commission paid to dealer' },
+            { key: 'credit_note',   icon: '📋', title: 'Credit Note',        desc: 'Deduct from outstanding balance' },
+            { key: 'journal',       icon: '📒', title: 'Journal Voucher',    desc: 'Free Dr/Cr double-entry posting' },
           ];
 
-          const voucherTypeLabel = { sales_invoice: 'Sales Invoice', payment_received: 'Payment Received', credit_note: 'Credit Note', journal: 'Journal Voucher' };
+          const voucherTypeLabel = { sales_invoice: 'Sales Invoice', receipt: 'Receipt', payment_out: 'Payment Out', credit_note: 'Credit Note', journal: 'Journal Voucher' };
           const voucherTypeBadgeStyle = {
-            sales_invoice:    { bg: '#fdecea', color: '#c0392b' },
-            payment_received: { bg: '#eafaf1', color: '#27ae60' },
-            credit_note:      { bg: '#fef9e7', color: '#e67e22' },
-            journal:          { bg: '#eef2ff', color: '#3730a3' },
-            order:            { bg: '#fdecea', color: '#c0392b' },
-            payment:          { bg: '#eafaf1', color: '#27ae60' },
+            sales_invoice: { bg: '#fdecea', color: '#c0392b' },
+            receipt:       { bg: '#eafaf1', color: '#27ae60' },
+            payment_out:   { bg: '#e8f4fd', color: '#1a6fa8' },
+            credit_note:   { bg: '#fef9e7', color: '#e67e22' },
+            journal:       { bg: '#eef2ff', color: '#3730a3' },
+            order:         { bg: '#fdecea', color: '#c0392b' },
+            payment:       { bg: '#eafaf1', color: '#27ae60' },
           };
 
-          const effectiveType = (row) => row.voucher_type || (row.type === 'order' ? 'sales_invoice' : row.type === 'payment' ? 'payment_received' : row.type);
+          // Prefer stored voucher_type; fall back for legacy rows that pre-date the voucher_type column
+          const effectiveType = (row) => row.voucher_type || (row.type === 'order' ? 'sales_invoice' : row.type === 'payment' ? 'receipt' : row.type);
           const badgeStyle = (row) => voucherTypeBadgeStyle[effectiveType(row)] || { bg: '#f3f4f6', color: '#555' };
 
           const thS = { textAlign: "left", padding: "7px 10px", color: "var(--muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" };
@@ -732,8 +739,8 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                         {fld("Narration", <input placeholder="e.g. Invoice for fans — batch May 2026" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
                       </>)}
 
-                      {/* Payment Received */}
-                      {ledVoucherMode === 'payment_received' && (<>
+                      {/* Receipt (Payment In) */}
+                      {ledVoucherMode === 'receipt' && (<>
                         <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
                           <div style={{ fontWeight: 700, marginBottom: 4, color: "#27ae60" }}>Particulars</div>
                           <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -750,6 +757,26 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                         {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
                         {fld("Reference No.", <input placeholder="Cheque no. / UTR / UPI ref" value={vf.reference_no || ''} onChange={e => setVf({ reference_no: e.target.value })} style={iStyle} />)}
                         {fld("Narration", <input placeholder="e.g. Payment received via NEFT" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                      </>)}
+
+                      {/* Payment Out */}
+                      {ledVoucherMode === 'payment_out' && (<>
+                        <div style={{ background: "#e8f4fd", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                          <div style={{ fontWeight: 700, marginBottom: 4, color: "#1a6fa8" }}>Particulars</div>
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span>{dealer.shop_name || dealer.owner_name || dealer.name} A/c</span>
+                            <span style={{ fontWeight: 700, color: "#27ae60" }}>Cr</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To Cash / Bank A/c (Dr) — incentive / rebate / commission paid out</div>
+                        </div>
+                        {fld("Method",
+                          <select value={vf.method || 'Cash'} onChange={e => setVf({ method: e.target.value })} style={iStyle}>
+                            {["Cash", "UPI", "Cheque", "RTGS-NEFT"].map(m => <option key={m}>{m}</option>)}
+                          </select>
+                        )}
+                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
+                        {fld("Reference No.", <input placeholder="Cheque no. / UTR / UPI ref" value={vf.reference_no || ''} onChange={e => setVf({ reference_no: e.target.value })} style={iStyle} />)}
+                        {fld("Narration", <input placeholder="e.g. Q2 incentive payout" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
                       </>)}
 
                       {/* Credit Note */}
