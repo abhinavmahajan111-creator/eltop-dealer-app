@@ -90,6 +90,12 @@ export default function DealerCRM() {
   const [ledSaving, setLedSaving] = useState(false);
   const [expandedLedgerId, setExpandedLedgerId] = useState(null);
 
+  // Sales Invoice product picker
+  const [siProducts, setSiProducts] = useState([]);
+  const [siProductsLoading, setSiProductsLoading] = useState(false);
+  const [siPickerLine, setSiPickerLine] = useState(null);
+  const [siQuery, setSiQuery] = useState('');
+
   // AI chat
   const [messages, setMessages] = useState([]);
   const [aiInput, setAiInput] = useState("");
@@ -127,6 +133,13 @@ export default function DealerCRM() {
   }, [dealerId]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  useEffect(() => {
+    if (ledVoucherMode !== 'sales_invoice' || siProducts.length > 0) return;
+    setSiProductsLoading(true);
+    supabase.from('products').select('id, name, mrp, dlp, price, hsn_code').order('name')
+      .then(({ data }) => { setSiProducts(data || []); setSiProductsLoading(false); });
+  }, [ledVoucherMode]);
 
   if (loading) return <div style={{ padding: 40, textAlign: "center", fontFamily: "Arial, sans-serif" }}>Loading CRM…</div>;
   if (!dealer) return <div style={{ padding: 40, color: "red", fontFamily: "Arial, sans-serif" }}>Dealer not found.</div>;
@@ -240,7 +253,73 @@ export default function DealerCRM() {
       amount:       Number(f.amount || 0),
     };
     if (vType === 'sales_invoice') {
-      row.type = 'order';
+      const lines = f.lines || [];
+      const validLines = lines.filter(l => l.product_id);
+      if (validLines.length === 0) {
+        alert('Add at least one product line item.');
+        setLedSaving(false);
+        return;
+      }
+      const grossTotal = validLines.reduce((s, l) => s + Number(l.net_rate || 0) * Number(l.qty || 1), 0);
+      if (grossTotal <= 0) {
+        alert('Invoice total must be greater than zero.');
+        setLedSaving(false);
+        return;
+      }
+      const taxableValue = grossTotal / 1.18;
+      const totalTax = grossTotal - taxableValue;
+      const delivState = (f.delivery_state || '').toLowerCase().trim();
+      const useCgstSgst = delivState === 'delhi';
+
+      const { data: orderData, error: orderError } = await supabase.from('orders').insert({
+        dealer_id:        dealerId,
+        customer_name:    dealer.owner_name || dealer.name || '',
+        customer_phone:   dealer.phone || '',
+        customer_email:   dealer.email || null,
+        subtotal:         Math.round(taxableValue * 100) / 100,
+        tax:              Math.round(totalTax * 100) / 100,
+        cgst:             useCgstSgst ? Math.round(totalTax / 2 * 100) / 100 : 0,
+        sgst:             useCgstSgst ? Math.round(totalTax / 2 * 100) / 100 : 0,
+        igst:             useCgstSgst ? 0 : Math.round(totalTax * 100) / 100,
+        total:            Math.round(grossTotal),
+        delivery_address: dealer.address || f.delivery_state || '',
+        payment_id:       null,
+        payment_status:   'pending',
+        status:           'confirmed',
+      }).select().single();
+
+      if (orderError) {
+        alert('Order save failed: ' + orderError.message);
+        setLedSaving(false);
+        return;
+      }
+
+      const { error: itemsError } = await supabase.from('order_items').insert(
+        validLines.map(l => ({
+          order_id:   orderData.id,
+          product_id: l.product_id,
+          name:       l.name,
+          price:      l.net_rate,
+          qty:        Number(l.qty || 1),
+          mrp:        l.mrp || null,
+          dlp:        l.dlp || null,
+          net_rate:   l.net_rate,
+          discount1:  d1,
+          discount2:  d2,
+          hsn_code:   l.hsn_code || null,
+        }))
+      );
+      if (itemsError) {
+        alert('Order items save failed: ' + itemsError.message);
+        setLedSaving(false);
+        return;
+      }
+
+      // Optimistically update Orders tab
+      setOrders(prev => [{ id: orderData.id, status: 'confirmed', total: Math.round(grossTotal), created_at: orderData.created_at, delivery_address: dealer.address || '' }, ...prev]);
+
+      row.type   = 'order';
+      row.amount = Math.round(grossTotal);
     } else if (vType === 'receipt') {
       row.type = 'payment';
       row.method = f.method || 'Cash';
@@ -726,18 +805,141 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                       )}
 
                       {/* Sales Invoice */}
-                      {ledVoucherMode === 'sales_invoice' && (<>
-                        <div style={{ background: "#fdf4ff", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
-                          <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--red-dark)" }}>Particulars</div>
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>{dealer.shop_name || dealer.owner_name || dealer.name} A/c</span>
-                            <span style={{ fontWeight: 700, color: "#c0392b" }}>Dr</span>
+                      {ledVoucherMode === 'sales_invoice' && (() => {
+                        const siLines = vf.lines || [];
+                        const validSiLines = siLines.filter(l => l.product_id);
+                        const siGross = validSiLines.reduce((s, l) => s + Number(l.net_rate || 0) * Number(l.qty || 1), 0);
+                        const siTaxable = siGross / 1.18;
+                        const siTax = siGross - siTaxable;
+                        const siDelivState = (vf.delivery_state || '').toLowerCase().trim();
+                        const siUseCgst = siDelivState === 'delhi';
+
+                        const setLine = (idx, patch) => setVf({ lines: siLines.map((l, i) => i === idx ? { ...l, ...patch } : l) });
+                        const removeLine = (idx) => setVf({ lines: siLines.filter((_, i) => i !== idx) });
+                        const addLine = () => setVf({ lines: [...siLines, { product_id: null, name: '', mrp: 0, dlp: 0, hsn_code: '', net_rate: 0, qty: 1 }] });
+
+                        return (<>
+                          {/* Product picker overlay — z-index above voucher modal */}
+                          {siPickerLine !== null && (
+                            <div style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                              <div style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 480, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(0,0,0,.25)" }}>
+                                <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: 10, alignItems: "center" }}>
+                                  <input autoFocus value={siQuery} onChange={e => setSiQuery(e.target.value)}
+                                    placeholder="Search product name…"
+                                    style={{ flex: 1, padding: "8px 12px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }} />
+                                  <button onClick={() => { setSiPickerLine(null); setSiQuery(''); }}
+                                    style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "var(--muted)", lineHeight: 1 }}>✕</button>
+                                </div>
+                                <div style={{ overflowY: "auto", flex: 1 }}>
+                                  {siProductsLoading ? (
+                                    <div style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>Loading products…</div>
+                                  ) : siProducts
+                                    .filter(p => !siQuery || p.name.toLowerCase().includes(siQuery.toLowerCase()))
+                                    .map(p => {
+                                      const nr = p.dlp
+                                        ? p.dlp * (1 - d1 / 100) * (1 - d2 / 100)
+                                        : (p.mrp || p.price || 0) * 0.85;
+                                      return (
+                                        <button key={p.id} onClick={() => {
+                                          setLine(siPickerLine, { product_id: p.id, name: p.name, mrp: p.mrp || 0, dlp: p.dlp || 0, hsn_code: p.hsn_code || '', net_rate: Math.round(nr * 100) / 100 });
+                                          setSiPickerLine(null); setSiQuery('');
+                                        }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", padding: "11px 14px", border: "none", borderBottom: "1px solid var(--border)", background: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+                                          <div>
+                                            <div style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</div>
+                                            <div style={{ fontSize: 11, color: "var(--muted)" }}>HSN: {p.hsn_code || '—'} · MRP ₹{fmt(p.mrp)}</div>
+                                          </div>
+                                          <div style={{ fontWeight: 700, color: "var(--red-dark)", fontSize: 13, whiteSpace: "nowrap", marginLeft: 12 }}>₹{fmt(Math.round(nr))}</div>
+                                        </button>
+                                      );
+                                    })
+                                  }
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Particulars */}
+                          <div style={{ background: "#fdf4ff", borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--red-dark)" }}>Particulars</div>
+                            <div style={{ display: "flex", justifyContent: "space-between" }}>
+                              <span>{dealer.shop_name || dealer.owner_name || dealer.name} A/c</span>
+                              <span style={{ fontWeight: 700, color: "#c0392b" }}>Dr</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To Sales A/c</div>
                           </div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>To Sales A/c</div>
-                        </div>
-                        {fld("Amount (₹)", <input type="number" placeholder="0" value={vf.amount || ''} onChange={e => setVf({ amount: e.target.value })} style={iStyle} />)}
-                        {fld("Narration", <input placeholder="e.g. Invoice for fans — batch May 2026" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
-                      </>)}
+
+                          {/* Line items */}
+                          <div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                              <div style={label}>Line Items</div>
+                              <button onClick={addLine} style={{ background: "var(--red-dark)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>+ Add Product</button>
+                            </div>
+                            {siLines.length === 0 && (
+                              <div style={{ color: "var(--muted)", fontSize: 13, padding: "8px 0" }}>No products added — click "+ Add Product".</div>
+                            )}
+                            {siLines.map((line, idx) => (
+                              <div key={idx} style={{ background: "#fafafa", borderRadius: 8, border: "1.5px solid var(--border)", padding: "10px 12px", marginBottom: 8 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: line.product_id ? 8 : 0 }}>
+                                  <button onClick={() => { setSiPickerLine(idx); setSiQuery(''); }}
+                                    style={{ flex: 1, textAlign: "left", padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: 7, background: "#fff", cursor: "pointer", fontSize: 13, fontFamily: "inherit", color: line.name ? "#222" : "var(--muted)" }}>
+                                    {line.name || 'Select product…'}
+                                  </button>
+                                  <button onClick={() => removeLine(idx)} style={{ background: "#fdecea", color: "#c0392b", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>✕</button>
+                                </div>
+                                {line.product_id && (
+                                  <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: 8, alignItems: "end" }}>
+                                    <div>
+                                      <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase" }}>Qty</div>
+                                      <input type="number" min="1" value={line.qty}
+                                        onChange={e => setLine(idx, { qty: Math.max(1, Number(e.target.value)) })}
+                                        style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, fontFamily: "inherit" }} />
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase" }}>Rate (₹) — editable</div>
+                                      <input type="number" value={line.net_rate}
+                                        onChange={e => setLine(idx, { net_rate: Number(e.target.value) })}
+                                        style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", border: "1.5px solid var(--border)", borderRadius: 7, fontSize: 13, fontFamily: "inherit" }} />
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 10, color: "var(--muted)", marginBottom: 3, textTransform: "uppercase" }}>Amount (₹)</div>
+                                      <div style={{ padding: "6px 0", fontWeight: 700, fontSize: 13 }}>₹{fmt(Math.round(line.net_rate * line.qty))}</div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Delivery state */}
+                          {fld("Delivery State (for GST)",
+                            <input placeholder="Type 'Delhi' for CGST+SGST; anything else → IGST"
+                              value={vf.delivery_state || ''} onChange={e => setVf({ delivery_state: e.target.value })} style={iStyle} />
+                          )}
+
+                          {/* Summary */}
+                          {validSiLines.length > 0 && siGross > 0 && (
+                            <div style={{ borderRadius: 10, border: "1.5px solid var(--border)", overflow: "hidden" }}>
+                              <div style={{ background: "#f8f4f8", padding: "7px 14px", fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase" }}>Invoice Summary</div>
+                              {[
+                                ["Basic Amount (excl. GST)", `₹${fmt(Math.round(siTaxable))}`],
+                                siUseCgst ? ["CGST (9%)", `₹${fmt(Math.round(siTax / 2))}`] : null,
+                                siUseCgst ? ["SGST (9%)", `₹${fmt(Math.round(siTax / 2))}`] : null,
+                                !siUseCgst ? ["IGST (18%)", `₹${fmt(Math.round(siTax))}`] : null,
+                              ].filter(Boolean).map(([k, v]) => (
+                                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "7px 14px", fontSize: 13, borderTop: "1px solid var(--border)" }}>
+                                  <span style={{ color: "var(--muted)" }}>{k}</span><span>{v}</span>
+                                </div>
+                              ))}
+                              <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontSize: 14, fontWeight: 800, borderTop: "2px solid var(--border)" }}>
+                                <span>Total</span>
+                                <span style={{ color: "var(--red-dark)" }}>₹{fmt(Math.round(siGross))}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {fld("Narration", <input placeholder="e.g. Invoice for fans — batch May 2026" value={vf.narration || ''} onChange={e => setVf({ narration: e.target.value })} style={iStyle} />)}
+                        </>);
+                      })()}
 
                       {/* Receipt (Payment In) */}
                       {ledVoucherMode === 'receipt' && (<>
@@ -848,7 +1050,9 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                       {/* Accept button */}
                       <div style={{ display: "flex", gap: 10, paddingTop: 4 }}>
                         <button className="btn small"
-                          disabled={ledSaving || !Number(vf.amount)}
+                          disabled={ledSaving || (ledVoucherMode === 'sales_invoice'
+                            ? !(vf.lines || []).some(l => l.product_id) || (vf.lines || []).reduce((s, l) => s + Number(l.net_rate || 0) * Number(l.qty || 1), 0) <= 0
+                            : !Number(vf.amount))}
                           onClick={saveLedgerVoucher}
                           style={{ flex: 1, background: "var(--red-dark)", color: "#fff", border: "none" }}>
                           {ledSaving ? "Saving…" : "✓ Accept"}
@@ -872,7 +1076,14 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                     </div>
                     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
                       {VOUCHER_TYPES.map(v => (
-                        <button key={v.key} onClick={() => setLedVoucherMode(v.key)}
+                        <button key={v.key} onClick={() => {
+                          if (v.key === 'sales_invoice') {
+                            const addr = (dealer.address || '').toLowerCase();
+                            const state = addr.includes('delhi') ? 'Delhi' : '';
+                            setLedVoucherForm({ delivery_state: state, lines: [] });
+                          }
+                          setLedVoucherMode(v.key);
+                        }}
                           style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", background: "#fdf8fd", border: "1.5px solid var(--border)", borderRadius: 10, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
                           <span style={{ fontSize: 24 }}>{v.icon}</span>
                           <div>
