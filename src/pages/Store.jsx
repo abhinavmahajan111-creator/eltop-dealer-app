@@ -1225,6 +1225,7 @@ export default function Store() {
   // Remember category count across reloads to avoid skeleton-count CLS
   const [skeletonCount] = useState(() => Math.max(4, Number(localStorage.getItem('eltop_cat_count') || 12)));
   const savedCheckoutData = useRef(null);
+  const [creditBlock, setCreditBlock] = useState(null);
 
   // Resolve display name: profiles.name > most-recent order > email
   useEffect(() => {
@@ -1293,7 +1294,7 @@ export default function Store() {
   const handleIncrease = (id) => cart.change(id, +1);
   const handleDecrease = (id) => cart.change(id, -1);
 
-  const handlePayment = (data, { emailVerified = false } = {}) => {
+  const handlePayment = async (data, { emailVerified = false } = {}) => {
     if (!data?.name?.trim() || !data?.phone?.trim()) {
       console.error('[handlePayment] called with missing customer fields', data);
       alert('Order cannot be placed: customer name and phone are required. Please try again.');
@@ -1304,6 +1305,38 @@ export default function Store() {
     const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
     const capturedItems = cart.items.map(i => ({ ...i, effectivePrice: getPrice(i.product) }));
     const capturedTotal = capturedItems.reduce((s, i) => s + i.effectivePrice * i.qty, 0);
+
+    // ── Credit-limit check (approved dealers only) ────────────────────────────
+    if (isApprovedDealer && dealer?.credit_limit != null) {
+      const { data: ledgerRows, error: ledgerError } = await supabase
+        .from('dealer_ledger')
+        .select('type, amount, dr_dealer, cr_dealer')
+        .eq('dealer_id', session.user.id);
+      if (ledgerError) {
+        console.warn('[credit-check] dealer_ledger fetch failed — failing open:', ledgerError.message);
+      } else {
+        const liveOutstanding = (ledgerRows || []).reduce((s, row) => {
+          const isDr = row.type === 'order' || (row.type === 'journal' && row.dr_dealer);
+          const isCr = row.type === 'payment' || row.type === 'credit_note' || (row.type === 'journal' && row.cr_dealer);
+          if (isDr) return s + Number(row.amount);
+          if (isCr) return s - Number(row.amount);
+          return s;
+        }, 0);
+        if (liveOutstanding + capturedTotal > Number(dealer.credit_limit)) {
+          setCreditBlock({
+            outstanding: liveOutstanding,
+            cartTotal: capturedTotal,
+            creditLimit: Number(dealer.credit_limit),
+            checkoutData: data,
+            emailVerified,
+            capturedItems,
+            d1, d2,
+          });
+          return;
+        }
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY_ID;
     if (!RAZORPAY_KEY) {
@@ -1467,6 +1500,80 @@ export default function Store() {
 
     script.onerror = () => alert('Failed to load payment gateway. Please try again.');
     document.body.appendChild(script);
+  };
+
+  const handleCOD = async () => {
+    if (!creditBlock) return;
+    const { checkoutData: data, capturedItems, capturedTotal, d1, d2, emailVerified } = creditBlock;
+    setCreditBlock(null);
+
+    const grossTotal   = capturedTotal;
+    const taxableValue = grossTotal / 1.18;
+    const totalTax     = grossTotal - taxableValue;
+    const isDelhi      = (data.state || '').trim() === 'Delhi';
+    const cgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
+    const sgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
+    const igst         = isDelhi ? 0 : Math.round(totalTax * 100) / 100;
+    const subtotal     = Math.round(taxableValue * 100) / 100;
+    const tax          = Math.round(totalTax * 100) / 100;
+    const total        = Math.round(grossTotal);
+    const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
+
+    const { data: orderRows, error: orderError } = await supabase
+      .from('orders')
+      .insert([{
+        dealer_id:        session.user.id,
+        profile_id:       session.user.id,
+        customer_name:    data.name,
+        customer_phone:   data.phone,
+        customer_email:   data.email || null,
+        subtotal, tax, cgst, sgst, igst, total,
+        delivery_address: deliveryAddress,
+        payment_id:       null,
+        payment_status:   'pending',
+        status:           'confirmed',
+        email_verified:   emailVerified || false,
+        created_at:       new Date().toISOString(),
+      }])
+      .select('id');
+
+    if (orderError) {
+      console.error('[cod-save] order insert failed:', orderError);
+      alert('COD order save failed: ' + orderError.message);
+      return;
+    }
+
+    const orderId = orderRows[0].id;
+    const orderItems = capturedItems.map(item => ({
+      order_id:   orderId,
+      product_id: item.product.id,
+      name:       item.product.name,
+      price:      Math.round(item.effectivePrice * 100) / 100,
+      qty:        item.qty,
+      mrp:        item.product.mrp ?? null,
+      dlp:        item.product.dlp ?? item.product.mrp ?? null,
+      net_rate:   Math.round(item.effectivePrice * 100) / 100,
+      discount1:  d1,
+      discount2:  d2,
+      hsn_code:   item.product.hsn_code ?? null,
+    }));
+
+    if (orderItems.length === 0) {
+      console.error('[cod-save] capturedItems was empty');
+      alert('Cart was empty — no items saved.');
+      return;
+    }
+
+    const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+    if (itemsError) {
+      console.error('[cod-save] order_items insert failed:', itemsError);
+      alert('Order saved but items failed: ' + itemsError.message);
+      return;
+    }
+
+    cart.clear();
+    setCartOpen(false);
+    alert('✅ COD Order Placed!\nYour order has been confirmed. Payment is due on delivery.\nPlease clear your outstanding balance to continue ordering on credit.');
   };
 
   const scrollToTop = () => {
@@ -2187,6 +2294,68 @@ export default function Store() {
           onCheckout={() => { setCartOpen(false); setShowCheckout(true); }}
           getPrice={getPrice} />
       )}
+      {/* ── Credit-limit block modal ── */}
+      {creditBlock && (() => {
+        const { outstanding, cartTotal, creditLimit } = creditBlock;
+        const balanceLeft = Math.max(0, creditLimit - outstanding);
+        const shortfall   = Math.round(outstanding + cartTotal - creditLimit);
+        const fmtR = (n) => `Rs. ${Math.round(Math.abs(n)).toLocaleString('en-IN')}`;
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div style={{ background: '#fff', borderRadius: 18, width: '100%', maxWidth: 420, boxShadow: '0 10px 50px rgba(0,0,0,.25)', overflow: 'hidden' }}>
+              {/* Header */}
+              <div style={{ background: '#c0392b', color: '#fff', padding: '18px 20px' }}>
+                <div style={{ fontSize: 22 }}>⚠️</div>
+                <div style={{ fontWeight: 800, fontSize: 17, marginTop: 6 }}>Credit Limit Exceeded</div>
+              </div>
+              {/* Message */}
+              <div style={{ padding: '16px 20px', fontSize: 14, lineHeight: 1.65, color: '#222', borderBottom: '1px solid #eee' }}>
+                Your credit limit is over. Your order value is <strong>{fmtR(cartTotal)}</strong>. Your balance credit limit is <strong>{fmtR(balanceLeft)}</strong>. Please pay the balance <strong>{fmtR(shortfall)}</strong> to place this order, or contact admin for a temporary limit grant against a commitment to pay in 7 days, or choose payment on delivery.
+              </div>
+              {/* Summary grid */}
+              <div style={{ padding: '12px 20px', background: '#fdf8f8', borderBottom: '1px solid #eee', fontSize: 13, display: 'grid', gridTemplateColumns: '1fr auto', gap: '5px 16px' }}>
+                <span style={{ color: '#888' }}>Outstanding balance</span><span style={{ fontWeight: 700, textAlign: 'right' }}>{fmtR(outstanding)} Dr</span>
+                <span style={{ color: '#888' }}>+ This order</span><span style={{ fontWeight: 700, textAlign: 'right' }}>{fmtR(cartTotal)}</span>
+                <span style={{ color: '#888' }}>Credit limit</span><span style={{ fontWeight: 700, textAlign: 'right' }}>{fmtR(creditLimit)}</span>
+                <span style={{ color: '#c0392b', fontWeight: 700 }}>Shortfall</span><span style={{ fontWeight: 800, color: '#c0392b', textAlign: 'right' }}>{fmtR(shortfall)}</span>
+              </div>
+              {/* Buttons */}
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Button 1 — Pay balance (contact-admin path for now; see flagged note below) */}
+                <div style={{ border: '1.5px solid #f5c6c6', borderRadius: 10, padding: '12px 14px', background: '#fff8f8' }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>💳 Pay Outstanding Balance First</div>
+                  <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>
+                    Pay {fmtR(shortfall)} to bring your balance within limit, then this order will go through. Contact admin to record this payment.
+                  </div>
+                  <button
+                    onClick={() => alert('Please contact admin to process your outstanding payment of ' + fmtR(shortfall) + '.\nOnce recorded in your ledger, your credit limit will free up for this order.')}
+                    style={{ width: '100%', padding: '9px 0', background: '#c0392b', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
+                    Contact Admin to Clear Balance
+                  </button>
+                </div>
+                {/* Button 2 — Temporary grant */}
+                <button
+                  onClick={() => alert('Feature coming soon — please contact admin directly to request a temporary credit limit increase against a 7-day payment commitment.')}
+                  style={{ width: '100%', padding: '11px 0', background: '#fff', color: '#444', border: '1.5px solid #ddd', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
+                  📋 Request Temporary Grant
+                </button>
+                {/* Button 3 — COD */}
+                <button
+                  onClick={handleCOD}
+                  style={{ width: '100%', padding: '11px 0', background: '#1a6fa8', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
+                  🚚 Place Order — Pay on Delivery (COD)
+                </button>
+                <button
+                  onClick={() => setCreditBlock(null)}
+                  style={{ width: '100%', padding: '8px 0', background: 'none', color: '#999', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showCheckout && (
         <CheckoutModal
           cart={cart}
