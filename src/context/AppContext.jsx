@@ -329,7 +329,7 @@ export function AppProvider({ children }) {
         .insert({
           dealer_id:        session.user.id,
           customer_name:    profile.name  || '',
-          customer_phone:   profile.phone || null,
+          customer_phone:   profile.phone || '',
           customer_email:   profile.email || session.user.email || null,
           payment_status:   'pending',
           subtotal:         Math.round(subtotal * 100) / 100,
