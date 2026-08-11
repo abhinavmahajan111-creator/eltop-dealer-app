@@ -17,7 +17,11 @@ export default function Cart() {
   const total      = Math.round(grossTotal);
 
   async function handlePlaceOrder() {
-    await placeOrder({ items: cart });
+    const result = await placeOrder({ items: cart });
+    if (!result?.success) {
+      alert('Order couldn\'t be placed — please try again or contact support.\n' + (result?.error || ''));
+      return;
+    }
     navigate("/confirm");
   }
 

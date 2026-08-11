@@ -327,34 +327,49 @@ export function AppProvider({ children }) {
       const { data: order, error } = await supabase
         .from("orders")
         .insert({
-          dealer_id: session.user.id,
-          subtotal: Math.round(subtotal * 100) / 100,
-          tax:      Math.round(tax * 100) / 100,
+          dealer_id:        session.user.id,
+          customer_name:    profile.name  || '',
+          customer_phone:   profile.phone || null,
+          customer_email:   profile.email || session.user.email || null,
+          payment_status:   'pending',
+          subtotal:         Math.round(subtotal * 100) / 100,
+          tax:              Math.round(tax * 100) / 100,
           total,
           delivery_address: address || profile.address || "",
         })
         .select()
         .single();
 
-      if (!error && order) {
-        await supabase.from("order_items").insert(
-          enriched.map((it) => ({
-            order_id:  order.id,
-            product_id: it.id,
-            name:       it.name,
-            price:      Math.round(it.netRate * 100) / 100,
-            qty:        it.qty,
-            mrp:        it.mrp ?? null,
-            dlp:        it.dlp,
-            net_rate:   Math.round(it.netRate * 100) / 100,
-            discount1:  d1,
-            discount2:  d2,
-            hsn_code:   it.hsn_code ?? null,
-          }))
-        );
+      if (error) {
+        console.error('[placeOrder] orders insert failed:', error);
+        return { success: false, error: error.message };
       }
+
+      const { error: itemsError } = await supabase.from("order_items").insert(
+        enriched.map((it) => ({
+          order_id:   order.id,
+          product_id: it.id,
+          name:       it.name,
+          price:      Math.round(it.netRate * 100) / 100,
+          qty:        it.qty,
+          mrp:        it.mrp ?? null,
+          dlp:        it.dlp,
+          net_rate:   Math.round(it.netRate * 100) / 100,
+          discount1:  d1,
+          discount2:  d2,
+          hsn_code:   it.hsn_code ?? null,
+        }))
+      );
+
+      if (itemsError) {
+        console.error('[placeOrder] order_items insert failed:', itemsError);
+        return { success: false, error: itemsError.message };
+      }
+
+      clearCart();
+      return { success: true, orderId: order.id };
     }
-    clearCart();
+    return { success: false, error: 'Not authenticated' };
   }, [session, profile, clearCart]);
 
   const value = {
