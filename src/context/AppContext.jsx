@@ -324,6 +324,37 @@ export function AppProvider({ children }) {
       const subtotal   = enriched.reduce((s, it) => s + (it.netRate / 1.18) * it.qty, 0);
       const tax        = subtotal * 0.18;
 
+      // Credit-limit check — approved dealers only; fail open on ledger query error
+      const appStatus = profile?.dealer_application_status ?? 'none';
+      const isApprovedDealer = profile?.is_dealer === true && (appStatus === 'approved' || appStatus === 'none');
+      if (isApprovedDealer && profile?.credit_limit != null) {
+        const { data: ledgerRows, error: creditCheckError } = await supabase
+          .from('dealer_ledger')
+          .select('type, amount, dr_dealer, cr_dealer')
+          .eq('dealer_id', session.user.id);
+        if (creditCheckError) {
+          console.warn('[placeOrder] credit-check: ledger fetch failed — failing open:', creditCheckError.message);
+        } else {
+          const liveOutstanding = (ledgerRows || []).reduce((s, row) => {
+            const isDr = row.type === 'order' || (row.type === 'journal' && row.dr_dealer);
+            const isCr = row.type === 'payment' || row.type === 'credit_note' || (row.type === 'journal' && row.cr_dealer);
+            if (isDr) return s + Number(row.amount);
+            if (isCr) return s - Number(row.amount);
+            return s;
+          }, 0);
+          const creditLimit = Number(profile.credit_limit);
+          if (liveOutstanding + total > creditLimit) {
+            const shortfall = Math.round(liveOutstanding + total - creditLimit);
+            const fmt = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
+            return {
+              success: false,
+              creditBlock: true,
+              error: `This order (${fmt(total)}) would take you ${fmt(shortfall)} over your ${fmt(creditLimit)} credit limit. Your current outstanding is ${fmt(liveOutstanding)}. Please clear your balance or contact admin before placing this order.`,
+            };
+          }
+        }
+      }
+
       const { data: order, error } = await supabase
         .from("orders")
         .insert({
