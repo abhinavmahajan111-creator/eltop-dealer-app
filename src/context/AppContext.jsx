@@ -366,6 +366,27 @@ export function AppProvider({ children }) {
         return { success: false, error: itemsError.message };
       }
 
+      // Mirror DealerCRM's Sales Invoice ledger write so outstanding balance stays accurate
+      const { count: ledgerCount } = await supabase
+        .from('dealer_ledger')
+        .select('id', { count: 'exact', head: true })
+        .eq('dealer_id', session.user.id)
+        .eq('type', 'order');
+      const seq = String((ledgerCount || 0) + 1).padStart(4, '0');
+      const { error: ledgerError } = await supabase.from('dealer_ledger').insert({
+        dealer_id:    session.user.id,
+        type:         'order',
+        voucher_type: 'sales_invoice',
+        voucher_no:   `EEIPL/SI/${seq}`,
+        voucher_date: new Date().toISOString().slice(0, 10),
+        narration:    '',
+        amount:       total,
+      });
+      if (ledgerError) {
+        console.error('[placeOrder] dealer_ledger insert failed:', ledgerError);
+        alert('Order placed successfully but the ledger entry could not be saved.\nError: ' + ledgerError.message + '\nPlease contact support.');
+      }
+
       clearCart();
       return { success: true, orderId: order.id };
     }
