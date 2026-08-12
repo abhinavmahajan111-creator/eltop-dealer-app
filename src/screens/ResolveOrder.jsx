@@ -38,7 +38,7 @@ const bodyStyle = {
 export default function ResolveOrder() {
   const navigate = useNavigate();
   const { state } = useLocation();
-  const { session } = useApp();
+  const { session, profile } = useApp();
 
   const {
     orderTotal = 0,
@@ -51,6 +51,7 @@ export default function ResolveOrder() {
   const [extraDaysResult, setExtraDaysResult] = useState(null);
   const [extraLimitResult, setExtraLimitResult] = useState(null);
   const [loading, setLoading] = useState(null);
+  const [payLoading, setPayLoading] = useState(false);
 
   if (!state?.orderTotal) {
     return (
@@ -69,6 +70,91 @@ export default function ResolveOrder() {
   }
 
   const toggle = (key) => setExpanded((prev) => (prev === key ? null : key));
+
+  const handlePayNow = async () => {
+    if (payLoading) return;
+    setPayLoading(true);
+    try {
+      // 1. Create Razorpay order server-side (server re-fetches live balance + credit_limit)
+      const { data, error } = await supabase.functions.invoke("create-payment-order", {
+        body: { orderTotal },
+      });
+      if (error || !data?.razorpay_order_id) {
+        alert("Could not create payment order.\n" + (data?.error || error?.message || "Unknown error"));
+        setPayLoading(false);
+        return;
+      }
+      const { razorpay_order_id, amount_paise } = data;
+
+      // 2. Load Razorpay checkout.js and open
+      const existingScript = document.getElementById("razorpay-script-resolve");
+      if (existingScript) existingScript.remove();
+      const script = document.createElement("script");
+      script.id = "razorpay-script-resolve";
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => {
+        const options = {
+          key:         import.meta.env.VITE_RAZORPAY_KEY_ID,
+          order_id:    razorpay_order_id,
+          amount:      amount_paise,
+          currency:    "INR",
+          name:        "Eltop by Embassy",
+          description: "Outstanding balance payment",
+          image:       "/assets/ELTOP%20LOGO.png",
+          prefill: {
+            name:    profile?.name    || "",
+            email:   profile?.email   || session?.user?.email || "",
+            contact: profile?.phone   || "",
+          },
+          handler: async function (response) {
+            const { razorpay_payment_id, razorpay_order_id: rpOrderId, razorpay_signature } = response;
+            // 3. Verify signature + record ledger entry server-side
+            const { data: verifyData, error: verifyError } = await supabase.functions.invoke(
+              "verify-and-record-payment",
+              { body: { razorpay_order_id: rpOrderId, razorpay_payment_id, razorpay_signature } }
+            );
+            if (verifyError || !verifyData?.success) {
+              // Payment captured but ledger write failed — surface loudly, do not navigate away
+              console.error("[resolve-order] verify-and-record-payment failed", razorpay_payment_id, verifyError, verifyData);
+              alert(
+                "⚠️ Payment received but balance update failed.\n" +
+                "Payment ID: " + razorpay_payment_id + "\n" +
+                "Please contact support immediately with this ID — your payment is safe."
+              );
+              setPayLoading(false);
+              return;
+            }
+            // 4. Success — balance reduced; navigate back to cart
+            alert(
+              "✅ Payment of ₹" + Math.round(verifyData.amount_inr).toLocaleString("en-IN") +
+              " recorded (Voucher: " + verifyData.voucher_no + ").\n\n" +
+              "You can now place your order."
+            );
+            navigate("/cart");
+          },
+          theme: { color: "#7B2D8B" },
+          modal: {
+            ondismiss: () => setPayLoading(false),
+            escape: true,
+            animation: false,
+          },
+        };
+        const rzp = new window.Razorpay(options);
+        rzp.open();
+        setPayLoading(false);
+      };
+      script.onerror = () => {
+        alert("Failed to load payment gateway. Please try again.");
+        setPayLoading(false);
+      };
+      document.body.appendChild(script);
+    } catch (err) {
+      console.error("[resolve-order] handlePayNow error:", err);
+      alert("Unexpected error starting payment. Please try again.");
+      setPayLoading(false);
+    }
+  };
 
   const handleExtraDays = async () => {
     setLoading("extra_days");
@@ -186,11 +272,16 @@ export default function ResolveOrder() {
           {expanded === "pay" && (
             <div style={bodyStyle}>
               <p style={{ marginTop: 12, marginBottom: 16, lineHeight: 1.5 }}>
-                Record a payment in your Ledger. Once admin marks it received, your
-                outstanding balance will drop and you can place this order.
+                Pay online now to immediately reduce your outstanding balance.
+                Once payment is confirmed, go back to cart and place your order.
               </p>
-              <button className="btn" onClick={() => navigate("/ledger", { state: { returnTo: "/resolve-order" } })}>
-                Go to Ledger →
+              <button
+                className="btn"
+                onClick={handlePayNow}
+                disabled={payLoading}
+                style={{ opacity: payLoading ? 0.6 : 1 }}
+              >
+                {payLoading ? "Opening payment…" : `Pay ${fmt(shortfall)} now →`}
               </button>
             </div>
           )}
