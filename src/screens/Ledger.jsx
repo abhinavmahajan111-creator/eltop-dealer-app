@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import BottomNav from "../components/BottomNav";
 import { useApp } from "../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 export default function Ledger() {
   const navigate = useNavigate();
+  const { state: routeState } = useLocation();
   const { session } = useApp();
+  const returnTo = routeState?.returnTo || "/dashboard";
 
   const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export default function Ledger() {
   return (
     <div className="screen" id="screen-ledger">
       <div className="topbar">
-        <span className="back" onClick={() => navigate("/dashboard")}>&#8592;</span>
+        <span className="back" onClick={() => navigate(returnTo)}>&#8592;</span>
         <h1>Ledger / Invoices</h1>
       </div>
       <div className="content">

@@ -189,7 +189,7 @@ export default function ResolveOrder() {
                 Record a payment in your Ledger. Once admin marks it received, your
                 outstanding balance will drop and you can place this order.
               </p>
-              <button className="btn" onClick={() => navigate("/ledger")}>
+              <button className="btn" onClick={() => navigate("/ledger", { state: { returnTo: "/resolve-order" } })}>
                 Go to Ledger →
               </button>
             </div>
