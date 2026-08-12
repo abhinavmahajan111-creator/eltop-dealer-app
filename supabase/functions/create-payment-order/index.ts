@@ -34,7 +34,9 @@ serve(async (req) => {
     //    (never trust client-passed amounts — amounts are computed here)
     const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const [ledgerResult, profileResult] = await Promise.all([
+    const today = new Date().toISOString().slice(0, 10);
+
+    const [ledgerResult, profileResult, grantResult] = await Promise.all([
       adminClient
         .from("dealer_ledger")
         .select("type, amount, dr_dealer, cr_dealer")
@@ -44,6 +46,18 @@ serve(async (req) => {
         .select("credit_limit")
         .eq("id", dealerId)
         .single(),
+      // Mirror placeOrder's active-grant lookup exactly — unconsumed approved extra_limit grant
+      adminClient
+        .from("credit_requests")
+        .select("extra_limit_amount")
+        .eq("dealer_id", dealerId)
+        .eq("type", "extra_limit")
+        .eq("status", "approved")
+        .gte("valid_until", today)
+        .is("consumed_at", null)
+        .order("valid_until", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     if (ledgerResult.error) {
@@ -54,6 +68,10 @@ serve(async (req) => {
       console.error("create-payment-order: profile fetch failed:", profileResult.error);
       return new Response(JSON.stringify({ error: "Could not fetch dealer profile" }), { status: 500, headers: CORS });
     }
+    // grantResult failure: fail open — use base credit_limit so we don't overcharge
+    if (grantResult.error) {
+      console.warn("create-payment-order: credit_requests fetch failed — using base credit_limit:", grantResult.error.message);
+    }
 
     const liveOutstanding = (ledgerResult.data || []).reduce((s: number, row: Record<string, unknown>) => {
       const isDr = row.type === "order" || (row.type === "journal" && row.dr_dealer);
@@ -63,14 +81,16 @@ serve(async (req) => {
       return s;
     }, 0);
 
-    const creditLimit = Number(profileResult.data?.credit_limit ?? 0);
+    const creditLimit          = Number(profileResult.data?.credit_limit ?? 0);
+    const extraLimitAmount     = Number(grantResult.data?.extra_limit_amount ?? 0);
+    const effectiveCreditLimit = creditLimit + extraLimitAmount;
 
     // 3. Parse order total from client so we can compute fresh shortfall
-    //    (client sends orderTotal as context; server recomputes shortfall using fresh liveOutstanding)
+    //    (client sends orderTotal as context; server recomputes shortfall using fresh live data)
     const body = await req.json().catch(() => ({}));
     const orderTotal = Number(body.orderTotal ?? 0);
 
-    const freshShortfall = Math.max(0, liveOutstanding + orderTotal - creditLimit);
+    const freshShortfall = Math.max(0, liveOutstanding + orderTotal - effectiveCreditLimit);
 
     if (freshShortfall < 1) {
       return new Response(
