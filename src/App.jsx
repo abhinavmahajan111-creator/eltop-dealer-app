@@ -13,6 +13,7 @@ import Dashboard from "./screens/Dashboard";
 import Catalogue from "./screens/Catalogue";
 import ProductDetail from "./screens/ProductDetail";
 import Cart from "./screens/Cart";
+import ResolveOrder from "./screens/ResolveOrder";
 import OrderConfirm from "./screens/OrderConfirm";
 import OrderTracking from "./screens/OrderTracking";
 import Ledger from "./screens/Ledger";
@@ -53,6 +54,7 @@ export default function App() {
         <Route element={<DealerRoute />}>
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/cart" element={<Cart />} />
+          <Route path="/resolve-order" element={<ResolveOrder />} />
           <Route path="/confirm" element={<OrderConfirm />} />
           <Route path="/tracking" element={<OrderTracking />} />
           <Route path="/schemes" element={<Schemes />} />

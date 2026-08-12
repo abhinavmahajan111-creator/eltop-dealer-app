@@ -19,7 +19,18 @@ export default function Cart() {
   async function handlePlaceOrder() {
     const result = await placeOrder({ items: cart });
     if (!result?.success) {
-      alert('Order couldn\'t be placed — please try again or contact support.\n' + (result?.error || ''));
+      if (result?.creditBlock) {
+        navigate("/resolve-order", {
+          state: {
+            orderTotal:      result.orderTotal,
+            liveOutstanding: result.liveOutstanding,
+            creditLimit:     result.creditLimit,
+            shortfall:       result.shortfall,
+          },
+        });
+        return;
+      }
+      alert("Order couldn't be placed — please try again or contact support.\n" + (result?.error || ""));
       return;
     }
     navigate("/confirm");

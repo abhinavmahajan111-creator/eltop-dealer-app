@@ -343,13 +343,41 @@ export function AppProvider({ children }) {
             return s;
           }, 0);
           const creditLimit = Number(profile.credit_limit);
-          if (liveOutstanding + total > creditLimit) {
-            const shortfall = Math.round(liveOutstanding + total - creditLimit);
-            const fmt = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
+          const today = new Date().toISOString().slice(0, 10);
+
+          // Check for active extra_limit grant — raises effective limit temporarily
+          const { data: activeExtraLimit } = await supabase
+            .from('credit_requests')
+            .select('extra_limit_amount')
+            .eq('dealer_id', session.user.id)
+            .eq('type', 'extra_limit')
+            .eq('status', 'approved')
+            .gte('valid_until', today)
+            .order('valid_until', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const effectiveCreditLimit = creditLimit + Number(activeExtraLimit?.extra_limit_amount || 0);
+
+          // Check for active extra_days grace period — bypasses limit check entirely
+          const { data: activeExtraDays } = await supabase
+            .from('credit_requests')
+            .select('id')
+            .eq('dealer_id', session.user.id)
+            .eq('type', 'extra_days')
+            .eq('status', 'approved')
+            .gte('valid_until', today)
+            .limit(1)
+            .maybeSingle();
+
+          if (!activeExtraDays && liveOutstanding + total > effectiveCreditLimit) {
+            const shortfall = Math.round(liveOutstanding + total - effectiveCreditLimit);
             return {
               success: false,
               creditBlock: true,
-              error: `This order (${fmt(total)}) would take you ${fmt(shortfall)} over your ${fmt(creditLimit)} credit limit. Your current outstanding is ${fmt(liveOutstanding)}. Please clear your balance or contact admin before placing this order.`,
+              orderTotal:      total,
+              liveOutstanding: Math.round(liveOutstanding),
+              creditLimit:     effectiveCreditLimit,
+              shortfall,
             };
           }
         }
