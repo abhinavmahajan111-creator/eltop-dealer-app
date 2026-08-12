@@ -327,6 +327,8 @@ export function AppProvider({ children }) {
       // Credit-limit check — approved dealers only; fail open on ledger query error
       const appStatus = profile?.dealer_application_status ?? 'none';
       const isApprovedDealer = profile?.is_dealer === true && (appStatus === 'approved' || appStatus === 'none');
+      // Hoisted so consume_credit_grant call below can reference it after the order saves
+      let usedGrantId = null;
       if (isApprovedDealer && profile?.credit_limit != null) {
         const { data: ledgerRows, error: creditCheckError } = await supabase
           .from('dealer_ledger')
@@ -345,20 +347,21 @@ export function AppProvider({ children }) {
           const creditLimit = Number(profile.credit_limit);
           const today = new Date().toISOString().slice(0, 10);
 
-          // Check for active extra_limit grant — raises effective limit temporarily
+          // Active unconsumed extra_limit grant — raises effective limit temporarily (single-use)
           const { data: activeExtraLimit } = await supabase
             .from('credit_requests')
-            .select('extra_limit_amount')
+            .select('id, extra_limit_amount')
             .eq('dealer_id', session.user.id)
             .eq('type', 'extra_limit')
             .eq('status', 'approved')
             .gte('valid_until', today)
+            .is('consumed_at', null)
             .order('valid_until', { ascending: false })
             .limit(1)
             .maybeSingle();
           const effectiveCreditLimit = creditLimit + Number(activeExtraLimit?.extra_limit_amount || 0);
 
-          // Check for active extra_days grace period — bypasses limit check entirely
+          // Active unconsumed extra_days grant — bypasses limit check entirely (single-use)
           const { data: activeExtraDays } = await supabase
             .from('credit_requests')
             .select('id')
@@ -366,10 +369,14 @@ export function AppProvider({ children }) {
             .eq('type', 'extra_days')
             .eq('status', 'approved')
             .gte('valid_until', today)
+            .is('consumed_at', null)
             .limit(1)
             .maybeSingle();
 
-          if (!activeExtraDays && liveOutstanding + total > effectiveCreditLimit) {
+          const wouldExceedEffective = liveOutstanding + total > effectiveCreditLimit;
+          const wouldExceedBase      = liveOutstanding + total > creditLimit;
+
+          if (wouldExceedEffective && !activeExtraDays) {
             const shortfall = Math.round(liveOutstanding + total - effectiveCreditLimit);
             return {
               success: false,
@@ -379,6 +386,13 @@ export function AppProvider({ children }) {
               creditLimit:     effectiveCreditLimit,
               shortfall,
             };
+          }
+
+          // Record which grant (if any) enabled this order — consumed after successful save
+          if (activeExtraDays && wouldExceedEffective) {
+            usedGrantId = activeExtraDays.id;
+          } else if (activeExtraLimit && wouldExceedBase && !wouldExceedEffective) {
+            usedGrantId = activeExtraLimit.id;
           }
         }
       }
@@ -444,6 +458,19 @@ export function AppProvider({ children }) {
       if (ledgerError) {
         console.error('[placeOrder] dealer_ledger insert failed:', ledgerError);
         alert('Order placed successfully but the ledger entry could not be saved.\nError: ' + ledgerError.message + '\nPlease contact support.');
+      }
+
+      // Consume the credit grant that enabled this order (single-use enforcement).
+      // Known edge case: if this RPC fails the grant remains reusable until valid_until;
+      // the order itself is already saved so we do not roll back — manual fix required.
+      if (usedGrantId) {
+        const { data: consumed } = await supabase.rpc('consume_credit_grant', {
+          p_request_id: usedGrantId,
+          p_order_id:   order.id,
+        });
+        if (!consumed) {
+          console.error('[placeOrder] consume_credit_grant returned false for request', usedGrantId, '— grant may remain reusable; manual correction required');
+        }
       }
 
       clearCart();
