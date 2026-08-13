@@ -373,7 +373,7 @@ export default function Dashboard() {
               <div className="quick-item" onClick={() => navigate("/ledger")}>
                 <div className="ic">&#128203;</div><div className="lb">Ledger</div>
               </div>
-              <div className="quick-item" onClick={() => navigate("/tracking")}>
+              <div className="quick-item" onClick={() => navigate(recentOrders[0]?.id ? `/tracking/${recentOrders[0].id}` : "/tracking")}>
                 <div className="ic">&#128666;</div><div className="lb">Track</div>
               </div>
               <div className="quick-item" onClick={async (e) => {
@@ -407,7 +407,7 @@ export default function Dashboard() {
                 const { label, badge } = statusLabel(o.status);
                 const date = new Date(o.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
                 return (
-                  <div className="order-row" key={o.id} onClick={() => navigate("/tracking")}>
+                  <div className="order-row" key={o.id} onClick={() => navigate(`/tracking/${o.id}`)}>
                     <div>
                       <div className="oid">{o.id}</div>
                       <div className="osub">Rs. {fmt(o.total)} · {date}</div>

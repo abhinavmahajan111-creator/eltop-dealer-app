@@ -33,7 +33,7 @@ export default function Cart() {
       alert("Order couldn't be placed — please try again or contact support.\n" + (result?.error || ""));
       return;
     }
-    navigate("/confirm");
+    navigate(`/confirm/${result.orderId}`);
   }
 
   return (

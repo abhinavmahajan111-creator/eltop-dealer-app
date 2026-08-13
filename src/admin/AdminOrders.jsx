@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
 
-const STATUSES = ["pending", "confirmed", "dispatched", "delivered"];
+const STATUSES = ["pending", "confirmed", "dispatched", "out_for_delivery", "delivered"];
 
 function dealerLabel(profile) {
   if (!profile) return "—";
@@ -38,7 +38,7 @@ export default function AdminOrders() {
     setLoading(true);
     supabase
       .from("orders")
-      .select("id, status, total, subtotal, tax, delivery_address, created_at, dealer_id, customer_name, customer_phone, customer_email, email_verified, profiles!dealer_id(name, email, dealer_code, address, staff_assigned, deleted_at)")
+      .select("id, status, total, subtotal, tax, delivery_address, created_at, confirmed_at, dispatched_at, out_for_delivery_at, delivered_at, dealer_id, customer_name, customer_phone, customer_email, email_verified, profiles!dealer_id(name, email, dealer_code, address, staff_assigned, deleted_at)")
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error) console.error('[AdminOrders] query error:', error);
@@ -117,11 +117,25 @@ export default function AdminOrders() {
     }
   };
 
+  const TS_COL = {
+    confirmed:        "confirmed_at",
+    dispatched:       "dispatched_at",
+    out_for_delivery: "out_for_delivery_at",
+    delivered:        "delivered_at",
+  };
+
   const handleStatusChange = async (orderId, status, e) => {
     e.stopPropagation();
     setSavingId(orderId);
-    await supabase.from("orders").update({ status }).eq("id", orderId);
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status } : o)));
+    const currentOrder = orders.find((o) => o.id === orderId);
+    const tsCol = TS_COL[status];
+    const payload = { status };
+    // Write the stage timestamp only on first transition — never overwrite an existing value
+    if (tsCol && currentOrder && !currentOrder[tsCol]) {
+      payload[tsCol] = new Date().toISOString();
+    }
+    await supabase.from("orders").update(payload).eq("id", orderId);
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, ...payload } : o)));
     setSavingId(null);
   };
 
