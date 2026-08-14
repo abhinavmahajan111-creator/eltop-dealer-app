@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import { isDebitEntry as entryDr, isCreditEntry as entryCr } from "../lib/ledgerUtils";
 
 const TABS = ["Overview", "Orders", "Activity", "Ledger", "AI Assistant"];
 
@@ -170,9 +171,6 @@ export default function DealerCRM() {
       .filter(Boolean).map(s => s.toLowerCase().trim());
     return targets.some(t => t && (n === t || n.includes(t) || t.includes(n)));
   };
-
-  const entryDr = (row) => row.type === "order" || (row.type === "journal" && row.dr_dealer);
-  const entryCr = (row) => row.type === "payment" || row.type === "credit_note" || (row.type === "journal" && row.cr_dealer);
 
   // All-time outstanding (independent of period filter)
   const outstanding = ledger.reduce((s, row) => {

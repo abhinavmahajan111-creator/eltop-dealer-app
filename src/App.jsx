@@ -26,6 +26,7 @@ import AdminOrders from "./admin/AdminOrders";
 import AdminProducts from "./admin/AdminProducts";
 import AdminDealers from "./admin/AdminDealers";
 import AdminHealth from "./admin/AdminHealth";
+import AgingReport from "./admin/AgingReport";
 import SalesOrder from "./admin/SalesOrder";
 import DealerCRM from "./admin/DealerCRM";
 import GuestCRM from "./admin/GuestCRM";
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/dealers" element={<AdminDealers />} />
           <Route path="/admin/health" element={<AdminHealth />} />
+          <Route path="/admin/aging" element={<AgingReport />} />
         </Route>
         {/* Full-page views — no sidebar */}
         <Route path="/admin/orders/:id/print" element={<SalesOrder />} />
