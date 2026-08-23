@@ -401,3 +401,10 @@ To https://github.com/abhinavmahajan111-creator/eltop-dealer-app.git
 To https://github.com/abhinavmahajan111-creator/eltop-dealer-app.git
    4466091..155aa97  master -> master
 [23/08/2026 18:00:04.85] Auto-backup pushed successfully 
+[master 351741d] Auto-backup: 23/08/2026 19:00:00.86
+ 3 files changed, 55 insertions(+)
+ create mode 100644 ResolveOrder_cash_policy_note.patch
+ create mode 100644 ResolveOrder_cash_policy_note_1.patch
+To https://github.com/abhinavmahajan111-creator/eltop-dealer-app.git
+   7f96979..351741d  master -> master
+[23/08/2026 19:00:06.80] Auto-backup pushed successfully 
