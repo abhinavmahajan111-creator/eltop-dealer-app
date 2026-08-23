@@ -46,6 +46,62 @@ function Section({ title, children, defaultOpen = false }) {
   );
 }
 
+// ── Price / MRP / DLP change history (last 10) ────────────────────────────────
+function PriceHistoryPanel({ productId }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from("product_price_history")
+        .select("*")
+        .eq("product_id", productId)
+        .order("changed_at", { ascending: false })
+        .limit(10);
+      if (cancelled) return;
+      if (err) setError(err.message);
+      else setRows(data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [productId]);
+
+  const fmtMoney = (n) => (n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`);
+  const fmtDate = (ts) =>
+    new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  const Diff = ({ label, oldV, newV }) => {
+    if (oldV === newV) return null;
+    return (
+      <div style={{ fontSize: 12, color: "#334155" }}>
+        {label}: <span style={{ textDecoration: "line-through", color: "#94a3b8" }}>{fmtMoney(oldV)}</span>
+        {" → "}
+        <span style={{ fontWeight: 700 }}>{fmtMoney(newV)}</span>
+      </div>
+    );
+  };
+
+  if (error) return <div style={{ fontSize: 12, color: "#dc2626" }}>Couldn't load price history: {error}</div>;
+  if (rows === null) return <div style={{ fontSize: 12, color: "#94a3b8" }}>Loading…</div>;
+  if (rows.length === 0) return <div style={{ fontSize: 12, color: "#94a3b8" }}>No price changes logged yet.</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {rows.map(r => (
+        <div key={r.id} style={{ borderBottom: "1px solid #f1f5f9", paddingBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
+            {fmtDate(r.changed_at)}{r.changed_by_email ? ` — ${r.changed_by_email}` : ""}
+          </div>
+          <Diff label="MRP" oldV={r.old_mrp} newV={r.new_mrp} />
+          <Diff label="DLP" oldV={r.old_dlp} newV={r.new_dlp} />
+          <Diff label="Price" oldV={r.old_price} newV={r.new_price} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Bullet list editor ────────────────────────────────────────────────────────
 function BulletEditor({ items, onChange }) {
   const add = () => onChange([...items, ""]);
@@ -1443,6 +1499,10 @@ export default function AdminProducts() {
           </div>
           {/* ── Rich detail sections (shown when editing existing product) ── */}
           {form.id && (<>
+            <Section title="🕒 Price History">
+              <PriceHistoryPanel productId={form.id} />
+            </Section>
+
             <Section title="📝 About This Item">
               <BulletEditor
                 items={form.about_item}
