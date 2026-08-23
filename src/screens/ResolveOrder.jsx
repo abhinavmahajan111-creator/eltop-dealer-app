@@ -259,6 +259,20 @@ export default function ResolveOrder() {
           </div>
         </div>
 
+        {/* Cash-to-salesperson policy note */}
+        <div style={{
+          background: "#EFF6FF",
+          border: "1.5px solid #BFDBFE",
+          borderRadius: 12,
+          padding: "12px 16px",
+          marginBottom: 20,
+          fontSize: 12.5,
+          lineHeight: 1.5,
+          color: "#1E3A5F",
+        }}>
+          ℹ️ Your credit limit is restored only once digital payment is received in your account. Paying cash to a salesperson does not update your limit — the order can only be placed after the payment is made digitally.
+        </div>
+
         <div style={{ fontWeight: 600, fontSize: 12, color: "var(--muted)", marginBottom: 12, letterSpacing: 0.5 }}>
           CHOOSE AN OPTION
         </div>
