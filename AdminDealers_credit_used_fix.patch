@@ -1,0 +1,34 @@
+diff --git a/src/admin/AdminDealers.jsx b/src/admin/AdminDealers.jsx
+index 7a17e31..6d8caf3 100644
+--- a/src/admin/AdminDealers.jsx
++++ b/src/admin/AdminDealers.jsx
+@@ -791,9 +791,26 @@ export default function AdminDealers() {
+     setEditingCreditLimit(false);
+     setCreditLimitDraft("");
+     if (isSupabaseConfigured) {
+-      supabase.from("orders").select("total").eq("dealer_id", d.id).in("status", ["pending", "confirmed"])
+-        .then(({ data }) => {
+-          if (data) setCreditUsed(data.reduce((sum, o) => sum + Number(o.total || 0), 0));
++      // Live ledger-based outstanding — matches the real credit-limit gate in
++      // AppContext.jsx's placeOrder() (Dr: order + journal-dr, Cr: payment +
++      // credit_note + journal-cr), NOT raw pending/confirmed order totals.
++      // The old raw-order-total query ignored payments already received and
++      // could overstate "Used" by 10x+ for a dealer who'd already paid down
++      // most of their balance.
++      supabase.from("dealer_ledger").select("type, amount, dr_dealer, cr_dealer").eq("dealer_id", d.id)
++        .then(({ data, error }) => {
++          if (error) {
++            console.warn("[AdminDealers] credit-used ledger fetch failed:", error.message);
++            return;
++          }
++          const liveOutstanding = (data || []).reduce((sum, row) => {
++            const isDr = row.type === "order" || (row.type === "journal" && row.dr_dealer);
++            const isCr = row.type === "payment" || row.type === "credit_note" || (row.type === "journal" && row.cr_dealer);
++            if (isDr) return sum + Number(row.amount);
++            if (isCr) return sum - Number(row.amount);
++            return sum;
++          }, 0);
++          setCreditUsed(Math.round(liveOutstanding));
+         });
+     }
+   };
