@@ -1543,79 +1543,11 @@ export default function Store() {
     document.body.appendChild(script);
   };
 
-  const handleCOD = async () => {
-    if (!creditBlock) return;
-    const { checkoutData: data, capturedItems, capturedTotal, d1, d2, emailVerified } = creditBlock;
-    setCreditBlock(null);
-
-    const grossTotal   = capturedTotal;
-    const taxableValue = grossTotal / 1.18;
-    const totalTax     = grossTotal - taxableValue;
-    const isDelhi      = (data.state || '').trim() === 'Delhi';
-    const cgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
-    const sgst         = isDelhi ? Math.round(totalTax / 2 * 100) / 100 : 0;
-    const igst         = isDelhi ? 0 : Math.round(totalTax * 100) / 100;
-    const subtotal     = Math.round(taxableValue * 100) / 100;
-    const tax          = Math.round(totalTax * 100) / 100;
-    const total        = Math.round(grossTotal);
-    const deliveryAddress = [data.line1, data.line2, data.city, data.state, data.pincode].filter(Boolean).join(', ');
-
-    const { data: orderRows, error: orderError } = await supabase
-      .from('orders')
-      .insert([{
-        dealer_id:        session.user.id,
-        profile_id:       session.user.id,
-        customer_name:    data.name,
-        customer_phone:   data.phone,
-        customer_email:   data.email || null,
-        subtotal, tax, cgst, sgst, igst, total,
-        delivery_address: deliveryAddress,
-        payment_id:       null,
-        payment_status:   'pending',
-        status:           'confirmed',
-        email_verified:   emailVerified || false,
-        created_at:       new Date().toISOString(),
-      }])
-      .select('id');
-
-    if (orderError) {
-      console.error('[cod-save] order insert failed:', orderError);
-      alert('COD order save failed: ' + orderError.message);
-      return;
-    }
-
-    const orderId = orderRows[0].id;
-    const orderItems = capturedItems.map(item => ({
-      order_id:   orderId,
-      product_id: item.product.id,
-      name:       item.product.name,
-      price:      Math.round(item.effectivePrice * 100) / 100,
-      qty:        item.qty,
-      mrp:        item.product.mrp ?? null,
-      dlp:        item.product.dlp ?? item.product.mrp ?? null,
-      net_rate:   Math.round(item.effectivePrice * 100) / 100,
-      discount1:  d1,
-      discount2:  d2,
-      hsn_code:   item.product.hsn_code ?? null,
-    }));
-
-    if (orderItems.length === 0) {
-      console.error('[cod-save] capturedItems was empty');
-      alert('Cart was empty — no items saved.');
-      return;
-    }
-
-    const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-    if (itemsError) {
-      console.error('[cod-save] order_items insert failed:', itemsError);
-      alert('Order saved but items failed: ' + itemsError.message);
-      return;
-    }
-
-    cart.clear();
-    setCartOpen(false);
-    alert('✅ COD Order Placed!\nYour order has been confirmed. Payment is due on delivery.\nPlease clear your outstanding balance to continue ordering on credit.');
-  };
+  // NOTE: COD-as-credit-block-bypass was intentionally removed (25 Aug 2026).
+  // It used to insert a real confirmed order with payment_status: 'pending'
+  // and no ledger entry, bypassing the credit-limit check entirely — this
+  // contradicted the standing policy that only a real digital payment can
+  // clear a credit-limit block (see Eltop_Session_23Aug2026_Summary.md).
 
   const scrollToTop = () => {
     if (containerRef.current) containerRef.current.scrollTop = 0;
@@ -2351,7 +2283,7 @@ export default function Store() {
               </div>
               {/* Message */}
               <div style={{ padding: '16px 20px', fontSize: 14, lineHeight: 1.65, color: '#222', borderBottom: '1px solid #eee' }}>
-                Your credit limit is over. Your order value is <strong>{fmtR(cartTotal)}</strong>. Your balance credit limit is <strong>{fmtR(balanceLeft)}</strong>. Please pay the balance <strong>{fmtR(shortfall)}</strong> to place this order, or contact admin for a temporary limit grant against a commitment to pay in 7 days, or choose payment on delivery.
+                Your credit limit is over. Your order value is <strong>{fmtR(cartTotal)}</strong>. Your balance credit limit is <strong>{fmtR(balanceLeft)}</strong>. Please pay the balance <strong>{fmtR(shortfall)}</strong> to place this order, or contact admin for a temporary limit grant against a commitment to pay in 7 days.
               </div>
               {/* Summary grid */}
               <div style={{ padding: '12px 20px', background: '#fdf8f8', borderBottom: '1px solid #eee', fontSize: 13, display: 'grid', gridTemplateColumns: '1fr auto', gap: '5px 16px' }}>
@@ -2379,12 +2311,6 @@ export default function Store() {
                   onClick={() => alert('Feature coming soon — please contact admin directly to request a temporary credit limit increase against a 7-day payment commitment.')}
                   style={{ width: '100%', padding: '11px 0', background: '#fff', color: '#444', border: '1.5px solid #ddd', borderRadius: 10, fontWeight: 600, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
                   📋 Request Temporary Grant
-                </button>
-                {/* Button 3 — COD */}
-                <button
-                  onClick={handleCOD}
-                  style={{ width: '100%', padding: '11px 0', background: '#1a6fa8', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' }}>
-                  🚚 Place Order — Pay on Delivery (COD)
                 </button>
                 <button
                   onClick={() => setCreditBlock(null)}
