@@ -51,6 +51,16 @@ export function AppProvider({ children }) {
     toastTimer.current = setTimeout(() => setToastShow(false), 1600);
   }, []);
 
+  // "Added to Cart / View Cart →" bar — separate from the generic showToast
+  // above (which auto-hides after 1.6s and has no action button). This one
+  // stays hovering: it (re)appears on Add to Cart and on every +/- qty
+  // change, and only goes away when the dealer dismisses it or the item is
+  // removed from the cart entirely. Mirrors the same fix applied to the
+  // public Store.jsx "View Cart" bar.
+  const [cartToastProduct, setCartToastProduct] = useState(null);
+  const [cartToastShow, setCartToastShow] = useState(false);
+  const dismissCartToast = useCallback(() => setCartToastShow(false), []);
+
   // ---------- AUTH ----------
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -290,19 +300,24 @@ export function AppProvider({ children }) {
       }
       return [...prev, { ...product, qty }];
     });
-    showToast("Added to cart");
-  }, [showToast]);
+    setCartToastProduct(product);
+    setCartToastShow(true);
+  }, []);
 
   const changeCartQty = useCallback((id, delta) => {
-    setCart((prev) =>
-      prev.map((c) =>
-        c.id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c
-      )
-    );
-  }, []);
+    setCart((prev) => prev.map((c) =>
+      c.id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c
+    ));
+    const item = cart.find((c) => c.id === id);
+    if (item) {
+      setCartToastProduct(item);
+      setCartToastShow(true);
+    }
+  }, [cart]);
 
   const removeFromCart = useCallback((id) => {
     setCart((prev) => prev.filter((c) => c.id !== id));
+    setCartToastShow(false);
   }, []);
 
   const clearCart = useCallback(() => setCart([]), []);
@@ -509,6 +524,9 @@ export function AppProvider({ children }) {
     toastMsg,
     toastShow,
     showToast,
+    cartToastProduct,
+    cartToastShow,
+    dismissCartToast,
     deactivatedAccount,
     clearDeactivated: () => setDeactivatedAccount(false),
     blockedAccount,
