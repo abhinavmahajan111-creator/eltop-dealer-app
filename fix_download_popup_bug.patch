@@ -1,0 +1,40 @@
+diff --git a/src/pages/Store.jsx b/src/pages/Store.jsx
+index ba2b399..541b312 100644
+--- a/src/pages/Store.jsx
++++ b/src/pages/Store.jsx
+@@ -806,12 +806,29 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
+     }
+   };
+ 
+-  const handleDownload = (url) => {
+-    const a = document.createElement("a");
+-    a.href = url;
+-    a.download = (p.name || "product") + ".jpg";
+-    a.target = "_blank";
+-    a.click();
++  const handleDownload = async (url) => {
++    // Product images are served from Supabase Storage — a different origin
++    // than eltopbyembassy.com. Browsers ignore the `download` attribute on
++    // cross-origin links, so the old code (plain <a download target="_blank">)
++    // just opened the raw image in a new tab instead of saving a file — the
++    // "popup instead of download" bug. Fix: fetch the image as a blob first
++    // (same-origin blob: URL), then trigger the download from that.
++    try {
++      const response = await fetch(url);
++      const blob = await response.blob();
++      const blobUrl = URL.createObjectURL(blob);
++      const a = document.createElement("a");
++      a.href = blobUrl;
++      a.download = (p.name || "product") + ".jpg";
++      document.body.appendChild(a);
++      a.click();
++      document.body.removeChild(a);
++      URL.revokeObjectURL(blobUrl);
++    } catch (err) {
++      // Fetch/CORS failure — fall back to opening the image so the user can
++      // still save it manually (long-press / right-click "Save image as").
++      window.open(url, "_blank");
++    }
+   };
+ 
+   return (

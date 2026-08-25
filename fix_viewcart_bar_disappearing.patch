@@ -1,0 +1,39 @@
+diff --git a/src/pages/Store.jsx b/src/pages/Store.jsx
+index ba2b399..d50006b 100644
+--- a/src/pages/Store.jsx
++++ b/src/pages/Store.jsx
+@@ -1291,8 +1291,32 @@ export default function Store() {
+     setShowToast(true);
+   };
+ 
+-  const handleIncrease = (id) => cart.change(id, +1);
+-  const handleDecrease = (id) => cart.change(id, -1);
++  // The "Added to Cart / View Cart →" toast used to only fire from
++  // handleAddToCart (the very first +1). Once a product was already in the
++  // cart, using its +/- stepper (on the grid card or Product Detail page)
++  // never re-showed it — and once dismissed, it stayed gone until you added
++  // a brand-new product. Now +/- keeps it hovering on every qty change too,
++  // and it only disappears when the user cancels it or the item's qty hits
++  // zero (fully removed from cart).
++  const handleIncrease = (id) => {
++    cart.change(id, +1);
++    const item = cart.items.find(i => i.product.id === id);
++    if (item) {
++      setToastProduct(item.product);
++      setShowToast(true);
++    }
++  };
++  const handleDecrease = (id) => {
++    const item = cart.items.find(i => i.product.id === id);
++    const willBeRemoved = !item || item.qty - 1 <= 0;
++    cart.change(id, -1);
++    if (willBeRemoved) {
++      setShowToast(false);
++    } else {
++      setToastProduct(item.product);
++      setShowToast(true);
++    }
++  };
+ 
+   const handlePayment = async (data, { emailVerified = false } = {}) => {
+     if (!data?.name?.trim() || !data?.phone?.trim()) {
