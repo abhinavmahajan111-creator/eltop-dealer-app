@@ -806,12 +806,29 @@ function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecre
     }
   };
 
-  const handleDownload = (url) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = (p.name || "product") + ".jpg";
-    a.target = "_blank";
-    a.click();
+  const handleDownload = async (url) => {
+    // Product images are served from Supabase Storage — a different origin
+    // than eltopbyembassy.com. Browsers ignore the `download` attribute on
+    // cross-origin links, so the old code (plain <a download target="_blank">)
+    // just opened the raw image in a new tab instead of saving a file — the
+    // "popup instead of download" bug. Fix: fetch the image as a blob first
+    // (same-origin blob: URL), then trigger the download from that.
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = (p.name || "product") + ".jpg";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      // Fetch/CORS failure — fall back to opening the image so the user can
+      // still save it manually (long-press / right-click "Save image as").
+      window.open(url, "_blank");
+    }
   };
 
   return (
@@ -1291,8 +1308,32 @@ export default function Store() {
     setShowToast(true);
   };
 
-  const handleIncrease = (id) => cart.change(id, +1);
-  const handleDecrease = (id) => cart.change(id, -1);
+  // The "Added to Cart / View Cart →" toast used to only fire from
+  // handleAddToCart (the very first +1). Once a product was already in the
+  // cart, using its +/- stepper (on the grid card or Product Detail page)
+  // never re-showed it — and once dismissed, it stayed gone until you added
+  // a brand-new product. Now +/- keeps it hovering on every qty change too,
+  // and it only disappears when the user cancels it or the item's qty hits
+  // zero (fully removed from cart).
+  const handleIncrease = (id) => {
+    cart.change(id, +1);
+    const item = cart.items.find(i => i.product.id === id);
+    if (item) {
+      setToastProduct(item.product);
+      setShowToast(true);
+    }
+  };
+  const handleDecrease = (id) => {
+    const item = cart.items.find(i => i.product.id === id);
+    const willBeRemoved = !item || item.qty - 1 <= 0;
+    cart.change(id, -1);
+    if (willBeRemoved) {
+      setShowToast(false);
+    } else {
+      setToastProduct(item.product);
+      setShowToast(true);
+    }
+  };
 
   const handlePayment = async (data, { emailVerified = false } = {}) => {
     if (!data?.name?.trim() || !data?.phone?.trim()) {
