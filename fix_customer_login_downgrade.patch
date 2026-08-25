@@ -1,0 +1,26 @@
+diff --git a/src/screens/Login.jsx b/src/screens/Login.jsx
+index 0ea80d8..9e17d1c 100644
+--- a/src/screens/Login.jsx
++++ b/src/screens/Login.jsx
+@@ -108,12 +108,17 @@ export default function Login() {
+         if (user) {
+           const { data: existing } = await supabase
+             .from("profiles").select("id, is_dealer").eq("id", user.id).maybeSingle();
+-          if (existing) {
+-            if (existing.is_dealer !== false)
+-              await supabase.from("profiles").update({ is_dealer: false }).eq("id", user.id);
+-          } else {
++          if (!existing) {
++            // No profile yet — create one as a plain customer.
+             await supabase.from("profiles").insert({ id: user.id, email: user.email, is_dealer: false, name: "" });
+           }
++          // Existing profile (dealer or not) — never touch is_dealer here.
++          // Logging in via "Customer / My Account" must not silently change
++          // an account's dealer status; that's an admin-only action
++          // (Dealers & Customers → Promote/Downgrade). Previously this
++          // unconditionally flipped is_dealer to false, which meant a dealer
++          // who mis-picked "Customer" on the login screen silently lost
++          // dealer access with no warning.
+         }
+       }
+       navigate("/my-account");
