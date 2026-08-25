@@ -59,7 +59,7 @@ Continuation of `Eltop_Chat_Handoff_27-7-2026.md`. This doc summarizes everythin
 ## 🟢 Low-priority / known gaps
 
 - **Profile page "Schemes & Offers" and "Support" rows have NO click handler at all** — true even for *approved* dealers (confirmed by Claude Code directly: "Schemes and Support have no onClick today and keep none"). The lock/toast feature (item 11 above) only covers the *pending-dealer* case: it prevents confusing navigation-then-bounce. It does **not** give these two menu items working navigation for approved dealers — that's a separate, still-open gap.
-- `.env.local` git-history check — never confirmed whether the dev-OTP-bypass secret (`mteam01.embassyelectric@gmail.com` / code `123456`, dev-only, cannot fire in production) has ever been committed to git history. Worth a `git log --all -- .env.local` check.
+- `.env.local` git-history check — **done, 25 Aug 2026**: confirmed clean, `.env.local` was never committed. The dev-OTP-bypass code itself (dev-only, cannot fire in production) has since been rotated — see `Eltop_Session_23Aug2026_Summary.md`.
 - Newly-promoted-via-admin-dropdown dealer's login was never explicitly re-tested end-to-end after all the DealerRoute changes (only application-approved-flow dealers were tested). Likely fine (`dealer_application_status` would be null/'none' → treated as approved) but not explicitly confirmed with a screenshot.
 
 ## 🔵 Business-side / Phase 2 (no urgency)

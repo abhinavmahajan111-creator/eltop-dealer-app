@@ -53,7 +53,7 @@ a soft notice, not a hard block.
 `.env.local` (gitignored, never committed) has:
 ```
 VITE_DEV_OTP_BYPASS_EMAIL=mteam01.embassyelectric@gmail.com
-VITE_DEV_OTP_BYPASS_CODE=123456
+VITE_DEV_OTP_BYPASS_CODE=<redacted — rotated locally, see Eltop_Session_23Aug2026_Summary.md>
 ```
 Only active when `import.meta.env.DEV` — stripped from production builds 
 entirely. Lets Claude Code log in and self-test authenticated dealer flows 
