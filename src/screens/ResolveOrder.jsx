@@ -45,7 +45,9 @@ export default function ResolveOrder() {
     liveOutstanding = 0,
     creditLimit = 0,
     shortfall = 0,
+    returnTo = "/cart",
   } = state || {};
+  const backLabel = returnTo === "/store" ? "Back to Store" : "Back to Cart";
 
   const [expanded, setExpanded] = useState(null);
   const [extraDaysResult, setExtraDaysResult] = useState(null);
@@ -57,13 +59,13 @@ export default function ResolveOrder() {
     return (
       <div className="screen" id="screen-resolve-order">
         <div className="topbar">
-          <span className="back" onClick={() => navigate("/cart")}>&#8592;</span>
+          <span className="back" onClick={() => navigate(returnTo)}>&#8592;</span>
           <h1>Credit Limit</h1>
         </div>
         <div className="content" style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)" }}>
           No order context found.
           <br /><br />
-          <button className="btn small" onClick={() => navigate("/cart")}>Back to Cart</button>
+          <button className="btn small" onClick={() => navigate(returnTo)}>{backLabel}</button>
         </div>
       </div>
     );
@@ -131,7 +133,7 @@ export default function ResolveOrder() {
               " recorded (Voucher: " + verifyData.voucher_no + ").\n\n" +
               "You can now place your order."
             );
-            navigate("/cart");
+            navigate(returnTo);
           },
           theme: { color: "#7B2D8B" },
           modal: {
@@ -228,7 +230,7 @@ export default function ResolveOrder() {
   return (
     <div className="screen" id="screen-resolve-order">
       <div className="topbar">
-        <span className="back" onClick={() => navigate("/cart")}>&#8592;</span>
+        <span className="back" onClick={() => navigate(returnTo)}>&#8592;</span>
         <h1>Order Blocked</h1>
       </div>
       <div className="content">
@@ -330,8 +332,8 @@ export default function ResolveOrder() {
                     Go back to your cart — orders placed before this date will be processed
                     during your grace period.
                   </p>
-                  <button className="btn" style={{ marginTop: 12 }} onClick={() => navigate("/cart")}>
-                    Back to Cart →
+                  <button className="btn" style={{ marginTop: 12 }} onClick={() => navigate(returnTo)}>
+                    {backLabel} →
                   </button>
                 </div>
               ) : extraDaysResult ? (
@@ -381,8 +383,8 @@ export default function ResolveOrder() {
                     Note: eligibility is currently based on whether an active enhancement is already
                     in use. Payment history scoring will be added in a future update.
                   </p>
-                  <button className="btn" style={{ marginTop: 12 }} onClick={() => navigate("/cart")}>
-                    Back to Cart →
+                  <button className="btn" style={{ marginTop: 12 }} onClick={() => navigate(returnTo)}>
+                    {backLabel} →
                   </button>
                 </div>
               ) : extraLimitResult ? (
