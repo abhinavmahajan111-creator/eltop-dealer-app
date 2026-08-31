@@ -1,0 +1,1084 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 2fe93cb..376654f 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -5,6 +5,7 @@ import AdminRoute from "./components/AdminRoute";
+ import DealerRoute from "./components/DealerRoute";
+ import DealerProfileRoute from "./components/DealerProfileRoute";
+ import CustomerRoute from "./components/CustomerRoute";
++import StaffRoute from "./components/StaffRoute";
+ import Store from "./pages/Store";
+ import MyAccount from "./pages/MyAccount";
+ import Splash from "./screens/Splash";
+@@ -20,11 +21,13 @@ import Ledger from "./screens/Ledger";
+ import Profile from "./screens/Profile";
+ import Schemes from "./screens/Schemes";
+ import Support from "./screens/Support";
++import StaffHome from "./screens/StaffHome";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+ import AdminOrders from "./admin/AdminOrders";
+ import AdminProducts from "./admin/AdminProducts";
+ import AdminDealers from "./admin/AdminDealers";
++import AdminStaff from "./admin/AdminStaff";
+ import AdminHealth from "./admin/AdminHealth";
+ import AgingReport from "./admin/AgingReport";
+ import SalesOrder from "./admin/SalesOrder";
+@@ -74,6 +77,7 @@ export default function App() {
+           <Route path="/admin/orders" element={<AdminOrders />} />
+           <Route path="/admin/products" element={<AdminProducts />} />
+           <Route path="/admin/dealers" element={<AdminDealers />} />
++          <Route path="/admin/staff" element={<AdminStaff />} />
+           <Route path="/admin/health" element={<AdminHealth />} />
+           <Route path="/admin/aging" element={<AgingReport />} />
+         </Route>
+@@ -91,6 +95,20 @@ export default function App() {
+         <Route path="/ledger" element={<Ledger />} />
+       </Route>
+ 
++      {/* Staff routes — full-width, outside PhoneFrame (internal desktop tools).
++          Every path below renders the same placeholder today; each swaps to
++          its real department dashboard independently as those get built. */}
++      <Route element={<StaffRoute />}>
++        <Route path="/staff" element={<StaffHome />} />
++        <Route path="/staff/sales" element={<StaffHome />} />
++        <Route path="/staff/after-sales" element={<StaffHome />} />
++        <Route path="/staff/dispatch" element={<StaffHome />} />
++        <Route path="/staff/logistics" element={<StaffHome />} />
++        <Route path="/staff/back-office" element={<StaffHome />} />
++        <Route path="/staff/support-desk" element={<StaffHome />} />
++        <Route path="/staff/content" element={<StaffHome />} />
++      </Route>
++
+       <Route path="/store" element={<Store />} />
+       <Route path="/track" element={<TrackOrder />} />
+       <Route path="/contact" element={<ContactSupport />} />
+diff --git a/src/admin/AdminLayout.jsx b/src/admin/AdminLayout.jsx
+index df50942..75a3a71 100644
+--- a/src/admin/AdminLayout.jsx
++++ b/src/admin/AdminLayout.jsx
+@@ -7,6 +7,7 @@ const NAV_ITEMS = [
+   { to: "/admin/orders", label: "Orders", icon: "\u{1F4E6}" },
+   { to: "/admin/products", label: "Products", icon: "\u{1F6CE}\u{FE0F}" },
+   { to: "/admin/dealers", label: "Dealers & Customers", icon: "\u{1F465}" },
++  { to: "/admin/staff", label: "Staff", icon: "\u{1F9D1}\u{200D}\u{1F4BC}" },
+   { to: "/admin/health", label: "Health Check", icon: "\u{1F6A8}" },
+   { to: "/admin/aging", label: "Aging Report", icon: "\u{1F4C5}" },
+ ];
+diff --git a/src/admin/AdminStaff.jsx b/src/admin/AdminStaff.jsx
+new file mode 100644
+index 0000000..2a3daab
+--- /dev/null
++++ b/src/admin/AdminStaff.jsx
+@@ -0,0 +1,189 @@
++import { useEffect, useState } from "react";
++import { isSupabaseConfigured, supabase } from "../lib/supabase";
++import { STAFF_ROLE_META, staffRoleLabel } from "../utils/staffRoles";
++
++const ROLE_OPTIONS = Object.keys(STAFF_ROLE_META);
++
++const EMPTY_FORM = { email: "", name: "", role: ROLE_OPTIONS[0], reports_to: "" };
++
++export default function AdminStaff() {
++  const [rows, setRows]         = useState([]);
++  const [loading, setLoading]   = useState(true);
++  const [fetchError, setFetchError] = useState("");
++  const [form, setForm]         = useState(EMPTY_FORM);
++  const [saving, setSaving]     = useState(false);
++  const [formError, setFormError] = useState("");
++
++  const load = async () => {
++    if (!isSupabaseConfigured) { setLoading(false); return; }
++    setLoading(true);
++    setFetchError("");
++    const { data, error } = await supabase
++      .from("staff_profiles")
++      .select("email, id, name, role, department, reports_to, is_active, created_at")
++      .order("created_at", { ascending: false });
++    if (error) {
++      setFetchError(error.message || "Failed to load staff.");
++    } else {
++      setRows(data || []);
++    }
++    setLoading(false);
++  };
++
++  useEffect(() => { load(); }, []);
++
++  const handleAdd = async () => {
++    setFormError("");
++    const email = form.email.trim().toLowerCase();
++    if (!email) { setFormError("Email is required."); return; }
++    if (rows.some(r => r.email === email)) { setFormError("This email is already registered as staff."); return; }
++
++    setSaving(true);
++    const department = STAFF_ROLE_META[form.role]?.department || "";
++    const { error } = await supabase.from("staff_profiles").insert({
++      email,
++      name: form.name.trim() || null,
++      role: form.role,
++      department,
++      reports_to: form.reports_to || null,
++    });
++    setSaving(false);
++    if (error) {
++      setFormError(error.message || "Could not add staff member.");
++      return;
++    }
++    setForm(EMPTY_FORM);
++    load();
++  };
++
++  const toggleActive = async (row) => {
++    await supabase.from("staff_profiles").update({ is_active: !row.is_active }).eq("email", row.email);
++    load();
++  };
++
++  const removeRow = async (row) => {
++    if (!window.confirm(`Remove ${row.email} from staff? This cannot be undone.`)) return;
++    await supabase.from("staff_profiles").delete().eq("email", row.email);
++    load();
++  };
++
++  return (
++    <div className="admin-page">
++      <h1 className="admin-title">Staff</h1>
++      <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 20 }}>
++        Add a staff member here BEFORE they try to log in — the Staff login option on
++        the login screen only lets registered, active emails through.
++      </div>
++
++      {/* ── Add staff form ── */}
++      <div style={{ background: "#fff", border: "1px solid #eee", borderRadius: 10, padding: 18, marginBottom: 24, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
++        <div>
++          <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 4 }}>Email</div>
++          <input
++            type="email"
++            value={form.email}
++            onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
++            placeholder="name@eltop.com"
++            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 13, minWidth: 200 }}
++          />
++        </div>
++        <div>
++          <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 4 }}>Name</div>
++          <input
++            type="text"
++            value={form.name}
++            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
++            placeholder="Optional"
++            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 13, minWidth: 160 }}
++          />
++        </div>
++        <div>
++          <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 4 }}>Role</div>
++          <select
++            className="admin-select"
++            value={form.role}
++            onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
++            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 13 }}
++          >
++            {ROLE_OPTIONS.map(r => (
++              <option key={r} value={r}>{staffRoleLabel(r)} — {STAFF_ROLE_META[r].department}</option>
++            ))}
++          </select>
++        </div>
++        <div>
++          <div style={{ fontSize: 11, fontWeight: 700, color: "#666", marginBottom: 4 }}>Reports to (optional)</div>
++          <select
++            className="admin-select"
++            value={form.reports_to}
++            onChange={e => setForm(f => ({ ...f, reports_to: e.target.value }))}
++            style={{ padding: "8px 10px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 13 }}
++          >
++            <option value="">— none —</option>
++            {rows.map(r => (
++              <option key={r.email} value={r.email}>{r.name || r.email}</option>
++            ))}
++          </select>
++        </div>
++        <button className="btn small" disabled={saving} onClick={handleAdd}>
++          {saving ? "Adding…" : "+ Add Staff"}
++        </button>
++      </div>
++      {formError && (
++        <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "10px 14px", marginBottom: 20, color: "#be123c", fontSize: 13 }}>
++          {formError}
++        </div>
++      )}
++
++      {fetchError && (
++        <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#be123c", fontSize: 13 }}>
++          ⚠️ Query failed: {fetchError}
++        </div>
++      )}
++
++      {loading ? (
++        <div className="admin-loading">Loading&hellip;</div>
++      ) : rows.length === 0 ? (
++        <div className="admin-empty">No staff added yet.</div>
++      ) : (
++        <div className="admin-table-wrap">
++          <table className="admin-table">
++            <thead>
++              <tr>
++                <th>Email</th>
++                <th>Name</th>
++                <th>Role</th>
++                <th>Department</th>
++                <th>Reports to</th>
++                <th>Login status</th>
++                <th>Active</th>
++                <th></th>
++              </tr>
++            </thead>
++            <tbody>
++              {rows.map(r => (
++                <tr key={r.email}>
++                  <td>{r.email}</td>
++                  <td>{r.name || "—"}</td>
++                  <td>{staffRoleLabel(r.role)}</td>
++                  <td>{r.department}</td>
++                  <td>{r.reports_to || "—"}</td>
++                  <td>{r.id ? "Logged in at least once" : "Never logged in"}</td>
++                  <td>
++                    <button className="btn small outline" onClick={() => toggleActive(r)}>
++                      {r.is_active ? "Active — deactivate" : "Deactivated — activate"}
++                    </button>
++                  </td>
++                  <td>
++                    <button className="btn small outline" style={{ color: "#c0392b", borderColor: "#c0392b" }} onClick={() => removeRow(r)}>
++                      Remove
++                    </button>
++                  </td>
++                </tr>
++              ))}
++            </tbody>
++          </table>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/AdminRoute.jsx b/src/components/AdminRoute.jsx
+index 4dd7c7b..9a2fb33 100644
+--- a/src/components/AdminRoute.jsx
++++ b/src/components/AdminRoute.jsx
+@@ -7,7 +7,7 @@ export default function AdminRoute() {
+   const [checking, setChecking] = useState(true);
+   const [isAdmin, setIsAdmin] = useState(false);
+   const [isLoggedIn, setIsLoggedIn] = useState(false);
+-  const { isDealer, isCustomer, sessionChecked, profileLoaded, adminChecked } = useApp();
++  const { isDealer, isCustomer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked } = useApp();
+ 
+   useEffect(() => {
+     if (!isSupabaseConfigured) {
+@@ -43,7 +43,7 @@ export default function AdminRoute() {
+   // resolve before redirecting. profileLoaded false means we don't yet know if
+   // the session belongs to a dealer, customer, or neither — redirecting during
+   // that window would use incomplete identity information.
+-  if (!sessionChecked || checking || (isLoggedIn && !isAdmin && (!profileLoaded || !adminChecked))) {
++  if (!sessionChecked || checking || (isLoggedIn && !isAdmin && (!profileLoaded || !adminChecked || !staffChecked))) {
+     return (
+       <div className="admin-app">
+         <div className="admin-loading">Checking access&hellip;</div>
+@@ -53,6 +53,7 @@ export default function AdminRoute() {
+ 
+   if (!isLoggedIn) return <Navigate to="/login" replace />;
+   if (!isAdmin && isDealer) return <Navigate to="/dashboard" replace />;
++  if (!isAdmin && isStaff) return <Navigate to="/staff" replace />;
+   if (!isAdmin && isCustomer) return <Navigate to="/store" replace />;
+   if (!isAdmin) return <Navigate to="/login" replace />;
+ 
+diff --git a/src/components/CustomerRoute.jsx b/src/components/CustomerRoute.jsx
+index dcf7d76..6bf705b 100644
+--- a/src/components/CustomerRoute.jsx
++++ b/src/components/CustomerRoute.jsx
+@@ -2,9 +2,9 @@ import { Navigate, Outlet } from "react-router-dom";
+ import { useApp } from "../context/AppContext";
+ 
+ export default function CustomerRoute() {
+-  const { isCustomer, isDealer, sessionChecked, profileLoaded, adminChecked, session } = useApp();
++  const { isCustomer, isDealer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked, session } = useApp();
+ 
+-  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked))) {
++  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked || !staffChecked))) {
+     return (
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontSize: 14, color: "#94a3b8" }}>
+         Loading…
+@@ -13,5 +13,6 @@ export default function CustomerRoute() {
+   }
+ 
+   if (isCustomer || isDealer) return <Outlet />;
++  if (isStaff) return <Navigate to="/staff" replace />;
+   return <Navigate to="/store" replace />;
+ }
+diff --git a/src/components/DealerProfileRoute.jsx b/src/components/DealerProfileRoute.jsx
+index 175a923..e4f624b 100644
+--- a/src/components/DealerProfileRoute.jsx
++++ b/src/components/DealerProfileRoute.jsx
+@@ -4,9 +4,9 @@ import { useApp } from "../context/AppContext";
+ // Like DealerRoute, but allows pending dealers through to /profile.
+ // Blocked dealers are already signed out by AppContext before this renders.
+ export default function DealerProfileRoute() {
+-  const { isDealer, isAdmin, isCustomer, sessionChecked, profileLoaded, adminChecked, session } = useApp();
++  const { isDealer, isAdmin, isCustomer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked, session } = useApp();
+ 
+-  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked))) {
++  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked || !staffChecked))) {
+     return (
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontSize: 14, color: "#94a3b8" }}>
+         Loading…
+@@ -16,6 +16,7 @@ export default function DealerProfileRoute() {
+ 
+   if (isDealer)   return <Outlet />;
+   if (isAdmin)    return <Navigate to="/admin" replace />;
++  if (isStaff)    return <Navigate to="/staff" replace />;
+   if (isCustomer) return <Navigate to="/store" replace />;
+   return <Navigate to="/login" replace />;
+ }
+diff --git a/src/components/DealerRoute.jsx b/src/components/DealerRoute.jsx
+index b85fe54..e3ac945 100644
+--- a/src/components/DealerRoute.jsx
++++ b/src/components/DealerRoute.jsx
+@@ -2,14 +2,15 @@ import { Navigate, Outlet } from "react-router-dom";
+ import { useApp } from "../context/AppContext";
+ 
+ export default function DealerRoute() {
+-  const { isDealer, isAdmin, isCustomer, sessionChecked, profileLoaded, adminChecked, session, dealerApplicationStatus } = useApp();
++  const { isDealer, isAdmin, isCustomer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked, session, dealerApplicationStatus } = useApp();
+ 
+-  // Three-phase loading gate:
++  // Four-phase loading gate:
+   // 1. sessionChecked — wait for getSession() to resolve (session starts null on mount)
+   // 2. profileLoaded  — wait for profiles table query to resolve (is_dealer flag)
+   // 3. adminChecked   — wait for admins table query to resolve (isAdmin flag)
+-  // Without all three, a hard reload redirects before identity is known.
+-  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked))) {
++  // 4. staffChecked   — wait for staff_profiles query to resolve (isStaff flag)
++  // Without all four, a hard reload redirects before identity is known.
++  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked || !staffChecked))) {
+     return (
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontSize: 14, color: "#94a3b8" }}>
+         Loading…
+@@ -25,6 +26,7 @@ export default function DealerRoute() {
+     return isApproved ? <Outlet /> : <Navigate to="/store" replace />;
+   }
+   if (isAdmin)     return <Navigate to="/admin" replace />;
++  if (isStaff)     return <Navigate to="/staff" replace />;
+   if (isCustomer)  return <Navigate to="/store" replace />;
+   return <Navigate to="/login" replace />;
+ }
+diff --git a/src/components/StaffRoute.jsx b/src/components/StaffRoute.jsx
+new file mode 100644
+index 0000000..47c3a96
+--- /dev/null
++++ b/src/components/StaffRoute.jsx
+@@ -0,0 +1,26 @@
++import { Navigate, Outlet } from "react-router-dom";
++import { useApp } from "../context/AppContext";
++
++// Modeled directly on DealerRoute.jsx. Gates every /staff/* route: only a
++// linked, active staff_profiles row gets through. Anyone else with a known
++// identity is bounced to their own home; anyone unknown goes to /login.
++export default function StaffRoute() {
++  const { isStaff, isAdmin, isDealer, isCustomer, sessionChecked, profileLoaded, adminChecked, staffChecked, session } = useApp();
++
++  // Four-phase loading gate — same reasoning as DealerRoute's three-phase one,
++  // with staffChecked added so a staff member isn't bounced before their
++  // staff_profiles row has had a chance to resolve.
++  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked || !staffChecked))) {
++    return (
++      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontSize: 14, color: "#94a3b8" }}>
++        Loading…
++      </div>
++    );
++  }
++
++  if (isStaff)    return <Outlet />;
++  if (isAdmin)    return <Navigate to="/admin" replace />;
++  if (isDealer)   return <Navigate to="/dashboard" replace />;
++  if (isCustomer) return <Navigate to="/store" replace />;
++  return <Navigate to="/login" replace />;
++}
+diff --git a/src/context/AppContext.jsx b/src/context/AppContext.jsx
+index 9cfe5f7..5de1b6d 100644
+--- a/src/context/AppContext.jsx
++++ b/src/context/AppContext.jsx
+@@ -37,6 +37,9 @@ export function AppProvider({ children }) {
+   const [isDealer, setIsDealer] = useState(false);
+   const [isAdmin, setIsAdmin] = useState(false);
+   const [adminChecked, setAdminChecked] = useState(false);
++  const [isStaff, setIsStaff] = useState(false);
++  const [staffProfile, setStaffProfile] = useState(null);
++  const [staffChecked, setStaffChecked] = useState(false);
+ 
+   const [deactivatedAccount, setDeactivatedAccount] = useState(false);
+   const [blockedAccount,     setBlockedAccount]     = useState(false);
+@@ -221,6 +224,30 @@ export function AppProvider({ children }) {
+       });
+   }, [session]);
+ 
++  // Check staff_profiles whenever session changes — same pattern as the
++  // admins check above. Looks up by id, so this only resolves AFTER a staff
++  // member's row has been linked (id set) on their first successful login;
++  // see Login.jsx's staff verify() branch for where that link happens.
++  useEffect(() => {
++    if (!isSupabaseConfigured || !session?.user) {
++      setIsStaff(false);
++      setStaffProfile(null);
++      setStaffChecked(false);
++      return;
++    }
++    supabase
++      .from('staff_profiles')
++      .select('role, department, name, is_active')
++      .eq('id', session.user.id)
++      .maybeSingle()
++      .then(({ data }) => {
++        const active = Boolean(data) && data.is_active !== false;
++        setIsStaff(active);
++        setStaffProfile(active ? data : null);
++        setStaffChecked(true);
++      });
++  }, [session]);
++
+   const signOut = useCallback(async () => {
+     if (isSupabaseConfigured) await supabase.auth.signOut();
+     setSession(null);
+@@ -229,6 +256,9 @@ export function AppProvider({ children }) {
+     setProfileLoaded(false);
+     setIsAdmin(false);
+     setAdminChecked(false);
++    setIsStaff(false);
++    setStaffProfile(null);
++    setStaffChecked(false);
+     setCart([]);
+     setDeactivatedAccount(false);
+   }, []);
+@@ -506,11 +536,14 @@ export function AppProvider({ children }) {
+     session,
+     isLoggedIn: isSupabaseConfigured ? Boolean(session) : null,
+     isDealer,
+-    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
++    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin && !isStaff,
+     profileLoaded,
+     sessionChecked,
+     isAdmin,
+     adminChecked,
++    isStaff,
++    staffProfile,
++    staffChecked,
+     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
+     dealer: profile,
+     products,
+diff --git a/src/screens/Login.jsx b/src/screens/Login.jsx
+index 9e17d1c..d199b29 100644
+--- a/src/screens/Login.jsx
++++ b/src/screens/Login.jsx
+@@ -2,18 +2,26 @@ import { useEffect, useRef, useState } from "react";
+ import { useNavigate } from "react-router-dom";
+ import { useApp } from "../context/AppContext";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
++import { staffRolePath } from "../utils/staffRoles";
+ 
+-const STAFF_ROLE_MAP = {
+-  "Sales Executive":      "sales_executive",
+-  "Logistics & Dispatch": "logistics",
+-  "Back Office":          "back_office",
+-};
++// Four top-level login choices — decided 31 Aug 2026. No per-department
++// dropdown pre-login (that used to list 7 options including 3 separate staff
++// roles — confusing for whoever's logging in). Everyone from the company
++// logs in through "Staff" with their own email; the app looks up their
++// role/department AFTER auth (staff_profiles), the same way it already
++// looks up dealer_application_status to decide what a dealer sees.
++const TOP_LEVEL_CHOICES = [
++  { key: "Guest",    label: "Guest",    blurb: "Browse the store, no account needed" },
++  { key: "Customer", label: "Customer", blurb: "Track your orders, manage your account" },
++  { key: "Dealer",   label: "Dealer",   blurb: "Channel partner ordering & pricing" },
++  { key: "Staff",    label: "Staff",    blurb: "Eltop team — sales, after-sales, logistics & more" },
++];
+ 
+ export default function Login() {
+   const navigate = useNavigate();
+   const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, blockedAccount, clearBlocked, markBlocked, refreshProfile } = useApp();
+ 
+-  const [role, setRole]             = useState("Guest");
++  const [topLevel, setTopLevel]     = useState(null); // null | 'Guest' | 'Customer' | 'Dealer' | 'Staff'
+   const [dealerMode, setDealerMode] = useState("existing"); // 'existing' | 'new'
+   const [step, setStep]             = useState(1);
+   const [emailInput, setEmailInput] = useState("");
+@@ -38,14 +46,12 @@ export default function Login() {
+     }, 1000);
+   }
+ 
+-  const isGuest    = role === "Guest";
+-  const isCustomer = role === "Customer / My Account";
+-  const isDealer   = role === "Channel Partner";
+-  const isAdmin    = role === "Administrator";
+-  const isStaff    = role in STAFF_ROLE_MAP;
++  const isGuest    = topLevel === "Guest";
++  const isCustomer = topLevel === "Customer";
++  const isDealer   = topLevel === "Dealer";
++  const isStaff    = topLevel === "Staff";
+ 
+-  function handleRoleChange(e) {
+-    setRole(e.target.value);
++  function resetFlowState() {
+     setStep(1);
+     setEmailInput("");
+     setLocalError("");
+@@ -54,25 +60,32 @@ export default function Login() {
+     otpRefs.forEach(r => { if (r.current) r.current.value = ""; });
+   }
+ 
++  function chooseTopLevel(choice) {
++    setTopLevel(choice);
++    resetFlowState();
++  }
++
++  function backToChoices() {
++    setTopLevel(null);
++    resetFlowState();
++  }
++
+   async function goOtp() {
+     setLocalError("");
+     const email = emailInput.trim();
+ 
+     if (isStaff && isSupabaseConfigured) {
+-      const staffRole = STAFF_ROLE_MAP[role];
+-      const { data, error } = await supabase
+-        .from("staff")
+-        .select("role")
+-        .ilike("email", email)
+-        .eq("role", staffRole)
+-        .maybeSingle();
+-      // error (non-null) covers both genuine query failure AND multiple-row conflicts
++      // Pre-OTP gate: is this email a registered, active staff member?
++      // Uses a security-definer function (not a direct table read) so the
++      // staff roster — names, roles, reporting lines — is never exposed to
++      // an unauthenticated request; it only ever returns true/false.
++      const { data, error } = await supabase.rpc("is_staff_email", { check_email: email });
+       if (error) {
+         setLocalError("Unable to verify your account. Please try again.");
+         return;
+       }
+       if (!data) {
+-        setLocalError(`You're not registered as a ${role}. Contact admin for clarification.`);
++        setLocalError("This email isn't registered as staff. Contact admin to get added.");
+         return;
+       }
+     }
+@@ -94,13 +107,22 @@ export default function Login() {
+     // OTP verified → mark this profile's email as confirmed.
+     // The on_auth_user_created trigger creates the profiles row at signInWithOtp time
+     // (before OTP verification), so we mark it verified here when the OTP actually succeeds.
++    let authUser = null;
+     if (isSupabaseConfigured) {
+       const { data: authData } = await supabase.auth.getUser();
+-      if (authData?.user) {
+-        await supabase.from('profiles').update({ email_verified: true }).eq('id', authData.user.id);
++      authUser = authData?.user || null;
++      if (authUser) {
++        await supabase.from('profiles').update({ email_verified: true }).eq('id', authUser.id);
+       }
+     }
+ 
++    // ── Admin (checked first, regardless of which of the four buttons was
++    // used to log in — an admins-table row always wins) ──
++    if (isSupabaseConfigured && authUser) {
++      const { data: adminRow } = await supabase.from('admins').select('id').eq('id', authUser.id).maybeSingle();
++      if (adminRow) { navigate("/admin"); return; }
++    }
++
+     // ── Customer ──
+     if (isCustomer) {
+       if (isSupabaseConfigured) {
+@@ -113,12 +135,12 @@ export default function Login() {
+             await supabase.from("profiles").insert({ id: user.id, email: user.email, is_dealer: false, name: "" });
+           }
+           // Existing profile (dealer or not) — never touch is_dealer here.
+-          // Logging in via "Customer / My Account" must not silently change
+-          // an account's dealer status; that's an admin-only action
+-          // (Dealers & Customers → Promote/Downgrade). Previously this
+-          // unconditionally flipped is_dealer to false, which meant a dealer
+-          // who mis-picked "Customer" on the login screen silently lost
+-          // dealer access with no warning.
++          // Logging in via "Customer" must not silently change an account's
++          // dealer status; that's an admin-only action (Dealers & Customers
++          // → Promote/Downgrade). Previously this unconditionally flipped
++          // is_dealer to false, which meant a dealer who mis-picked
++          // "Customer" on the login screen silently lost dealer access with
++          // no warning.
+         }
+       }
+       navigate("/my-account");
+@@ -221,8 +243,41 @@ export default function Login() {
+       return;
+     }
+ 
+-    // ── Admin / Staff ──
+-    navigate(isAdmin ? "/admin" : "/dashboard");
++    // ── Staff ──
++    if (isStaff) {
++      if (isSupabaseConfigured) {
++        const { data: { user } } = await supabase.auth.getUser();
++        if (user) {
++          // Link this staff_profiles row to the auth id on first successful
++          // login (the row starts with id = null — Admin creates it by
++          // email only, before the person ever logs in).
++          await supabase.from("staff_profiles").update({ id: user.id }).eq("email", user.email).is("id", null);
++          const { data: sp, error: spErr } = await supabase
++            .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
++          if (spErr || !sp) {
++            setLocalError("Unable to verify your staff account. Please try again.");
++            await supabase.auth.signOut();
++            setLocalBusy(false);
++            setStep(1);
++            return;
++          }
++          if (!sp.is_active) {
++            setLocalError("Your staff account has been deactivated. Contact admin.");
++            await supabase.auth.signOut();
++            setLocalBusy(false);
++            setStep(1);
++            return;
++          }
++          navigate(staffRolePath(sp.role));
++        }
++      } else {
++        navigate("/staff");
++      }
++      return;
++    }
++
++    // Fallback — shouldn't normally be reached (every branch above returns).
++    navigate("/store");
+   }
+ 
+   function handleOtpInput(e, i) {
+@@ -236,14 +291,16 @@ export default function Login() {
+     }
+   }
+ 
+-  const titleText = isCustomer ? "My Account"
+-    : isDealer ? "Channel Partner"
+-    : "Welcome, Dealer";
+-  const subText = isCustomer
+-    ? "Sign in or create your account"
+-    : isDealer
+-    ? (dealerMode === "new" ? "Register as a new dealer" : "Login to your dealer account")
+-    : "Login to manage your orders";
++  const titleText = !topLevel ? "Welcome to Eltop"
++    : isCustomer ? "My Account"
++    : isDealer   ? "Channel Partner"
++    : isStaff    ? "Staff Login"
++    : "Welcome to Eltop";
++  const subText = !topLevel ? "Choose how you'd like to continue"
++    : isCustomer ? "Sign in or create your account"
++    : isDealer   ? (dealerMode === "new" ? "Register as a new dealer" : "Login to your dealer account")
++    : isStaff    ? "Login with your company email"
++    : "Browse Eltop products";
+ 
+   const formContent = (
+     <>
+@@ -270,108 +327,122 @@ export default function Login() {
+         </div>
+       )}
+ 
+-      {dealerMismatch && (
+-        <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
+-          <div style={{ fontWeight: 800, marginBottom: 6 }}>No dealer account found</div>
+-          No dealer account is linked to <b>{emailInput}</b>. Double-check for a typo — a single wrong character means a different inbox.
+-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+-            <button
+-              onClick={() => { setDealerMismatch(false); setEmailInput(""); setStep(1); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
+-              style={{ background: "#fff", border: "1.5px solid #e74c3c", color: "#7b241c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+-            >
+-              ← Try a different email
+-            </button>
++      {!topLevel ? (
++        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
++          {TOP_LEVEL_CHOICES.map(choice => (
+             <button
+-              onClick={() => { setDealerMismatch(false); setDealerMode("new"); setStep(1); }}
+-              style={{ background: "#7B2D8B", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
++              key={choice.key}
++              className="btn"
++              onClick={() => chooseTopLevel(choice.key)}
++              style={{ textAlign: "left", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, padding: "14px 18px" }}
+             >
+-              Register as new dealer →
+-            </button>
+-          </div>
+-        </div>
+-      )}
+-
+-      <select value={role} onChange={handleRoleChange}
+-        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", marginBottom: 16, border: "1.5px solid #ddd", borderRadius: 10, fontSize: 14, fontFamily: "inherit", background: "#fff", color: "#111", appearance: "auto" }}>
+-        <option value="Guest">Guest</option>
+-        <option value="Customer / My Account">Customer / My Account</option>
+-        <option value="Channel Partner">Channel Partner</option>
+-        <option value="Sales Executive">Sales Executive</option>
+-        <option value="Logistics & Dispatch">Logistics &amp; Dispatch</option>
+-        <option value="Administrator">Administrator</option>
+-        <option value="Back Office">Back Office</option>
+-      </select>
+-
+-      {/* Channel Partner sub-choice */}
+-      {isDealer && !dealerMismatch && (
+-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+-          {[["existing", "Existing Dealer"], ["new", "New Dealer — Sign Up"]].map(([mode, label]) => (
+-            <button key={mode}
+-              onClick={() => { setDealerMode(mode); setStep(1); setLocalError(""); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
+-              style={{
+-                flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+-                cursor: "pointer", fontFamily: "inherit",
+-                background: dealerMode === mode ? "#7B2D8B" : "transparent",
+-                color: dealerMode === mode ? "#fff" : "#7B2D8B",
+-                border: "1.5px solid #7B2D8B",
+-              }}>
+-              {label}
++              <span style={{ fontSize: 17, fontWeight: 800 }}>{choice.label}</span>
++              <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.85 }}>{choice.blurb}</span>
+             </button>
+           ))}
+         </div>
+-      )}
+-
+-      {isGuest ? (
+-        <>
+-          <button className="btn" onClick={() => navigate("/store")}>Continue to Store →</button>
+-          <img
+-            src="/assets/fan%20man%20eltop.png"
+-            alt="Fanman"
+-            style={{ display: "block", margin: "20px auto 0 auto", height: 150, width: "auto", cursor: "pointer", transition: "transform 0.2s" }}
+-            onClick={() => setShowFanmanModal(true)}
+-            onMouseEnter={e => { e.target.style.transform = "scale(1.05)"; }}
+-            onMouseLeave={e => { e.target.style.transform = "scale(1)"; }}
+-            onError={e => { e.target.style.display = "none"; }}
+-          />
+-        </>
+       ) : (
+         <>
+-          {step === 1 && (
+-            <div>
+-              <input
+-                type="email"
+-                placeholder="Enter Email Address"
+-                value={emailInput}
+-                onChange={e => { setEmailInput(e.target.value); setLocalError(""); setDealerMismatch(false); }}
+-              />
+-              {(localError || authError) && (
+-                <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
+-              )}
+-              <button className="btn" onClick={goOtp} disabled={authBusy || !emailInput.trim()}>
+-                {authBusy ? "Checking..." : "Send OTP"}
+-              </button>
++          <button
++            onClick={backToChoices}
++            style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 16, textDecoration: "underline" }}
++          >
++            ← Change login type
++          </button>
++
++          {dealerMismatch && (
++            <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
++              <div style={{ fontWeight: 800, marginBottom: 6 }}>No dealer account found</div>
++              No dealer account is linked to <b>{emailInput}</b>. Double-check for a typo — a single wrong character means a different inbox.
++              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
++                <button
++                  onClick={() => { setDealerMismatch(false); setEmailInput(""); setStep(1); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
++                  style={{ background: "#fff", border: "1.5px solid #e74c3c", color: "#7b241c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
++                >
++                  ← Try a different email
++                </button>
++                <button
++                  onClick={() => { setDealerMismatch(false); setDealerMode("new"); setStep(1); }}
++                  style={{ background: "#7B2D8B", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
++                >
++                  Register as new dealer →
++                </button>
++              </div>
+             </div>
+           )}
+-          {step === 2 && (
+-            <div>
+-              <div className="login-sub" style={{ marginBottom: 14, overflowWrap: 'break-word', wordBreak: 'break-all' }}>OTP sent to <b>{emailInput}</b></div>
+-              <div className="otp-row">
+-                {otpRefs.map((ref, i) => (
+-                  <input key={i} ref={ref} maxLength={1} className="otp-box"
+-                    onInput={e => handleOtpInput(e, i)} onKeyDown={e => handleOtpKeyDown(e, i)} />
+-                ))}
+-              </div>
+-              {(localError || authError) && (
+-                <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
+-              )}
+-              <button className="btn" onClick={verify} disabled={authBusy || localBusy}>
+-                {authBusy ? "Verifying..." : localBusy ? "Setting up account..." : "Verify & Login"}
+-              </button>
+-              {resendCooldown > 0
+-                ? <div className="resend" style={{ opacity: 0.5, cursor: "default" }}>Resend OTP in {resendCooldown}s</div>
+-                : <div className="resend" onClick={goOtp}>Resend OTP</div>}
++
++          {/* Dealer sub-choice */}
++          {isDealer && !dealerMismatch && (
++            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
++              {[["existing", "Existing Dealer"], ["new", "New Dealer — Sign Up"]].map(([mode, label]) => (
++                <button key={mode}
++                  onClick={() => { setDealerMode(mode); setStep(1); setLocalError(""); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
++                  style={{
++                    flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: 700,
++                    cursor: "pointer", fontFamily: "inherit",
++                    background: dealerMode === mode ? "#7B2D8B" : "transparent",
++                    color: dealerMode === mode ? "#fff" : "#7B2D8B",
++                    border: "1.5px solid #7B2D8B",
++                  }}>
++                  {label}
++                </button>
++              ))}
+             </div>
+           )}
++
++          {isGuest ? (
++            <>
++              <button className="btn" onClick={() => navigate("/store")}>Continue to Store →</button>
++              <img
++                src="/assets/fan%20man%20eltop.png"
++                alt="Fanman"
++                style={{ display: "block", margin: "20px auto 0 auto", height: 150, width: "auto", cursor: "pointer", transition: "transform 0.2s" }}
++                onClick={() => setShowFanmanModal(true)}
++                onMouseEnter={e => { e.target.style.transform = "scale(1.05)"; }}
++                onMouseLeave={e => { e.target.style.transform = "scale(1)"; }}
++                onError={e => { e.target.style.display = "none"; }}
++              />
++            </>
++          ) : (
++            <>
++              {step === 1 && (
++                <div>
++                  <input
++                    type="email"
++                    placeholder="Enter Email Address"
++                    value={emailInput}
++                    onChange={e => { setEmailInput(e.target.value); setLocalError(""); setDealerMismatch(false); }}
++                  />
++                  {(localError || authError) && (
++                    <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
++                  )}
++                  <button className="btn" onClick={goOtp} disabled={authBusy || !emailInput.trim()}>
++                    {authBusy ? "Checking..." : "Send OTP"}
++                  </button>
++                </div>
++              )}
++              {step === 2 && (
++                <div>
++                  <div className="login-sub" style={{ marginBottom: 14, overflowWrap: 'break-word', wordBreak: 'break-all' }}>OTP sent to <b>{emailInput}</b></div>
++                  <div className="otp-row">
++                    {otpRefs.map((ref, i) => (
++                      <input key={i} ref={ref} maxLength={1} className="otp-box"
++                        onInput={e => handleOtpInput(e, i)} onKeyDown={e => handleOtpKeyDown(e, i)} />
++                    ))}
++                  </div>
++                  {(localError || authError) && (
++                    <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
++                  )}
++                  <button className="btn" onClick={verify} disabled={authBusy || localBusy}>
++                    {authBusy ? "Verifying..." : localBusy ? "Setting up account..." : "Verify & Login"}
++                  </button>
++                  {resendCooldown > 0
++                    ? <div className="resend" style={{ opacity: 0.5, cursor: "default" }}>Resend OTP in {resendCooldown}s</div>
++                    : <div className="resend" onClick={goOtp}>Resend OTP</div>}
++                </div>
++              )}
++            </>
++          )}
+         </>
+       )}
+     </>
+diff --git a/src/screens/StaffHome.jsx b/src/screens/StaffHome.jsx
+new file mode 100644
+index 0000000..018fa64
+--- /dev/null
++++ b/src/screens/StaffHome.jsx
+@@ -0,0 +1,50 @@
++import { useNavigate } from "react-router-dom";
++import { useApp } from "../context/AppContext";
++import { staffRoleLabel, staffRoleDepartment } from "../utils/staffRoles";
++
++// Generic landing page for every staff route that doesn't have a real
++// department dashboard built yet. Every /staff/* path in App.jsx currently
++// points here — as each department's real panel gets built (Sales and
++// After-Sales first, per the architecture doc), that path's <Route element>
++// swaps to the real screen without touching login, routing, or this file's
++// role/department lookup.
++export default function StaffHome() {
++  const navigate = useNavigate();
++  const { staffProfile, signOut } = useApp();
++
++  const roleLabel = staffRoleLabel(staffProfile?.role);
++  const department = staffRoleDepartment(staffProfile?.role) || staffProfile?.department || "";
++
++  const handleLogout = async () => {
++    await signOut();
++    navigate("/login");
++  };
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #eee" }}>
++        <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
++        <button
++          onClick={handleLogout}
++          style={{ background: "none", border: "1.5px solid #ddd", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, color: "#555", cursor: "pointer" }}
++        >
++          Log out
++        </button>
++      </div>
++
++      <div style={{ maxWidth: 560, margin: "60px auto", padding: "0 24px", textAlign: "center" }}>
++        <div style={{ fontSize: 13, fontWeight: 700, color: "#7B2D8B", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
++          {department}
++        </div>
++        <div style={{ fontSize: 26, fontWeight: 800, marginBottom: 12 }}>
++          Welcome, {roleLabel}
++        </div>
++        <div style={{ fontSize: 15, color: "#666", lineHeight: 1.6 }}>
++          Your {department ? `${department} ` : ""}dashboard isn't built yet — this is a placeholder
++          landing page so login and role routing can be tested end-to-end.
++          Real screens for Sales and After-Sales are next in line.
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/utils/staffRoles.js b/src/utils/staffRoles.js
+new file mode 100644
+index 0000000..a821643
+--- /dev/null
++++ b/src/utils/staffRoles.js
+@@ -0,0 +1,41 @@
++// Single source of truth for staff role → department/label/dashboard-route
++// mapping. Used by Login.jsx (post-login routing), StaffHome.jsx, the
++// AdminStaff screen (role picker), and the *Route guards (redirect target
++// when a staff member lands on a route that isn't theirs).
++//
++// Departments without a built dashboard yet (HR/Legal/Admin/Operations/Delhi
++// Head) all point at the generic "/staff" placeholder — adding their real
++// panel later just means changing one path here, not touching routing logic.
++export const STAFF_ROLE_META = {
++  sales_associate:        { department: "Sales",       label: "Sales Associate",        path: "/staff/sales" },
++  senior_sales_associate: { department: "Sales",       label: "Senior Sales Associate", path: "/staff/sales" },
++  senior_sales_executive: { department: "Sales",       label: "Senior Sales Executive", path: "/staff/sales" },
++
++  after_sales_head:       { department: "After-Sales", label: "After-Sales Head",       path: "/staff/after-sales" },
++
++  dispatch:               { department: "Logistics",   label: "Dispatch",               path: "/staff/dispatch" },
++  logistics_coordinator:  { department: "Logistics",   label: "Logistics Coordinator",  path: "/staff/logistics" },
++
++  back_office:            { department: "Back Office", label: "Back Office",            path: "/staff/back-office" },
++  calling_support:        { department: "Back Office", label: "Calling / Support",      path: "/staff/support-desk" },
++
++  content_marketing:      { department: "Content",     label: "Content & Marketing",    path: "/staff/content" },
++
++  hr:                     { department: "HR",          label: "HR",                     path: "/staff" },
++  legal:                  { department: "Legal",       label: "Legal",                  path: "/staff" },
++  office_admin:           { department: "Admin",       label: "Admin",                  path: "/staff" },
++  operations:             { department: "Operations",  label: "Operations",             path: "/staff" },
++  delhi_head:             { department: "Delhi Head",  label: "Delhi Head",             path: "/staff" },
++};
++
++export function staffRolePath(role) {
++  return STAFF_ROLE_META[role]?.path || "/staff";
++}
++
++export function staffRoleLabel(role) {
++  return STAFF_ROLE_META[role]?.label || role || "Staff";
++}
++
++export function staffRoleDepartment(role) {
++  return STAFF_ROLE_META[role]?.department || "";
++}
+diff --git a/supabase/migrations/staff_profiles.sql b/supabase/migrations/staff_profiles.sql
+new file mode 100644
+index 0000000..31a0733
+--- /dev/null
++++ b/supabase/migrations/staff_profiles.sql
+@@ -0,0 +1,75 @@
++-- staff_profiles table
++-- Replaces the old ad-hoc "staff" table (email+role lookup, never linked to
++-- auth.users, not tracked in any migration). This is the real thing: every
++-- internal Eltop employee who needs to log in via the "Staff" option on the
++-- login screen gets exactly one row here, created by Admin BEFORE they ever
++-- log in (no self-signup, unlike profiles/dealers).
++--
++-- email is the primary key because the row has to exist pre-login (Admin
++-- creates it), so there's no auth.users id yet at creation time. `id` gets
++-- filled in by the app on first successful OTP verify.
++--
++-- Run in Supabase SQL Editor.
++
++CREATE TABLE public.staff_profiles (
++  email       text        PRIMARY KEY,
++  id          uuid        UNIQUE REFERENCES auth.users(id) ON DELETE SET NULL,
++  name        text,
++  role        text        NOT NULL CHECK (role IN (
++                'sales_associate', 'senior_sales_associate', 'senior_sales_executive',
++                'after_sales_head',
++                'dispatch', 'logistics_coordinator',
++                'back_office', 'calling_support',
++                'content_marketing',
++                'hr', 'legal', 'office_admin', 'operations', 'delhi_head'
++              )),
++  department  text        NOT NULL,
++  reports_to  text        REFERENCES public.staff_profiles(email),
++  is_active   boolean     NOT NULL DEFAULT true,
++  created_at  timestamptz NOT NULL DEFAULT now()
++);
++
++ALTER TABLE public.staff_profiles ENABLE ROW LEVEL SECURITY;
++
++-- A staff member can read their own row (looked up by their logged-in id).
++CREATE POLICY "Staff can view their own profile"
++  ON public.staff_profiles FOR SELECT
++  USING (id = auth.uid());
++
++-- The pre-OTP login gate needs to check whether an email is registered as
++-- staff BEFORE that person has a session (id is still null at that point).
++-- Deliberately NOT a public SELECT policy on the table (that would expose
++-- the whole roster — names, roles, reports_to — to anyone unauthenticated).
++-- Instead, a security-definer function that only ever returns a boolean,
++-- same pattern as is_admin() above.
++CREATE OR REPLACE FUNCTION public.is_staff_email(check_email text)
++RETURNS boolean AS $$
++  SELECT EXISTS (
++    SELECT 1 FROM public.staff_profiles
++    WHERE email = check_email AND is_active = true
++  );
++$$ LANGUAGE sql SECURITY DEFINER STABLE;
++
++-- Staff can link their own row to their auth id on first successful login
++-- (id starts null; the app sets it once, only while it's still null).
++CREATE POLICY "Staff can claim their own unlinked profile"
++  ON public.staff_profiles FOR UPDATE
++  USING (id IS NULL)
++  WITH CHECK (id = auth.uid());
++
++-- Admins manage the roster: create, edit, deactivate staff accounts.
++CREATE POLICY "Admins can view all staff profiles"
++  ON public.staff_profiles FOR SELECT
++  USING (public.is_admin());
++
++CREATE POLICY "Admins can insert staff profiles"
++  ON public.staff_profiles FOR INSERT
++  WITH CHECK (public.is_admin());
++
++CREATE POLICY "Admins can update any staff profile"
++  ON public.staff_profiles FOR UPDATE
++  USING (public.is_admin());
++
++CREATE POLICY "Admins can delete staff profiles"
++  ON public.staff_profiles FOR DELETE
++  USING (public.is_admin());
