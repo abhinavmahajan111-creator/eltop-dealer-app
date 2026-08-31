@@ -1,0 +1,1477 @@
+diff --git a/src/components/ProductDetailView.jsx b/src/components/ProductDetailView.jsx
+new file mode 100644
+index 0000000..082f1a3
+--- /dev/null
++++ b/src/components/ProductDetailView.jsx
+@@ -0,0 +1,509 @@
++import { useEffect, useState } from "react";
++import { getImages, getEmbedUrl, getYoutubeThumbnail, downloadImageAsFile } from "../utils/productMedia";
++
++const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
++
++// ── Consolidated Product Detail view ────────────────────────────────────────
++// Used by both the public /store page (Store.jsx) and the dealer-only
++// /product/:id page (ProductDetail.jsx). Before 31 Aug 2026 these were two
++// separate, drifting implementations — Store.jsx's richer inline version
++// (zoom lightbox, collapsible About/Specs/Item Details, quick specs table)
++// vs. the dealer flow's simpler one (video support, a Warehouse Stock table,
++// no collapsible sections). This component merges both feature sets:
++//   - Video support (YouTube/Vimeo) is shown to everyone — just product
++//     marketing content, not sensitive.
++//   - Warehouse Stock is shown ONLY when `showWarehouseStock` is true, which
++//     callers gate on `isApprovedDealer` — a guest/customer on /store must
++//     never see it, same as they never see dealer (DLP) pricing today.
++//
++// `compact` switches between Store's desktop two-column layout (thumbnail
++// rail beside a wide main image) and a single-column stacked layout with a
++// horizontal thumbnail row below the main image — needed because the dealer
++// route always renders inside the narrow (≤640px) PhoneFrame, where a fixed
++// desktop-width image column would overflow.
++export default function ProductDetailView({
++  product: p,
++  onBack,
++  showBackButton = true,
++  backLabel = "← Back to Products",
++  onAdd,
++  qty,
++  onIncrease,
++  onDecrease,
++  effectivePrice,
++  pricingMode,
++  showWarehouseStock = false,
++  compact = false,
++}) {
++  const [activeImg, setActiveImg] = useState(0);
++  const [lightbox, setLightbox] = useState(false);
++  const [showAbout, setShowAbout] = useState(false);
++  const [showSpecs, setShowSpecs] = useState(false);
++  const [showItemDetails, setShowItemDetails] = useState(false);
++  const [showShareModal, setShowShareModal] = useState(false);
++  const [shareUrl, setShareUrl] = useState('');
++
++  const images = getImages(p);
++  const embedUrl = getEmbedUrl(p.video_url);
++  const ytThumb = p.video_url ? getYoutubeThumbnail(p.video_url) : null;
++  // Media rail: video first (if present), then images — same ordering the
++  // dealer flow's ProductGallery.jsx used.
++  const media = [
++    ...(embedUrl ? [{ type: "video", embedUrl, thumb: ytThumb }] : []),
++    ...images.map((url) => ({ type: "image", url })),
++  ];
++  const current = media[Math.min(activeImg, media.length - 1)] || null;
++
++  // Close lightbox on Escape key
++  useEffect(() => {
++    if (!lightbox) return;
++    const handler = (e) => { if (e.key === "Escape") setLightbox(false); };
++    window.addEventListener("keydown", handler);
++    return () => window.removeEventListener("keydown", handler);
++  }, [lightbox]);
++
++  const handleShare = async () => {
++    const productUrl = `${window.location.origin}/store?product=${p.id}`;
++    if (navigator.share) {
++      try {
++        await navigator.share({ title: p.name, text: `Check out ${p.name} - MRP ₹${p.mrp}`, url: productUrl });
++      } catch (_) {}
++    } else {
++      setShareUrl(productUrl);
++      setShowShareModal(true);
++    }
++  };
++
++  return (
++    <div style={{ maxWidth: 1100, margin: "0 auto", padding: compact ? "12px 0 40px" : "20px 16px 60px" }}>
++      {showBackButton && (
++        <button
++          onClick={onBack}
++          style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "1.5px solid #7B2D8B", color: "#7B2D8B", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginBottom: 20 }}
++        >
++          {backLabel}
++        </button>
++      )}
++
++      <div style={{ display: "flex", gap: compact ? 0 : 32, flexWrap: "wrap", flexDirection: compact ? "column" : "row" }}>
++        {/* Left/top: image + video viewer */}
++        <div style={{ flex: compact ? "1 1 auto" : "1 1 340px", maxWidth: compact ? "100%" : 480, minWidth: 0, display: "flex", gap: 10, flexDirection: compact ? "column" : "row" }}>
++
++          {/* Thumbnail rail — left of main image on desktop, below it on compact/phone-frame layouts */}
++          {media.length > 1 && (
++            <div style={{
++              display: "flex",
++              flexDirection: compact ? "row" : "column",
++              gap: 8,
++              width: compact ? "100%" : 72,
++              flexShrink: 0,
++              overflowX: compact ? "auto" : "visible",
++              overflowY: compact ? "visible" : "auto",
++              maxHeight: compact ? "none" : 440,
++              order: compact ? 2 : 0,
++            }}>
++              {media.map((item, i) => (
++                <div
++                  key={i}
++                  onClick={() => setActiveImg(i)}
++                  style={{
++                    width: 70, height: 70, borderRadius: 8, overflow: "hidden", flexShrink: 0,
++                    border: i === activeImg ? "2px solid #7B2D8B" : "2px solid transparent",
++                    cursor: "pointer", background: "#f9f8ff",
++                    display: "flex", alignItems: "center", justifyContent: "center",
++                    opacity: i === activeImg ? 1 : 0.6,
++                    transition: "opacity .15s, border-color .15s",
++                    boxShadow: i === activeImg ? "0 0 0 1px #7B2D8B" : "0 1px 4px rgba(0,0,0,.1)",
++                    position: "relative",
++                  }}
++                >
++                  {item.type === "video" ? (
++                    <>
++                      {item.thumb
++                        ? <img src={item.thumb} alt="video" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
++                        : <div style={{ background: "#222", width: "100%", height: "100%" }} />}
++                      <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 20, textShadow: "0 1px 4px rgba(0,0,0,.6)" }}>▶</span>
++                    </>
++                  ) : (
++                    <img src={item.url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
++                  )}
++                </div>
++              ))}
++            </div>
++          )}
++
++          {/* Main image / video */}
++          <div
++            onClick={() => current && current.type === "image" && setLightbox(true)}
++            style={{
++              flex: 1, minWidth: 0, background: "#f9f8ff", overflow: "hidden",
++              display: "flex", alignItems: "center", justifyContent: "center",
++              padding: current && current.type === "video" ? 0 : "20px 20px", backgroundColor: "#f9f9f9",
++              borderRadius: 12, minHeight: compact ? 260 : 380,
++              border: "1px solid #edf0f7", cursor: current && current.type === "image" ? "zoom-in" : "default",
++              position: "relative",
++            }}
++          >
++            {!current && <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
++            {current && current.type === "video" && (
++              <iframe
++                src={current.embedUrl}
++                title="Product video"
++                frameBorder="0"
++                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
++                allowFullScreen
++                style={{ width: "100%", height: compact ? 260 : 380, border: "none" }}
++              />
++            )}
++            {current && current.type === "image" && (
++              <>
++                <img src={current.url} alt={p.name} style={{ maxWidth: "85%", maxHeight: compact ? 240 : 360, objectFit: "contain", cursor: "zoom-in", display: "block", margin: "0 auto" }} />
++                <span style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#94a3b8", background: "rgba(255,255,255,.8)", borderRadius: 6, padding: "2px 8px" }}>
++                  🔍 {compact ? "Tap" : "Click"} to zoom
++                </span>
++              </>
++            )}
++          </div>
++        </div>
++
++        {/* Right/bottom: info */}
++        <div style={{ flex: 1, minWidth: compact ? "100%" : 260, marginTop: compact ? 16 : 0 }}>
++          {p.category && (
++            <span style={{ display: "inline-block", background: "#7B2D8B", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
++              {p.category}
++            </span>
++          )}
++          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", lineHeight: 1.3, margin: "0 0 8px" }}>{p.name}</h1>
++
++          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0 16px 0' }}>
++            <button
++              onClick={handleShare}
++              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 20, border: '1px solid #7B2D8B', background: 'white', color: '#7B2D8B', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'inherit' }}
++            >
++              🔗 Share This Product
++            </button>
++          </div>
++
++          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
++            {p.sku      && <div style={{ fontSize: 13, color: "#64748b" }}>SKU: <strong style={{ color: "#334155" }}>{p.sku}</strong></div>}
++            {p.hsn_code && <div style={{ fontSize: 13, color: "#64748b" }}>HSN Code: <strong style={{ color: "#334155" }}>{p.hsn_code}</strong></div>}
++            {p.unit     && <div style={{ fontSize: 13, color: "#64748b" }}>Unit: <strong style={{ color: "#334155" }}>{p.unit}</strong></div>}
++          </div>
++
++          {(() => {
++            const discPct = p.mrp && effectivePrice < p.mrp ? Math.round((p.mrp - effectivePrice) / p.mrp * 100) : 0;
++            const showDlp = pricingMode === 'dealer' && p.dlp && effectivePrice < p.dlp;
++            const showMrp = p.mrp && effectivePrice < p.mrp;
++            return (
++              <div style={{ background: "#faf7ff", border: "1px solid #e9d5f5", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
++                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
++                  <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
++                  <span style={{ fontSize: 32, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
++                  {discPct > 0 && (
++                    <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 13, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{discPct}% OFF</span>
++                  )}
++                </div>
++                {(showDlp || showMrp) && (
++                  <div style={{ fontSize: 11, color: "#94a3b8" }}>
++                    {showDlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.dlp)}</span></span>}
++                    {showDlp && showMrp && <span> · </span>}
++                    {showMrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span></span>}
++                  </div>
++                )}
++              </div>
++            );
++          })()}
++
++          {!qty ? (
++            <button
++              onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
++              style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
++            >
++              + Add to Cart
++            </button>
++          ) : (
++            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#7B2D8B", borderRadius: 10, overflow: "hidden", width: "100%", marginBottom: 10 }}>
++              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onDecrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>−</button>
++              <span style={{ color: "white", fontWeight: "bold", fontSize: 20 }}>{qty}</span>
++              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onIncrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>+</button>
++            </div>
++          )}
++          {/* Only relevant to guests/customers browsing dealer-priced items —
++              an already-approved dealer is already getting dealer pricing,
++              so showing this note to them (as the old Store.jsx version
++              always did, unconditionally) didn't make sense. */}
++          {pricingMode !== 'dealer' && (
++            <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
++              Sign up to place orders at dealer pricing
++            </div>
++          )}
++
++          {/* Warehouse Stock — dealer-only, never shown to a guest/customer.
++              Gated by the same isApprovedDealer flag callers use for dealer
++              pricing, regardless of whether they're on /store or /product/:id. */}
++          {showWarehouseStock && (
++            <div style={{ marginTop: 16, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
++              <div style={{ padding: "9px 14px", background: "#f9f8ff", fontSize: 12, fontWeight: 700, color: "#7B2D8B", textTransform: "uppercase", letterSpacing: "0.5px" }}>
++                Warehouse Stock
++              </div>
++              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
++                <tbody>
++                  {[
++                    ["Delhi Warehouse", p.wh?.delhi ?? 0],
++                    ["Ludhiana Warehouse", p.wh?.ludhiana ?? 0],
++                    ["Jaipur Warehouse", p.wh?.jaipur ?? 0],
++                  ].map(([label, units], i, arr) => (
++                    <tr key={label} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none" }}>
++                      <td style={{ padding: "9px 14px", color: "#64748b", fontSize: 12 }}>{label}</td>
++                      <td style={{ padding: "9px 14px", color: "#1e293b", fontWeight: 600, textAlign: "right" }}>{units} units</td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            </div>
++          )}
++
++          {/* Quick specs */}
++          {(p.standard_packing || p.unit || p.brand || p.warranty) && (
++            <div style={{ marginTop: 16, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
++              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
++                <tbody>
++                  {[
++                    ["Brand", p.brand],
++                    ["Unit", p.unit],
++                    ["Standard Packing", p.standard_packing ? `${p.standard_packing} pcs` : null],
++                    ["Warranty", p.warranty],
++                    ["Colour", p.colour],
++                    ["Material", p.material],
++                    ["Weight", p.weight],
++                    ["Dimensions", p.dimensions],
++                    ["Power Source", p.power_source],
++                    ["Wattage", p.wattage],
++                    ["Voltage", p.voltage],
++                    ["Mounting Type", p.mounting_type],
++                    ["Room Type", p.room_type],
++                  ].filter(([, v]) => v).map(([label, val], i, arr) => (
++                    <tr key={label} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none" }}>
++                      <td style={{ padding: "9px 14px", color: "#64748b", width: "42%", fontSize: 12 }}>{label}</td>
++                      <td style={{ padding: "9px 14px", color: "#1e293b", fontWeight: 600 }}>{val}</td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            </div>
++          )}
++        </div>
++      </div>
++
++      {/* ── About This Item (collapsible) ── */}
++      <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
++        <div
++          onClick={() => setShowAbout(!showAbout)}
++          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' }}
++        >
++          <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📋 About This Item</h3>
++          <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showAbout ? '▲' : '▼'}</span>
++        </div>
++        {showAbout && (
++          <div style={{ padding: 16, background: '#fafafa' }}>
++            {Array.isArray(p.about_item) && p.about_item.filter(Boolean).length > 0 ? (
++              <ul style={{ paddingLeft: 20, margin: 0 }}>
++                {p.about_item.filter(Boolean).map((pt, i) => (
++                  <li key={i} style={{ marginBottom: 8, fontSize: 14, lineHeight: 1.6 }}>{pt}</li>
++                ))}
++              </ul>
++            ) : (
++              <p style={{ color: '#bbb', fontSize: 14, margin: 0 }}>No description added yet</p>
++            )}
++          </div>
++        )}
++      </div>
++
++      {/* ── Features & Specs (collapsible) ── */}
++      {(() => {
++        const SPEC_FIELDS = [
++          { key: 'power_source', label: 'Power Source' },
++          { key: 'room_type', label: 'Room Type' },
++          { key: 'mounting_type', label: 'Mounting Type' },
++          { key: 'special_features', label: 'Special Features' },
++          { key: 'recommended_use', label: 'Recommended Use' },
++          { key: 'colour', label: 'Colour' },
++          { key: 'style', label: 'Style' },
++          { key: 'material', label: 'Material' },
++          { key: 'wattage', label: 'Wattage' },
++          { key: 'voltage', label: 'Voltage' },
++          { key: 'speed', label: 'Speed' },
++          { key: 'capacity', label: 'Capacity' },
++          { key: 'warranty', label: 'Warranty' },
++          { key: 'weight', label: 'Weight' },
++          { key: 'dimensions', label: 'Dimensions' },
++        ];
++        const ITEM_DETAIL_FIELDS = [
++          { key: 'brand', label: 'Brand' },
++          { key: 'colour', label: 'Colour' },
++          { key: 'style', label: 'Style' },
++          { key: 'warranty', label: 'Warranty' },
++          { key: 'weight', label: 'Weight' },
++          { key: 'dimensions', label: 'Dimensions' },
++          { key: 'material', label: 'Material' },
++          { key: 'wattage', label: 'Wattage' },
++          { key: 'voltage', label: 'Voltage' },
++          { key: 'power_source', label: 'Power Source' },
++          { key: 'mounting_type', label: 'Mounting Type' },
++          { key: 'room_type', label: 'Room Type' },
++          { key: 'special_features', label: 'Special Features' },
++        ];
++        const specsVis = p.features_specs?.visibility || {};
++        const specs = p.features_specs?.values || {};
++        const itemVis = p.item_details?.visibility || {};
++        const itemDetails = p.item_details?.values || {};
++        const hdrStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' };
++        const renderRow = (key, label, val, vis) => {
++          if (vis[key] === false) return null;
++          return (
++            <tr key={key} style={{ borderBottom: '1px solid #eee' }}>
++              <td style={{ padding: '10px 12px', fontWeight: 500, width: '40%', background: '#f9f9f9', fontSize: 14 }}>{label}</td>
++              <td style={{ padding: '10px 12px', fontSize: 14, color: val ? '#333' : '#bbb' }}>{val || '—'}</td>
++            </tr>
++          );
++        };
++        return (
++          <>
++            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
++              <div onClick={() => setShowSpecs(!showSpecs)} style={hdrStyle}>
++                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>⚡ Features &amp; Specs</h3>
++                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showSpecs ? '▲' : '▼'}</span>
++              </div>
++              {showSpecs && (
++                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
++                  <tbody>{SPEC_FIELDS.map(({ key, label }) => renderRow(key, label, specs[key], specsVis))}</tbody>
++                </table>
++              )}
++            </div>
++            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
++              <div onClick={() => setShowItemDetails(!showItemDetails)} style={hdrStyle}>
++                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📦 Item Details</h3>
++                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showItemDetails ? '▲' : '▼'}</span>
++              </div>
++              {showItemDetails && (
++                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
++                  <tbody>{ITEM_DETAIL_FIELDS.map(({ key, label }) => renderRow(key, label, itemDetails[key], itemVis))}</tbody>
++                </table>
++              )}
++            </div>
++          </>
++        );
++      })()}
++
++      {/* ── Share Modal ── */}
++      {showShareModal && (
++        <div
++          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3500 }}
++          onClick={() => setShowShareModal(false)}
++        >
++          <div
++            style={{ background: 'white', borderRadius: 16, padding: 24, width: 320, maxWidth: '90vw' }}
++            onClick={e => e.stopPropagation()}
++          >
++            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>Share This Product</h3>
++            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
++              <input
++                value={shareUrl}
++                readOnly
++                style={{ flex: 1, padding: 8, border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}
++              />
++              <button
++                onClick={() => { navigator.clipboard.writeText(shareUrl); alert('Link copied!'); }}
++                style={{ padding: '8px 12px', background: '#7B2D8B', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}
++              >
++                Copy
++              </button>
++            </div>
++            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
++              <a
++                href={`https://wa.me/?text=${encodeURIComponent(p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
++                target="_blank" rel="noreferrer"
++                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#25D366', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
++              >
++                📱 WhatsApp
++              </a>
++              <a
++                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`}
++                target="_blank" rel="noreferrer"
++                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1877F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
++              >
++                👍 Facebook
++              </a>
++              <a
++                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(p.name)}&url=${encodeURIComponent(shareUrl)}`}
++                target="_blank" rel="noreferrer"
++                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1DA1F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
++              >
++                🐦 Twitter
++              </a>
++              <a
++                href={`mailto:?subject=${encodeURIComponent(p.name)}&body=${encodeURIComponent('Check out ' + p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
++                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#64748b', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
++              >
++                📧 Email
++              </a>
++            </div>
++            <button
++              onClick={() => setShowShareModal(false)}
++              style={{ marginTop: 16, width: '100%', padding: '10px', background: 'none', border: '1px solid #ddd', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#64748b' }}
++            >
++              Close
++            </button>
++          </div>
++        </div>
++      )}
++
++      {/* ── Lightbox (images only — video plays inline in the main viewer) ── */}
++      {lightbox && current && current.type === "image" && (
++        <div
++          onClick={() => setLightbox(false)}
++          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
++        >
++          {/* Controls top-right */}
++          <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }} onClick={e => e.stopPropagation()}>
++            <button
++              onClick={() => downloadImageAsFile(current.url, p.name)}
++              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
++            >
++              ⬇️ Download
++            </button>
++            <button
++              onClick={() => setLightbox(false)}
++              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, width: 40, height: 40, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
++            >
++              ✕
++            </button>
++          </div>
++
++          {/* Image */}
++          <img
++            src={current.url}
++            alt={p.name}
++            onClick={e => e.stopPropagation()}
++            style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,.6)" }}
++          />
++
++          {/* Thumbnail strip at bottom (images only — video isn't reachable via lightbox) */}
++          {images.length > 1 && (
++            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8, maxWidth: "90vw", overflowX: "auto" }} onClick={e => e.stopPropagation()}>
++              {media.map((item, i) => item.type === "image" && (
++                <div
++                  key={i}
++                  onClick={() => setActiveImg(i)}
++                  style={{ width: 52, height: 52, borderRadius: 6, overflow: "hidden", border: i === activeImg ? "2px solid #fff" : "2px solid rgba(255,255,255,.3)", cursor: "pointer", background: "#222", flexShrink: 0 }}
++                >
++                  <img src={item.url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
++                </div>
++              ))}
++            </div>
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/ProductGallery.jsx b/src/components/ProductGallery.jsx
+deleted file mode 100644
+index d808634..0000000
+--- a/src/components/ProductGallery.jsx
++++ /dev/null
+@@ -1,148 +0,0 @@
+-import { useEffect, useState } from "react";
+-
+-function getEmbedUrl(url) {
+-  if (!url) return null;
+-  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/);
+-  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+-  const vm = url.match(/vimeo\.com\/(\d+)/);
+-  if (vm) return `https://player.vimeo.com/video/${vm[1]}`;
+-  return null;
+-}
+-
+-function getYoutubeThumbnail(url) {
+-  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/);
+-  return match ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg` : null;
+-}
+-
+-export default function ProductGallery({ images = [], videoUrl = null, productName = "product" }) {
+-  const embedUrl = getEmbedUrl(videoUrl);
+-  const ytThumb = videoUrl ? getYoutubeThumbnail(videoUrl) : null;
+-
+-  // Build media items: video first (if present), then images
+-  const items = [
+-    ...(embedUrl ? [{ type: "video", embedUrl, thumb: ytThumb }] : []),
+-    ...images.map((url) => ({ type: "image", url })),
+-  ];
+-
+-  const [active, setActive] = useState(0);
+-  const [lightbox, setLightbox] = useState(false);
+-
+-  // Close lightbox on Escape key — same as the Store.jsx version.
+-  useEffect(() => {
+-    if (!lightbox) return;
+-    const handler = (e) => { if (e.key === "Escape") setLightbox(false); };
+-    window.addEventListener("keydown", handler);
+-    return () => window.removeEventListener("keydown", handler);
+-  }, [lightbox]);
+-
+-  // Same fix as Store.jsx's ProductDetailView: product images live on
+-  // Supabase Storage, a different origin, so a plain <a download> is
+-  // ignored by the browser and just opens the image in a new tab instead
+-  // of saving it. Fetch it as a blob first so `download` actually works.
+-  const handleDownload = async (url) => {
+-    try {
+-      const response = await fetch(url);
+-      const blob = await response.blob();
+-      const blobUrl = URL.createObjectURL(blob);
+-      const a = document.createElement("a");
+-      a.href = blobUrl;
+-      a.download = (productName || "product") + ".jpg";
+-      document.body.appendChild(a);
+-      a.click();
+-      document.body.removeChild(a);
+-      URL.revokeObjectURL(blobUrl);
+-    } catch (err) {
+-      window.open(url, "_blank");
+-    }
+-  };
+-
+-  if (items.length === 0) {
+-    return (
+-      <div className="pd-img">
+-        <span style={{ fontSize: 60, color: "#bbb" }}>&#128247;</span>
+-      </div>
+-    );
+-  }
+-
+-  const current = items[Math.min(active, items.length - 1)];
+-
+-  return (
+-    <div>
+-      <div
+-        className="gallery-main"
+-        onClick={() => current.type === "image" && setLightbox(true)}
+-        style={{ cursor: current.type === "image" ? "zoom-in" : "default", position: "relative" }}
+-      >
+-        {current.type === "video" ? (
+-          <iframe
+-            src={current.embedUrl}
+-            title="Product video"
+-            frameBorder="0"
+-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+-            allowFullScreen
+-            style={{ width: "100%", height: "100%", border: "none" }}
+-          />
+-        ) : (
+-          <img src={current.url} alt="Product" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+-        )}
+-        {current.type === "image" && (
+-          <span style={{ position: "absolute", bottom: 6, right: 8, fontSize: 10, color: "#94a3b8", background: "rgba(255,255,255,.85)", borderRadius: 6, padding: "2px 7px" }}>
+-            🔍 Tap to zoom
+-          </span>
+-        )}
+-      </div>
+-
+-      {items.length > 1 && (
+-        <div className="gallery-thumbs">
+-          {items.map((item, i) => (
+-            <div
+-              key={i}
+-              className={`gallery-thumb${active === i ? " active" : ""}`}
+-              onClick={() => setActive(i)}
+-            >
+-              {item.type === "video" ? (
+-                <div className="gallery-play-wrap">
+-                  {item.thumb
+-                    ? <img src={item.thumb} alt="video" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+-                    : <div style={{ background: "#222", width: "100%", height: "100%" }} />}
+-                  <span className="gallery-play">&#9654;</span>
+-                </div>
+-              ) : (
+-                <img src={item.url} alt={`thumb-${i}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+-              )}
+-            </div>
+-          ))}
+-        </div>
+-      )}
+-
+-      {/* ── Lightbox ── */}
+-      {lightbox && current.type === "image" && (
+-        <div
+-          onClick={() => setLightbox(false)}
+-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 3000, display: "flex", alignItems: "center", justifyContent: "center" }}
+-        >
+-          <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }} onClick={e => e.stopPropagation()}>
+-            <button
+-              onClick={() => handleDownload(current.url)}
+-              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+-            >
+-              ⬇️ Download
+-            </button>
+-            <button
+-              onClick={() => setLightbox(false)}
+-              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, width: 36, height: 36, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+-            >
+-              ✕
+-            </button>
+-          </div>
+-          <img
+-            src={current.url}
+-            alt="Product"
+-            onClick={e => e.stopPropagation()}
+-            style={{ maxWidth: "92vw", maxHeight: "85vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,.6)" }}
+-          />
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+diff --git a/src/pages/Store.jsx b/src/pages/Store.jsx
+index 2f050c8..4f7d2e9 100644
+--- a/src/pages/Store.jsx
++++ b/src/pages/Store.jsx
+@@ -4,6 +4,8 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ import { useApp } from "../context/AppContext";
+ import { generatePriceListPDF } from "../utils/generatePriceListPDF";
+ import PdfViewerModal from "../components/PdfViewerModal";
++import ProductDetailView from "../components/ProductDetailView";
++import { getImages, getFirstImage } from "../utils/productMedia";
+ 
+ // ── Cart helpers ──────────────────────────────────────────────────────────────
+ function useCart() {
+@@ -30,29 +32,9 @@ function useCart() {
+ 
+ const fmt = (n) => Number(n || 0).toLocaleString("en-IN");
+ 
+-// Handle image_urls (array or JSON string) or image_url (string).
+-// When image_urls is present but resolves to an empty array (product has no
+-// uploaded photos yet), fall back to image_url — same logic as Catalogue.
+-// Products that already have real uploaded photos (non-empty image_urls) are
+-// unaffected because the early return fires before the fallback.
+-function getImages(p) {
+-  let urls = p.image_urls;
+-  if (urls != null) {
+-    if (typeof urls === "string") {
+-      try { urls = JSON.parse(urls); } catch { urls = [urls]; }
+-    }
+-    if (Array.isArray(urls)) {
+-      const filtered = urls.filter(Boolean);
+-      if (filtered.length > 0) return filtered; // has real uploaded photos — use them
+-      // empty array — fall through to image_url fallback below
+-    } else if (urls) {
+-      return [urls];
+-    }
+-  }
+-  // Fallback: single image_url field (e.g. the default red-poster image)
+-  return p.image_url ? [p.image_url] : [];
+-}
+-function getFirstImage(p) { return getImages(p)[0] || null; }
++// getImages/getFirstImage now live in ../utils/productMedia (shared with
++// ProductDetailView.jsx and the dealer Product Detail route) — see import
++// above. Logic unchanged from what was here before.
+ 
+ const CAT_ICONS = {
+   "Fans": "🌀", "Wiring Devices": "🔌", "Cables": "🔋", "Lighting": "💡",
+@@ -775,432 +757,6 @@ function ProductCard({ product: p, onAdd, onSelect, qty, onIncrease, onDecrease,
+   );
+ }
+ 
+-// ── Product Detail View ───────────────────────────────────────────────────────
+-function ProductDetailView({ product: p, onBack, onAdd, qty, onIncrease, onDecrease, effectivePrice, pricingMode }) {
+-  const [activeImg, setActiveImg] = useState(0);
+-  const [lightbox, setLightbox] = useState(false);
+-  const [showAbout, setShowAbout] = useState(false);
+-  const [showSpecs, setShowSpecs] = useState(false);
+-  const [showItemDetails, setShowItemDetails] = useState(false);
+-  const [showShareModal, setShowShareModal] = useState(false);
+-  const [shareUrl, setShareUrl] = useState('');
+-  const images = getImages(p);
+-
+-  // Close lightbox on Escape key
+-  useEffect(() => {
+-    if (!lightbox) return;
+-    const handler = (e) => { if (e.key === "Escape") setLightbox(false); };
+-    window.addEventListener("keydown", handler);
+-    return () => window.removeEventListener("keydown", handler);
+-  }, [lightbox]);
+-
+-  const handleShare = async () => {
+-    const productUrl = `${window.location.origin}/store?product=${p.id}`;
+-    if (navigator.share) {
+-      try {
+-        await navigator.share({ title: p.name, text: `Check out ${p.name} - MRP ₹${p.mrp}`, url: productUrl });
+-      } catch (_) {}
+-    } else {
+-      setShareUrl(productUrl);
+-      setShowShareModal(true);
+-    }
+-  };
+-
+-  const handleDownload = async (url) => {
+-    // Product images are served from Supabase Storage — a different origin
+-    // than eltopbyembassy.com. Browsers ignore the `download` attribute on
+-    // cross-origin links, so the old code (plain <a download target="_blank">)
+-    // just opened the raw image in a new tab instead of saving a file — the
+-    // "popup instead of download" bug. Fix: fetch the image as a blob first
+-    // (same-origin blob: URL), then trigger the download from that.
+-    try {
+-      const response = await fetch(url);
+-      const blob = await response.blob();
+-      const blobUrl = URL.createObjectURL(blob);
+-      const a = document.createElement("a");
+-      a.href = blobUrl;
+-      a.download = (p.name || "product") + ".jpg";
+-      document.body.appendChild(a);
+-      a.click();
+-      document.body.removeChild(a);
+-      URL.revokeObjectURL(blobUrl);
+-    } catch (err) {
+-      // Fetch/CORS failure — fall back to opening the image so the user can
+-      // still save it manually (long-press / right-click "Save image as").
+-      window.open(url, "_blank");
+-    }
+-  };
+-
+-  return (
+-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
+-      <button
+-        onClick={onBack}
+-        style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "1.5px solid #7B2D8B", color: "#7B2D8B", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", marginBottom: 20 }}
+-      >
+-        ← Back to Products
+-      </button>
+-
+-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
+-        {/* Left: image viewer */}
+-        <div style={{ flex: "0 0 420px", minWidth: 0, display: "flex", gap: 10 }}>
+-
+-          {/* Thumbnail column — left of main image */}
+-          {images.length > 1 && (
+-            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 72, flexShrink: 0, overflowY: "auto", maxHeight: 440 }}>
+-              {images.map((url, i) => (
+-                <div
+-                  key={i}
+-                  onClick={() => setActiveImg(i)}
+-                  style={{
+-                    width: 70, height: 70, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+-                    border: i === activeImg ? "2px solid #7B2D8B" : "2px solid transparent",
+-                    cursor: "pointer", background: "#f9f8ff",
+-                    display: "flex", alignItems: "center", justifyContent: "center",
+-                    opacity: i === activeImg ? 1 : 0.6,
+-                    transition: "opacity .15s, border-color .15s",
+-                    boxShadow: i === activeImg ? "0 0 0 1px #7B2D8B" : "0 1px 4px rgba(0,0,0,.1)",
+-                  }}
+-                >
+-                  <img src={url} alt="" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+-                </div>
+-              ))}
+-            </div>
+-          )}
+-
+-          {/* Main image */}
+-          <div
+-            onClick={() => images[activeImg] && setLightbox(true)}
+-            style={{
+-              flex: 1, background: "#f9f8ff", borderRadius: 14, overflow: "hidden",
+-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+-              padding: "20px 40px 20px 20px", backgroundColor: "#f9f9f9",
+-              borderRadius: 12, margin: "0 16px 0 0", minHeight: 380,
+-              border: "1px solid #edf0f7", cursor: images[activeImg] ? "zoom-in" : "default",
+-              position: "relative",
+-            }}
+-          >
+-            {images[activeImg]
+-              ? <img src={images[activeImg]} alt={p.name} style={{ maxWidth: "85%", maxHeight: 360, objectFit: "contain", cursor: "zoom-in", display: "block", margin: "0 auto" }} />
+-              : <span style={{ fontSize: 80, opacity: 0.2 }}>📦</span>}
+-            {images[activeImg] && (
+-              <span style={{ position: "absolute", bottom: 8, right: 10, fontSize: 11, color: "#94a3b8", background: "rgba(255,255,255,.8)", borderRadius: 6, padding: "2px 8px" }}>
+-                🔍 Click to zoom
+-              </span>
+-            )}
+-          </div>
+-        </div>
+-
+-        {/* Right: info */}
+-        <div style={{ flex: 1, minWidth: 260 }}>
+-          {p.category && (
+-            <span style={{ display: "inline-block", background: "#7B2D8B", color: "#fff", fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+-              {p.category}
+-            </span>
+-          )}
+-          <h1 style={{ fontSize: 22, fontWeight: 800, color: "#1e293b", lineHeight: 1.3, margin: "0 0 8px" }}>{p.name}</h1>
+-
+-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0 16px 0' }}>
+-            <button
+-              onClick={handleShare}
+-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 20, border: '1px solid #7B2D8B', background: 'white', color: '#7B2D8B', cursor: 'pointer', fontSize: 14, fontWeight: 500, fontFamily: 'inherit' }}
+-            >
+-              🔗 Share This Product
+-            </button>
+-          </div>
+-
+-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+-            {p.sku      && <div style={{ fontSize: 13, color: "#64748b" }}>SKU: <strong style={{ color: "#334155" }}>{p.sku}</strong></div>}
+-            {p.hsn_code && <div style={{ fontSize: 13, color: "#64748b" }}>HSN Code: <strong style={{ color: "#334155" }}>{p.hsn_code}</strong></div>}
+-            {p.unit     && <div style={{ fontSize: 13, color: "#64748b" }}>Unit: <strong style={{ color: "#334155" }}>{p.unit}</strong></div>}
+-          </div>
+-
+-          {(() => {
+-            const discPct = p.mrp && effectivePrice < p.mrp ? Math.round((p.mrp - effectivePrice) / p.mrp * 100) : 0;
+-            const showDlp = pricingMode === 'dealer' && p.dlp && effectivePrice < p.dlp;
+-            const showMrp = p.mrp && effectivePrice < p.mrp;
+-            return (
+-              <div style={{ background: "#faf7ff", border: "1px solid #e9d5f5", borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+-                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+-                  <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
+-                  <span style={{ fontSize: 32, fontWeight: 900, color: "#7B2D8B" }}>₹{fmt(effectivePrice)}</span>
+-                  {discPct > 0 && (
+-                    <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 13, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>15% OFF</span>
+-                  )}
+-                </div>
+-                {(showDlp || showMrp) && (
+-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>
+-                    {showDlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.dlp)}</span></span>}
+-                    {showDlp && showMrp && <span> · </span>}
+-                    {showMrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmt(p.mrp)}</span></span>}
+-                  </div>
+-                )}
+-              </div>
+-            );
+-          })()}
+-
+-          {!qty ? (
+-            <button
+-              onClick={e => { e.preventDefault(); e.stopPropagation(); onAdd(p); }}
+-              style={{ width: "100%", padding: "13px 0", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, fontSize: 16, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}
+-            >
+-              + Add to Cart
+-            </button>
+-          ) : (
+-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#7B2D8B", borderRadius: 10, overflow: "hidden", width: "100%", marginBottom: 10 }}>
+-              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onDecrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>−</button>
+-              <span style={{ color: "white", fontWeight: "bold", fontSize: 20 }}>{qty}</span>
+-              <button onClick={e => { e.preventDefault(); e.stopPropagation(); onIncrease(p.id); }} style={{ background: "none", border: "none", color: "white", fontSize: 28, fontWeight: "bold", cursor: "pointer", padding: "10px 20px", lineHeight: 1 }}>+</button>
+-            </div>
+-          )}
+-          <div style={{ fontSize: 12, color: "#94a3b8", textAlign: "center" }}>
+-            Sign up to place orders at dealer pricing
+-          </div>
+-
+-          {/* Quick specs */}
+-          {(p.standard_packing || p.unit || p.brand || p.warranty) && (
+-            <div style={{ marginTop: 16, borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+-                <tbody>
+-                  {[
+-                    ["Brand", p.brand],
+-                    ["Unit", p.unit],
+-                    ["Standard Packing", p.standard_packing ? `${p.standard_packing} pcs` : null],
+-                    ["Warranty", p.warranty],
+-                    ["Colour", p.colour],
+-                    ["Material", p.material],
+-                    ["Weight", p.weight],
+-                    ["Dimensions", p.dimensions],
+-                    ["Power Source", p.power_source],
+-                    ["Wattage", p.wattage],
+-                    ["Voltage", p.voltage],
+-                    ["Mounting Type", p.mounting_type],
+-                    ["Room Type", p.room_type],
+-                  ].filter(([, v]) => v).map(([label, val], i, arr) => (
+-                    <tr key={label} style={{ borderBottom: i < arr.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+-                      <td style={{ padding: "9px 14px", color: "#64748b", width: "42%", fontSize: 12 }}>{label}</td>
+-                      <td style={{ padding: "9px 14px", color: "#1e293b", fontWeight: 600 }}>{val}</td>
+-                    </tr>
+-                  ))}
+-                </tbody>
+-              </table>
+-            </div>
+-          )}
+-        </div>
+-      </div>
+-
+-      {/* ── About This Item (collapsible) ── */}
+-      <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+-        <div
+-          onClick={() => setShowAbout(!showAbout)}
+-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' }}
+-        >
+-          <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📋 About This Item</h3>
+-          <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showAbout ? '▲' : '▼'}</span>
+-        </div>
+-        {showAbout && (
+-          <div style={{ padding: 16, background: '#fafafa' }}>
+-            {Array.isArray(p.about_item) && p.about_item.filter(Boolean).length > 0 ? (
+-              <ul style={{ paddingLeft: 20, margin: 0 }}>
+-                {p.about_item.filter(Boolean).map((pt, i) => (
+-                  <li key={i} style={{ marginBottom: 8, fontSize: 14, lineHeight: 1.6 }}>{pt}</li>
+-                ))}
+-              </ul>
+-            ) : (
+-              <p style={{ color: '#bbb', fontSize: 14, margin: 0 }}>No description added yet</p>
+-            )}
+-          </div>
+-        )}
+-      </div>
+-
+-      {/* ── Features & Specs (collapsible) ── */}
+-      {(() => {
+-        const SPEC_FIELDS = [
+-          { key: 'power_source', label: 'Power Source' },
+-          { key: 'room_type', label: 'Room Type' },
+-          { key: 'mounting_type', label: 'Mounting Type' },
+-          { key: 'special_features', label: 'Special Features' },
+-          { key: 'recommended_use', label: 'Recommended Use' },
+-          { key: 'colour', label: 'Colour' },
+-          { key: 'style', label: 'Style' },
+-          { key: 'material', label: 'Material' },
+-          { key: 'wattage', label: 'Wattage' },
+-          { key: 'voltage', label: 'Voltage' },
+-          { key: 'speed', label: 'Speed' },
+-          { key: 'capacity', label: 'Capacity' },
+-          { key: 'warranty', label: 'Warranty' },
+-          { key: 'weight', label: 'Weight' },
+-          { key: 'dimensions', label: 'Dimensions' },
+-        ];
+-        const ITEM_DETAIL_FIELDS = [
+-          { key: 'brand', label: 'Brand' },
+-          { key: 'colour', label: 'Colour' },
+-          { key: 'style', label: 'Style' },
+-          { key: 'warranty', label: 'Warranty' },
+-          { key: 'weight', label: 'Weight' },
+-          { key: 'dimensions', label: 'Dimensions' },
+-          { key: 'material', label: 'Material' },
+-          { key: 'wattage', label: 'Wattage' },
+-          { key: 'voltage', label: 'Voltage' },
+-          { key: 'power_source', label: 'Power Source' },
+-          { key: 'mounting_type', label: 'Mounting Type' },
+-          { key: 'room_type', label: 'Room Type' },
+-          { key: 'special_features', label: 'Special Features' },
+-        ];
+-        const specsVis = p.features_specs?.visibility || {};
+-        const specs = p.features_specs?.values || {};
+-        const itemVis = p.item_details?.visibility || {};
+-        const itemDetails = p.item_details?.values || {};
+-        const hdrStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: '#7B2D8B', cursor: 'pointer', userSelect: 'none' };
+-        const renderRow = (key, label, val, vis) => {
+-          if (vis[key] === false) return null;
+-          return (
+-            <tr key={key} style={{ borderBottom: '1px solid #eee' }}>
+-              <td style={{ padding: '10px 12px', fontWeight: 500, width: '40%', background: '#f9f9f9', fontSize: 14 }}>{label}</td>
+-              <td style={{ padding: '10px 12px', fontSize: 14, color: val ? '#333' : '#bbb' }}>{val || '—'}</td>
+-            </tr>
+-          );
+-        };
+-        return (
+-          <>
+-            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+-              <div onClick={() => setShowSpecs(!showSpecs)} style={hdrStyle}>
+-                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>⚡ Features &amp; Specs</h3>
+-                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showSpecs ? '▲' : '▼'}</span>
+-              </div>
+-              {showSpecs && (
+-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+-                  <tbody>{SPEC_FIELDS.map(({ key, label }) => renderRow(key, label, specs[key], specsVis))}</tbody>
+-                </table>
+-              )}
+-            </div>
+-            <div style={{ marginTop: 16, border: '1px solid #eee', borderRadius: 8, overflow: 'hidden' }}>
+-              <div onClick={() => setShowItemDetails(!showItemDetails)} style={hdrStyle}>
+-                <h3 style={{ color: 'white', margin: 0, fontSize: 15, fontWeight: 'bold' }}>📦 Item Details</h3>
+-                <span style={{ color: 'white', fontSize: 18, fontWeight: 'bold' }}>{showItemDetails ? '▲' : '▼'}</span>
+-              </div>
+-              {showItemDetails && (
+-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+-                  <tbody>{ITEM_DETAIL_FIELDS.map(({ key, label }) => renderRow(key, label, itemDetails[key], itemVis))}</tbody>
+-                </table>
+-              )}
+-            </div>
+-          </>
+-        );
+-      })()}
+-
+-      {/* ── Share Modal ── */}
+-      {showShareModal && (
+-        <div
+-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+-          onClick={() => setShowShareModal(false)}
+-        >
+-          <div
+-            style={{ background: 'white', borderRadius: 16, padding: 24, width: 320, maxWidth: '90vw' }}
+-            onClick={e => e.stopPropagation()}
+-          >
+-            <h3 style={{ margin: '0 0 16px 0', fontSize: 16 }}>Share This Product</h3>
+-            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+-              <input
+-                value={shareUrl}
+-                readOnly
+-                style={{ flex: 1, padding: 8, border: '1px solid #ddd', borderRadius: 8, fontSize: 13 }}
+-              />
+-              <button
+-                onClick={() => { navigator.clipboard.writeText(shareUrl); alert('Link copied!'); }}
+-                style={{ padding: '8px 12px', background: '#7B2D8B', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit' }}
+-              >
+-                Copy
+-              </button>
+-            </div>
+-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+-              <a
+-                href={`https://wa.me/?text=${encodeURIComponent(p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#25D366', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+-              >
+-                📱 WhatsApp
+-              </a>
+-              <a
+-                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1877F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+-              >
+-                👍 Facebook
+-              </a>
+-              <a
+-                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(p.name)}&url=${encodeURIComponent(shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#1DA1F2', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+-              >
+-                🐦 Twitter
+-              </a>
+-              <a
+-                href={`mailto:?subject=${encodeURIComponent(p.name)}&body=${encodeURIComponent('Check out ' + p.name + ' - MRP ₹' + p.mrp + '\n' + shareUrl)}`}
+-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 10, background: '#64748b', color: 'white', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+-              >
+-                📧 Email
+-              </a>
+-            </div>
+-            <button
+-              onClick={() => setShowShareModal(false)}
+-              style={{ marginTop: 16, width: '100%', padding: '10px', background: 'none', border: '1px solid #ddd', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#64748b' }}
+-            >
+-              Close
+-            </button>
+-          </div>
+-        </div>
+-      )}
+-
+-      {/* ── Lightbox ── */}
+-      {lightbox && images[activeImg] && (
+-        <div
+-          onClick={() => setLightbox(false)}
+-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.9)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+-        >
+-          {/* Controls top-right */}
+-          <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }} onClick={e => e.stopPropagation()}>
+-            <button
+-              onClick={() => handleDownload(images[activeImg])}
+-              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 14, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+-            >
+-              ⬇️ Download
+-            </button>
+-            <button
+-              onClick={() => setLightbox(false)}
+-              style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, width: 40, height: 40, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+-            >
+-              ✕
+-            </button>
+-          </div>
+-
+-          {/* Image */}
+-          <img
+-            src={images[activeImg]}
+-            alt={p.name}
+-            onClick={e => e.stopPropagation()}
+-            style={{ maxWidth: "90vw", maxHeight: "90vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,.6)" }}
+-          />
+-
+-          {/* Thumbnail strip at bottom */}
+-          {images.length > 1 && (
+-            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 8 }} onClick={e => e.stopPropagation()}>
+-              {images.map((url, i) => (
+-                <div
+-                  key={i}
+-                  onClick={() => setActiveImg(i)}
+-                  style={{ width: 52, height: 52, borderRadius: 6, overflow: "hidden", border: i === activeImg ? "2px solid #fff" : "2px solid rgba(255,255,255,.3)", cursor: "pointer", background: "#222", flexShrink: 0 }}
+-                >
+-                  <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+-                </div>
+-              ))}
+-            </div>
+-          )}
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+ // ── Main ──────────────────────────────────────────────────────────────────────
+ export default function Store() {
+   const navigate = useNavigate();
+@@ -2225,6 +1781,8 @@ export default function Store() {
+           onDecrease={handleDecrease}
+           effectivePrice={getPrice(selectedProduct)}
+           pricingMode={pricingMode}
++          showWarehouseStock={isApprovedDealer}
++          compact={isMobile}
+         />
+       )}
+ 
+diff --git a/src/screens/ProductDetail.jsx b/src/screens/ProductDetail.jsx
+index d81eb0b..4107709 100644
+--- a/src/screens/ProductDetail.jsx
++++ b/src/screens/ProductDetail.jsx
+@@ -1,17 +1,22 @@
+-import { useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { useApp } from "../context/AppContext";
+-import ProductGallery from "../components/ProductGallery";
+-
+-const fmtINR = (n) => Number(n || 0).toLocaleString('en-IN');
++import ProductDetailView from "../components/ProductDetailView";
+ 
++// Dealer-only Product Detail route (/product/:id, DealerRoute-gated, renders
++// inside the narrow PhoneFrame). Before 31 Aug 2026 this had its own
++// separate, simpler implementation — no collapsible About/Specs sections, no
++// quick specs table, a different "pick a qty then Add to Cart" interaction
++// pattern instead of a live cart stepper. It now delegates to the same
++// ProductDetailView component /store uses, so any future Product Detail
++// change (pricing display, a new field, another bug) only has to be made
++// once. See claude/Eltop_Session_23Aug2026_Summary.md for the full writeup.
++//
++// The topbar below already provides back navigation, so the shared
++// component's own back button is suppressed here (showBackButton={false}).
+ export default function ProductDetail() {
+   const { id } = useParams();
+   const navigate = useNavigate();
+-  const { products, addToCart, dealer, dealerApplicationStatus } = useApp();
+-  const [qty, setQty] = useState(1);
+-  const [showShareModal, setShowShareModal] = useState(false);
+-  const [shareUrl, setShareUrl] = useState("");
++  const { products, dealer, dealerApplicationStatus, cart, addToCart, changeCartQty, removeFromCart } = useApp();
+ 
+   const product = products.find((p) => p.id === Number(id));
+   if (!product) {
+@@ -22,28 +27,37 @@ export default function ProductDetail() {
+     );
+   }
+ 
++  // Same rule Store.jsx uses: only a fully-approved (or legacy 'none')
++  // dealer gets dealer-rate pricing and sees Warehouse Stock. A dealer whose
++  // application is still pending_details/under_review sees guest pricing,
++  // same as an unverified visitor on /store would.
+   const isApprovedDealer = dealerApplicationStatus === 'approved' || dealerApplicationStatus === 'none';
+-  const d1 = isApprovedDealer ? Number(dealer?.discount1 || 0) : 0;
+-  const d2 = isApprovedDealer ? Number(dealer?.discount2 || 0) : 0;
+-  const dlp = Number(product.dlp ?? product.price ?? product.mrp ?? 0);
+-  const net = isApprovedDealer
+-    ? Math.round(dlp * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100
+-    : Math.round(Number(product.mrp || 0) * 0.85 * 100) / 100;
+-  const pct = product.mrp && product.mrp > net ? Math.round((product.mrp - net) / product.mrp * 100) : 0;
++  const pricingMode = isApprovedDealer ? 'dealer' : 'guest-verified';
++
++  const getPrice = (p) => {
++    if (isApprovedDealer) {
++      const d1 = Number(dealer?.discount1 || 0);
++      const d2 = Number(dealer?.discount2 || 0);
++      return Math.round(Number((p.dlp ?? p.mrp) || 0) * (1 - d1 / 100) * (1 - d2 / 100) * 100) / 100;
++    }
++    return Math.round(Number(p.mrp || 0) * 0.85);
++  };
++
++  const cartItem = cart.find((c) => c.id === product.id);
++  const qty = cartItem?.qty;
+ 
+-  // Share link points at the public /store page, not this dealer-only
+-  // /product/:id route — a customer or non-dealer opening a shared
+-  // /product/:id link would just get bounced back to /store by DealerRoute,
+-  // so the store link is the one that actually works for anyone it's sent to.
+-  const handleShare = async () => {
+-    const productUrl = `${window.location.origin}/store?product=${product.id}`;
+-    if (navigator.share) {
+-      try {
+-        await navigator.share({ title: product.name, text: `Check out ${product.name} - MRP ₹${product.mrp}`, url: productUrl });
+-      } catch (_) {}
++  // AppContext's addToCart/changeCartQty already show the persistent
++  // "Added to Cart!" toast themselves (see PhoneFrame.jsx) — no extra toast
++  // wiring needed here, unlike Store.jsx which keeps its own local cart.
++  const handleAdd = (p) => addToCart(p, 1);
++  const handleIncrease = (id) => changeCartQty(id, +1);
++  const handleDecrease = (id) => {
++    // changeCartQty floors at qty 1 (it never removes the item) — Store's
++    // stepper removes the item once qty hits 0, so mirror that here too.
++    if ((cartItem?.qty ?? 0) <= 1) {
++      removeFromCart(id);
+     } else {
+-      setShareUrl(productUrl);
+-      setShowShareModal(true);
++      changeCartQty(id, -1);
+     }
+   };
+ 
+@@ -54,131 +68,19 @@ export default function ProductDetail() {
+         <h1>Product Detail</h1>
+       </div>
+       <div className="content">
+-        <ProductGallery images={product.image_urls} videoUrl={product.video_url} productName={product.name} />
+-
+-        <div className="pd-title">{product.name}</div>
+-        <div className="pd-sku">SKU: {product.sku}</div>
+-
+-        <div style={{ margin: "10px 0 4px" }}>
+-          <button
+-            onClick={handleShare}
+-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 20, border: "1px solid #7B2D8B", background: "white", color: "#7B2D8B", cursor: "pointer", fontSize: 13, fontWeight: 500, fontFamily: "inherit" }}
+-          >
+-            🔗 Share This Product
+-          </button>
+-        </div>
+-
+-        <div style={{ margin: "12px 0 16px" }}>
+-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+-            <span style={{ fontSize: 12, color: "#64748b" }}>Net price</span>
+-            <span style={{ fontSize: 24, fontWeight: 700, color: "#7B2D8B" }}>₹{fmtINR(net)}</span>
+-            {pct > 0 && (
+-              <span style={{ background: "#dcfce7", color: "#16a34a", fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>{pct}% OFF</span>
+-            )}
+-          </div>
+-          {isApprovedDealer ? (
+-            (product.dlp || product.mrp) && (
+-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+-                {product.dlp && <span>DLP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.dlp)}</span></span>}
+-                {product.dlp && product.mrp && <span> · </span>}
+-                {product.mrp && <span>MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span></span>}
+-              </div>
+-            )
+-          ) : (
+-            product.mrp && (
+-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+-                MRP <span style={{ textDecoration: "line-through" }}>₹{fmtINR(product.mrp)}</span>
+-              </div>
+-            )
+-          )}
+-        </div>
+-
+-        <div className="section-title">Warehouse Stock</div>
+-        <div className="wh-table">
+-          <div className="wh-row">
+-            <span>Delhi Warehouse</span>
+-            <span className="wh-stock">{product.wh?.delhi ?? 0} units</span>
+-          </div>
+-          <div className="wh-row">
+-            <span>Ludhiana Warehouse</span>
+-            <span className="wh-stock">{product.wh?.ludhiana ?? 0} units</span>
+-          </div>
+-          <div className="wh-row">
+-            <span>Jaipur Warehouse</span>
+-            <span className="wh-stock">{product.wh?.jaipur ?? 0} units</span>
+-          </div>
+-        </div>
+-        <div className="section-title">Quantity</div>
+-        <div className="qty-row">
+-          <div className="qty-btn" onClick={() => setQty((q) => Math.max(1, q - 1))}>-</div>
+-          <div className="qty-val">{qty}</div>
+-          <div className="qty-btn" onClick={() => setQty((q) => q + 1)}>+</div>
+-        </div>
+-        <button className="btn" onClick={() => addToCart(product, qty)}>Add to Cart</button>
++        <ProductDetailView
++          product={product}
++          showBackButton={false}
++          onAdd={handleAdd}
++          qty={qty}
++          onIncrease={handleIncrease}
++          onDecrease={handleDecrease}
++          effectivePrice={getPrice(product)}
++          pricingMode={pricingMode}
++          showWarehouseStock={isApprovedDealer}
++          compact
++        />
+       </div>
+-
+-      {/* ── Share Modal ── */}
+-      {showShareModal && (
+-        <div
+-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 3500 }}
+-          onClick={() => setShowShareModal(false)}
+-        >
+-          <div
+-            style={{ background: "white", borderRadius: 16, padding: 24, width: 320, maxWidth: "90vw" }}
+-            onClick={e => e.stopPropagation()}
+-          >
+-            <h3 style={{ margin: "0 0 16px 0", fontSize: 16 }}>Share This Product</h3>
+-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+-              <input
+-                value={shareUrl}
+-                readOnly
+-                style={{ flex: 1, padding: 8, border: "1px solid #ddd", borderRadius: 8, fontSize: 13 }}
+-              />
+-              <button
+-                onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Link copied!"); }}
+-                style={{ padding: "8px 12px", background: "#7B2D8B", color: "white", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}
+-              >
+-                Copy
+-              </button>
+-            </div>
+-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+-              <a
+-                href={`https://wa.me/?text=${encodeURIComponent(product.name + " - MRP ₹" + product.mrp + "\n" + shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, background: "#25D366", color: "white", borderRadius: 8, textDecoration: "none", fontSize: 14 }}
+-              >
+-                📱 WhatsApp
+-              </a>
+-              <a
+-                href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, background: "#1877F2", color: "white", borderRadius: 8, textDecoration: "none", fontSize: 14 }}
+-              >
+-                👍 Facebook
+-              </a>
+-              <a
+-                href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(product.name)}&url=${encodeURIComponent(shareUrl)}`}
+-                target="_blank" rel="noreferrer"
+-                style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, background: "#1DA1F2", color: "white", borderRadius: 8, textDecoration: "none", fontSize: 14 }}
+-              >
+-                🐦 Twitter
+-              </a>
+-              <a
+-                href={`mailto:?subject=${encodeURIComponent(product.name)}&body=${encodeURIComponent("Check out " + product.name + " - MRP ₹" + product.mrp + "\n" + shareUrl)}`}
+-                style={{ display: "flex", alignItems: "center", gap: 8, padding: 10, background: "#64748b", color: "white", borderRadius: 8, textDecoration: "none", fontSize: 14 }}
+-              >
+-                📧 Email
+-              </a>
+-            </div>
+-            <button
+-              onClick={() => setShowShareModal(false)}
+-              style={{ marginTop: 16, width: "100%", padding: "10px", background: "none", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontSize: 14, fontFamily: "inherit", color: "#64748b" }}
+-            >
+-              Close
+-            </button>
+-          </div>
+-        </div>
+-      )}
+     </div>
+   );
+ }
+diff --git a/src/utils/productMedia.js b/src/utils/productMedia.js
+new file mode 100644
+index 0000000..21dd09c
+--- /dev/null
++++ b/src/utils/productMedia.js
+@@ -0,0 +1,78 @@
++// Shared product-media helpers used by both the public Store product page
++// and the dealer-only Product Detail page. Consolidated here (26/31 Aug work
++// on checkout already unified the *ordering* logic between /store and the
++// Catalogue flow — this does the same for the *display* logic, which used to
++// be duplicated with small drifts between Store.jsx's ProductDetailView and
++// the dealer-only ProductGallery.jsx/ProductDetail.jsx).
++
++// Handle image_urls (array or JSON string) or image_url (string).
++// When image_urls is present but resolves to an empty array (product has no
++// uploaded photos yet), fall back to image_url — same logic Store.jsx and
++// Catalogue.jsx already relied on; the old dealer ProductDetail.jsx did NOT
++// have this fallback, so a dealer-only product with just image_url set could
++// show a broken/empty gallery on /product/:id even though it displayed fine
++// on /store. Centralizing here fixes that gap for both callers.
++export function getImages(p) {
++  let urls = p.image_urls;
++  if (urls != null) {
++    if (typeof urls === "string") {
++      try { urls = JSON.parse(urls); } catch { urls = [urls]; }
++    }
++    if (Array.isArray(urls)) {
++      const filtered = urls.filter(Boolean);
++      if (filtered.length > 0) return filtered; // has real uploaded photos — use them
++      // empty array — fall through to image_url fallback below
++    } else if (urls) {
++      return [urls];
++    }
++  }
++  // Fallback: single image_url field (e.g. the default red-poster image)
++  return p.image_url ? [p.image_url] : [];
++}
++
++export function getFirstImage(p) { return getImages(p)[0] || null; }
++
++// Video support — previously only on the dealer flow's ProductGallery.jsx.
++// Merged in here so the unified detail view can show product videos to
++// everyone (customers included), same as before, just no longer tied to a
++// dealer-only-gated component.
++export function getEmbedUrl(url) {
++  if (!url) return null;
++  const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/);
++  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
++  const vm = url.match(/vimeo\.com\/(\d+)/);
++  if (vm) return `https://player.vimeo.com/video/${vm[1]}`;
++  return null;
++}
++
++export function getYoutubeThumbnail(url) {
++  const match = url && url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&?/]+)/);
++  return match ? `https://img.youtube.com/vi/${match[1]}/mqdefault.jpg` : null;
++}
++
++// Product images are served from Supabase Storage — a different origin than
++// eltopbyembassy.com. Browsers ignore the `download` attribute on a
++// cross-origin <a> link, so a plain <a href={url} download> just opens the
++// raw image in a new tab instead of saving a file. Fix: fetch the image as a
++// blob first (same-origin blob: URL), then trigger the download from that.
++// Falls back to opening the image in a new tab only if the fetch itself
++// fails (e.g. a CORS issue), so there's always some way to save the image.
++// (This was previously duplicated, nearly verbatim, in three places —
++// Store.jsx's ProductDetailView and the dealer ProductGallery.jsx — now one
++// copy shared by both.)
++export async function downloadImageAsFile(url, filename) {
++  try {
++    const response = await fetch(url);
++    const blob = await response.blob();
++    const blobUrl = URL.createObjectURL(blob);
++    const a = document.createElement("a");
++    a.href = blobUrl;
++    a.download = (filename || "product") + ".jpg";
++    document.body.appendChild(a);
++    a.click();
++    document.body.removeChild(a);
++    URL.revokeObjectURL(blobUrl);
++  } catch (err) {
++    window.open(url, "_blank");
++  }
++}
