@@ -1,0 +1,38 @@
+diff --git a/src/screens/Login.jsx b/src/screens/Login.jsx
+index b13580b..9b83c18 100644
+--- a/src/screens/Login.jsx
++++ b/src/screens/Login.jsx
+@@ -69,7 +69,12 @@ export default function Login() {
+ 
+   async function goOtp() {
+     setLocalError("");
+-    const email = emailInput.trim();
++    // Lowercase consistently: staff_profiles.email is always stored lowercase
++    // (AdminStaff.jsx lowercases on insert), and the same lowercase string
++    // gets sent to Supabase Auth here so auth.users.email matches it too —
++    // otherwise a browser that auto-capitalizes ("ABC@X.com") would fail the
++    // staff lookup even though the person typed the right email.
++    const email = emailInput.trim().toLowerCase();
+ 
+     if (isStaff && isSupabaseConfigured) {
+       // Pre-OTP gate: is this email a registered, active staff member?
+diff --git a/supabase/migrations/staff_profiles.sql b/supabase/migrations/staff_profiles.sql
+index 31a0733..44ebc9c 100644
+--- a/supabase/migrations/staff_profiles.sql
++++ b/supabase/migrations/staff_profiles.sql
+@@ -42,11 +42,14 @@ CREATE POLICY "Staff can view their own profile"
+ -- the whole roster — names, roles, reports_to — to anyone unauthenticated).
+ -- Instead, a security-definer function that only ever returns a boolean,
+ -- same pattern as is_admin() above.
++-- lower() on both sides: emails are stored lowercase (AdminStaff.jsx
++-- lowercases on insert) but this must not silently fail for a browser/
++-- keyboard that auto-capitalizes what the person typed.
+ CREATE OR REPLACE FUNCTION public.is_staff_email(check_email text)
+ RETURNS boolean AS $$
+   SELECT EXISTS (
+     SELECT 1 FROM public.staff_profiles
+-    WHERE email = check_email AND is_active = true
++    WHERE lower(email) = lower(check_email) AND is_active = true
+   );
+ $$ LANGUAGE sql SECURITY DEFINER STABLE;
+ 
