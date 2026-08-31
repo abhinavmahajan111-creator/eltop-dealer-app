@@ -69,7 +69,12 @@ export default function Login() {
 
   async function goOtp() {
     setLocalError("");
-    const email = emailInput.trim();
+    // Lowercase consistently: staff_profiles.email is always stored lowercase
+    // (AdminStaff.jsx lowercases on insert), and the same lowercase string
+    // gets sent to Supabase Auth here so auth.users.email matches it too —
+    // otherwise a browser that auto-capitalizes ("ABC@X.com") would fail the
+    // staff lookup even though the person typed the right email.
+    const email = emailInput.trim().toLowerCase();
 
     if (isStaff && isSupabaseConfigured) {
       // Pre-OTP gate: is this email a registered, active staff member?

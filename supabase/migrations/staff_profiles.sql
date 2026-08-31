@@ -42,11 +42,14 @@ CREATE POLICY "Staff can view their own profile"
 -- the whole roster — names, roles, reports_to — to anyone unauthenticated).
 -- Instead, a security-definer function that only ever returns a boolean,
 -- same pattern as is_admin() above.
+-- lower() on both sides: emails are stored lowercase (AdminStaff.jsx
+-- lowercases on insert) but this must not silently fail for a browser/
+-- keyboard that auto-capitalizes what the person typed.
 CREATE OR REPLACE FUNCTION public.is_staff_email(check_email text)
 RETURNS boolean AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.staff_profiles
-    WHERE email = check_email AND is_active = true
+    WHERE lower(email) = lower(check_email) AND is_active = true
   );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
