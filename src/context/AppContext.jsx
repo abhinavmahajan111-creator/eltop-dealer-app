@@ -37,6 +37,9 @@ export function AppProvider({ children }) {
   const [isDealer, setIsDealer] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminChecked, setAdminChecked] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
+  const [staffProfile, setStaffProfile] = useState(null);
+  const [staffChecked, setStaffChecked] = useState(false);
 
   const [deactivatedAccount, setDeactivatedAccount] = useState(false);
   const [blockedAccount,     setBlockedAccount]     = useState(false);
@@ -221,6 +224,30 @@ export function AppProvider({ children }) {
       });
   }, [session]);
 
+  // Check staff_profiles whenever session changes — same pattern as the
+  // admins check above. Looks up by id, so this only resolves AFTER a staff
+  // member's row has been linked (id set) on their first successful login;
+  // see Login.jsx's staff verify() branch for where that link happens.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !session?.user) {
+      setIsStaff(false);
+      setStaffProfile(null);
+      setStaffChecked(false);
+      return;
+    }
+    supabase
+      .from('staff_profiles')
+      .select('role, department, name, is_active')
+      .eq('id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const active = Boolean(data) && data.is_active !== false;
+        setIsStaff(active);
+        setStaffProfile(active ? data : null);
+        setStaffChecked(true);
+      });
+  }, [session]);
+
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured) await supabase.auth.signOut();
     setSession(null);
@@ -229,6 +256,9 @@ export function AppProvider({ children }) {
     setProfileLoaded(false);
     setIsAdmin(false);
     setAdminChecked(false);
+    setIsStaff(false);
+    setStaffProfile(null);
+    setStaffChecked(false);
     setCart([]);
     setDeactivatedAccount(false);
   }, []);
@@ -506,11 +536,14 @@ export function AppProvider({ children }) {
     session,
     isLoggedIn: isSupabaseConfigured ? Boolean(session) : null,
     isDealer,
-    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin,
+    isCustomer: profileLoaded && Boolean(session?.user?.id) && !isDealer && !isAdmin && !isStaff,
     profileLoaded,
     sessionChecked,
     isAdmin,
     adminChecked,
+    isStaff,
+    staffProfile,
+    staffChecked,
     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
     dealer: profile,
     products,

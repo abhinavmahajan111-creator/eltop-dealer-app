@@ -7,7 +7,7 @@ export default function AdminRoute() {
   const [checking, setChecking] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const { isDealer, isCustomer, sessionChecked, profileLoaded, adminChecked } = useApp();
+  const { isDealer, isCustomer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked } = useApp();
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -43,7 +43,7 @@ export default function AdminRoute() {
   // resolve before redirecting. profileLoaded false means we don't yet know if
   // the session belongs to a dealer, customer, or neither — redirecting during
   // that window would use incomplete identity information.
-  if (!sessionChecked || checking || (isLoggedIn && !isAdmin && (!profileLoaded || !adminChecked))) {
+  if (!sessionChecked || checking || (isLoggedIn && !isAdmin && (!profileLoaded || !adminChecked || !staffChecked))) {
     return (
       <div className="admin-app">
         <div className="admin-loading">Checking access&hellip;</div>
@@ -53,6 +53,7 @@ export default function AdminRoute() {
 
   if (!isLoggedIn) return <Navigate to="/login" replace />;
   if (!isAdmin && isDealer) return <Navigate to="/dashboard" replace />;
+  if (!isAdmin && isStaff) return <Navigate to="/staff" replace />;
   if (!isAdmin && isCustomer) return <Navigate to="/store" replace />;
   if (!isAdmin) return <Navigate to="/login" replace />;
 

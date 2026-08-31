@@ -2,18 +2,26 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import { staffRolePath } from "../utils/staffRoles";
 
-const STAFF_ROLE_MAP = {
-  "Sales Executive":      "sales_executive",
-  "Logistics & Dispatch": "logistics",
-  "Back Office":          "back_office",
-};
+// Four top-level login choices — decided 31 Aug 2026. No per-department
+// dropdown pre-login (that used to list 7 options including 3 separate staff
+// roles — confusing for whoever's logging in). Everyone from the company
+// logs in through "Staff" with their own email; the app looks up their
+// role/department AFTER auth (staff_profiles), the same way it already
+// looks up dealer_application_status to decide what a dealer sees.
+const TOP_LEVEL_CHOICES = [
+  { key: "Guest",    label: "Guest",    blurb: "Browse the store, no account needed" },
+  { key: "Customer", label: "Customer", blurb: "Track your orders, manage your account" },
+  { key: "Dealer",   label: "Dealer",   blurb: "Channel partner ordering & pricing" },
+  { key: "Staff",    label: "Staff",    blurb: "Eltop team — sales, after-sales, logistics & more" },
+];
 
 export default function Login() {
   const navigate = useNavigate();
   const { sendOtp, verifyOtp, authBusy, authError, deactivatedAccount, clearDeactivated, blockedAccount, clearBlocked, markBlocked, refreshProfile } = useApp();
 
-  const [role, setRole]             = useState("Guest");
+  const [topLevel, setTopLevel]     = useState(null); // null | 'Guest' | 'Customer' | 'Dealer' | 'Staff'
   const [dealerMode, setDealerMode] = useState("existing"); // 'existing' | 'new'
   const [step, setStep]             = useState(1);
   const [emailInput, setEmailInput] = useState("");
@@ -38,14 +46,12 @@ export default function Login() {
     }, 1000);
   }
 
-  const isGuest    = role === "Guest";
-  const isCustomer = role === "Customer / My Account";
-  const isDealer   = role === "Channel Partner";
-  const isAdmin    = role === "Administrator";
-  const isStaff    = role in STAFF_ROLE_MAP;
+  const isGuest    = topLevel === "Guest";
+  const isCustomer = topLevel === "Customer";
+  const isDealer   = topLevel === "Dealer";
+  const isStaff    = topLevel === "Staff";
 
-  function handleRoleChange(e) {
-    setRole(e.target.value);
+  function resetFlowState() {
     setStep(1);
     setEmailInput("");
     setLocalError("");
@@ -54,25 +60,32 @@ export default function Login() {
     otpRefs.forEach(r => { if (r.current) r.current.value = ""; });
   }
 
+  function chooseTopLevel(choice) {
+    setTopLevel(choice);
+    resetFlowState();
+  }
+
+  function backToChoices() {
+    setTopLevel(null);
+    resetFlowState();
+  }
+
   async function goOtp() {
     setLocalError("");
     const email = emailInput.trim();
 
     if (isStaff && isSupabaseConfigured) {
-      const staffRole = STAFF_ROLE_MAP[role];
-      const { data, error } = await supabase
-        .from("staff")
-        .select("role")
-        .ilike("email", email)
-        .eq("role", staffRole)
-        .maybeSingle();
-      // error (non-null) covers both genuine query failure AND multiple-row conflicts
+      // Pre-OTP gate: is this email a registered, active staff member?
+      // Uses a security-definer function (not a direct table read) so the
+      // staff roster — names, roles, reporting lines — is never exposed to
+      // an unauthenticated request; it only ever returns true/false.
+      const { data, error } = await supabase.rpc("is_staff_email", { check_email: email });
       if (error) {
         setLocalError("Unable to verify your account. Please try again.");
         return;
       }
       if (!data) {
-        setLocalError(`You're not registered as a ${role}. Contact admin for clarification.`);
+        setLocalError("This email isn't registered as staff. Contact admin to get added.");
         return;
       }
     }
@@ -94,11 +107,20 @@ export default function Login() {
     // OTP verified → mark this profile's email as confirmed.
     // The on_auth_user_created trigger creates the profiles row at signInWithOtp time
     // (before OTP verification), so we mark it verified here when the OTP actually succeeds.
+    let authUser = null;
     if (isSupabaseConfigured) {
       const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user) {
-        await supabase.from('profiles').update({ email_verified: true }).eq('id', authData.user.id);
+      authUser = authData?.user || null;
+      if (authUser) {
+        await supabase.from('profiles').update({ email_verified: true }).eq('id', authUser.id);
       }
+    }
+
+    // ── Admin (checked first, regardless of which of the four buttons was
+    // used to log in — an admins-table row always wins) ──
+    if (isSupabaseConfigured && authUser) {
+      const { data: adminRow } = await supabase.from('admins').select('id').eq('id', authUser.id).maybeSingle();
+      if (adminRow) { navigate("/admin"); return; }
     }
 
     // ── Customer ──
@@ -113,12 +135,12 @@ export default function Login() {
             await supabase.from("profiles").insert({ id: user.id, email: user.email, is_dealer: false, name: "" });
           }
           // Existing profile (dealer or not) — never touch is_dealer here.
-          // Logging in via "Customer / My Account" must not silently change
-          // an account's dealer status; that's an admin-only action
-          // (Dealers & Customers → Promote/Downgrade). Previously this
-          // unconditionally flipped is_dealer to false, which meant a dealer
-          // who mis-picked "Customer" on the login screen silently lost
-          // dealer access with no warning.
+          // Logging in via "Customer" must not silently change an account's
+          // dealer status; that's an admin-only action (Dealers & Customers
+          // → Promote/Downgrade). Previously this unconditionally flipped
+          // is_dealer to false, which meant a dealer who mis-picked
+          // "Customer" on the login screen silently lost dealer access with
+          // no warning.
         }
       }
       navigate("/my-account");
@@ -221,8 +243,41 @@ export default function Login() {
       return;
     }
 
-    // ── Admin / Staff ──
-    navigate(isAdmin ? "/admin" : "/dashboard");
+    // ── Staff ──
+    if (isStaff) {
+      if (isSupabaseConfigured) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // Link this staff_profiles row to the auth id on first successful
+          // login (the row starts with id = null — Admin creates it by
+          // email only, before the person ever logs in).
+          await supabase.from("staff_profiles").update({ id: user.id }).eq("email", user.email).is("id", null);
+          const { data: sp, error: spErr } = await supabase
+            .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
+          if (spErr || !sp) {
+            setLocalError("Unable to verify your staff account. Please try again.");
+            await supabase.auth.signOut();
+            setLocalBusy(false);
+            setStep(1);
+            return;
+          }
+          if (!sp.is_active) {
+            setLocalError("Your staff account has been deactivated. Contact admin.");
+            await supabase.auth.signOut();
+            setLocalBusy(false);
+            setStep(1);
+            return;
+          }
+          navigate(staffRolePath(sp.role));
+        }
+      } else {
+        navigate("/staff");
+      }
+      return;
+    }
+
+    // Fallback — shouldn't normally be reached (every branch above returns).
+    navigate("/store");
   }
 
   function handleOtpInput(e, i) {
@@ -236,14 +291,16 @@ export default function Login() {
     }
   }
 
-  const titleText = isCustomer ? "My Account"
-    : isDealer ? "Channel Partner"
-    : "Welcome, Dealer";
-  const subText = isCustomer
-    ? "Sign in or create your account"
-    : isDealer
-    ? (dealerMode === "new" ? "Register as a new dealer" : "Login to your dealer account")
-    : "Login to manage your orders";
+  const titleText = !topLevel ? "Welcome to Eltop"
+    : isCustomer ? "My Account"
+    : isDealer   ? "Channel Partner"
+    : isStaff    ? "Staff Login"
+    : "Welcome to Eltop";
+  const subText = !topLevel ? "Choose how you'd like to continue"
+    : isCustomer ? "Sign in or create your account"
+    : isDealer   ? (dealerMode === "new" ? "Register as a new dealer" : "Login to your dealer account")
+    : isStaff    ? "Login with your company email"
+    : "Browse Eltop products";
 
   const formContent = (
     <>
@@ -270,107 +327,121 @@ export default function Login() {
         </div>
       )}
 
-      {dealerMismatch && (
-        <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>No dealer account found</div>
-          No dealer account is linked to <b>{emailInput}</b>. Double-check for a typo — a single wrong character means a different inbox.
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      {!topLevel ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {TOP_LEVEL_CHOICES.map(choice => (
             <button
-              onClick={() => { setDealerMismatch(false); setEmailInput(""); setStep(1); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
-              style={{ background: "#fff", border: "1.5px solid #e74c3c", color: "#7b241c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+              key={choice.key}
+              className="btn"
+              onClick={() => chooseTopLevel(choice.key)}
+              style={{ textAlign: "left", display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2, padding: "14px 18px" }}
             >
-              ← Try a different email
-            </button>
-            <button
-              onClick={() => { setDealerMismatch(false); setDealerMode("new"); setStep(1); }}
-              style={{ background: "#7B2D8B", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
-            >
-              Register as new dealer →
-            </button>
-          </div>
-        </div>
-      )}
-
-      <select value={role} onChange={handleRoleChange}
-        style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", marginBottom: 16, border: "1.5px solid #ddd", borderRadius: 10, fontSize: 14, fontFamily: "inherit", background: "#fff", color: "#111", appearance: "auto" }}>
-        <option value="Guest">Guest</option>
-        <option value="Customer / My Account">Customer / My Account</option>
-        <option value="Channel Partner">Channel Partner</option>
-        <option value="Sales Executive">Sales Executive</option>
-        <option value="Logistics & Dispatch">Logistics &amp; Dispatch</option>
-        <option value="Administrator">Administrator</option>
-        <option value="Back Office">Back Office</option>
-      </select>
-
-      {/* Channel Partner sub-choice */}
-      {isDealer && !dealerMismatch && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {[["existing", "Existing Dealer"], ["new", "New Dealer — Sign Up"]].map(([mode, label]) => (
-            <button key={mode}
-              onClick={() => { setDealerMode(mode); setStep(1); setLocalError(""); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
-              style={{
-                flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: 700,
-                cursor: "pointer", fontFamily: "inherit",
-                background: dealerMode === mode ? "#7B2D8B" : "transparent",
-                color: dealerMode === mode ? "#fff" : "#7B2D8B",
-                border: "1.5px solid #7B2D8B",
-              }}>
-              {label}
+              <span style={{ fontSize: 17, fontWeight: 800 }}>{choice.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 400, opacity: 0.85 }}>{choice.blurb}</span>
             </button>
           ))}
         </div>
-      )}
-
-      {isGuest ? (
-        <>
-          <button className="btn" onClick={() => navigate("/store")}>Continue to Store →</button>
-          <img
-            src="/assets/fan%20man%20eltop.png"
-            alt="Fanman"
-            style={{ display: "block", margin: "20px auto 0 auto", height: 150, width: "auto", cursor: "pointer", transition: "transform 0.2s" }}
-            onClick={() => setShowFanmanModal(true)}
-            onMouseEnter={e => { e.target.style.transform = "scale(1.05)"; }}
-            onMouseLeave={e => { e.target.style.transform = "scale(1)"; }}
-            onError={e => { e.target.style.display = "none"; }}
-          />
-        </>
       ) : (
         <>
-          {step === 1 && (
-            <div>
-              <input
-                type="email"
-                placeholder="Enter Email Address"
-                value={emailInput}
-                onChange={e => { setEmailInput(e.target.value); setLocalError(""); setDealerMismatch(false); }}
-              />
-              {(localError || authError) && (
-                <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
-              )}
-              <button className="btn" onClick={goOtp} disabled={authBusy || !emailInput.trim()}>
-                {authBusy ? "Checking..." : "Send OTP"}
-              </button>
+          <button
+            onClick={backToChoices}
+            style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 16, textDecoration: "underline" }}
+          >
+            ← Change login type
+          </button>
+
+          {dealerMismatch && (
+            <div style={{ background: "#fdecea", border: "1px solid #e74c3c", borderRadius: 12, padding: "16px 18px", marginBottom: 20, fontSize: 14, color: "#7b241c", lineHeight: 1.5 }}>
+              <div style={{ fontWeight: 800, marginBottom: 6 }}>No dealer account found</div>
+              No dealer account is linked to <b>{emailInput}</b>. Double-check for a typo — a single wrong character means a different inbox.
+              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => { setDealerMismatch(false); setEmailInput(""); setStep(1); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
+                  style={{ background: "#fff", border: "1.5px solid #e74c3c", color: "#7b241c", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+                >
+                  ← Try a different email
+                </button>
+                <button
+                  onClick={() => { setDealerMismatch(false); setDealerMode("new"); setStep(1); }}
+                  style={{ background: "#7B2D8B", border: "none", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13, padding: "6px 14px", borderRadius: 8 }}
+                >
+                  Register as new dealer →
+                </button>
+              </div>
             </div>
           )}
-          {step === 2 && (
-            <div>
-              <div className="login-sub" style={{ marginBottom: 14, overflowWrap: 'break-word', wordBreak: 'break-all' }}>OTP sent to <b>{emailInput}</b></div>
-              <div className="otp-row">
-                {otpRefs.map((ref, i) => (
-                  <input key={i} ref={ref} maxLength={1} className="otp-box"
-                    onInput={e => handleOtpInput(e, i)} onKeyDown={e => handleOtpKeyDown(e, i)} />
-                ))}
-              </div>
-              {(localError || authError) && (
-                <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
-              )}
-              <button className="btn" onClick={verify} disabled={authBusy || localBusy}>
-                {authBusy ? "Verifying..." : localBusy ? "Setting up account..." : "Verify & Login"}
-              </button>
-              {resendCooldown > 0
-                ? <div className="resend" style={{ opacity: 0.5, cursor: "default" }}>Resend OTP in {resendCooldown}s</div>
-                : <div className="resend" onClick={goOtp}>Resend OTP</div>}
+
+          {/* Dealer sub-choice */}
+          {isDealer && !dealerMismatch && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              {[["existing", "Existing Dealer"], ["new", "New Dealer — Sign Up"]].map(([mode, label]) => (
+                <button key={mode}
+                  onClick={() => { setDealerMode(mode); setStep(1); setLocalError(""); otpRefs.forEach(r => { if (r.current) r.current.value = ""; }); }}
+                  style={{
+                    flex: 1, padding: "8px 6px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                    cursor: "pointer", fontFamily: "inherit",
+                    background: dealerMode === mode ? "#7B2D8B" : "transparent",
+                    color: dealerMode === mode ? "#fff" : "#7B2D8B",
+                    border: "1.5px solid #7B2D8B",
+                  }}>
+                  {label}
+                </button>
+              ))}
             </div>
+          )}
+
+          {isGuest ? (
+            <>
+              <button className="btn" onClick={() => navigate("/store")}>Continue to Store →</button>
+              <img
+                src="/assets/fan%20man%20eltop.png"
+                alt="Fanman"
+                style={{ display: "block", margin: "20px auto 0 auto", height: 150, width: "auto", cursor: "pointer", transition: "transform 0.2s" }}
+                onClick={() => setShowFanmanModal(true)}
+                onMouseEnter={e => { e.target.style.transform = "scale(1.05)"; }}
+                onMouseLeave={e => { e.target.style.transform = "scale(1)"; }}
+                onError={e => { e.target.style.display = "none"; }}
+              />
+            </>
+          ) : (
+            <>
+              {step === 1 && (
+                <div>
+                  <input
+                    type="email"
+                    placeholder="Enter Email Address"
+                    value={emailInput}
+                    onChange={e => { setEmailInput(e.target.value); setLocalError(""); setDealerMismatch(false); }}
+                  />
+                  {(localError || authError) && (
+                    <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
+                  )}
+                  <button className="btn" onClick={goOtp} disabled={authBusy || !emailInput.trim()}>
+                    {authBusy ? "Checking..." : "Send OTP"}
+                  </button>
+                </div>
+              )}
+              {step === 2 && (
+                <div>
+                  <div className="login-sub" style={{ marginBottom: 14, overflowWrap: 'break-word', wordBreak: 'break-all' }}>OTP sent to <b>{emailInput}</b></div>
+                  <div className="otp-row">
+                    {otpRefs.map((ref, i) => (
+                      <input key={i} ref={ref} maxLength={1} className="otp-box"
+                        onInput={e => handleOtpInput(e, i)} onKeyDown={e => handleOtpKeyDown(e, i)} />
+                    ))}
+                  </div>
+                  {(localError || authError) && (
+                    <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{localError || authError}</div>
+                  )}
+                  <button className="btn" onClick={verify} disabled={authBusy || localBusy}>
+                    {authBusy ? "Verifying..." : localBusy ? "Setting up account..." : "Verify & Login"}
+                  </button>
+                  {resendCooldown > 0
+                    ? <div className="resend" style={{ opacity: 0.5, cursor: "default" }}>Resend OTP in {resendCooldown}s</div>
+                    : <div className="resend" onClick={goOtp}>Resend OTP</div>}
+                </div>
+              )}
+            </>
           )}
         </>
       )}

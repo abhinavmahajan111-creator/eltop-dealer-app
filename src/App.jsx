@@ -5,6 +5,7 @@ import AdminRoute from "./components/AdminRoute";
 import DealerRoute from "./components/DealerRoute";
 import DealerProfileRoute from "./components/DealerProfileRoute";
 import CustomerRoute from "./components/CustomerRoute";
+import StaffRoute from "./components/StaffRoute";
 import Store from "./pages/Store";
 import MyAccount from "./pages/MyAccount";
 import Splash from "./screens/Splash";
@@ -20,11 +21,13 @@ import Ledger from "./screens/Ledger";
 import Profile from "./screens/Profile";
 import Schemes from "./screens/Schemes";
 import Support from "./screens/Support";
+import StaffHome from "./screens/StaffHome";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
 import AdminOrders from "./admin/AdminOrders";
 import AdminProducts from "./admin/AdminProducts";
 import AdminDealers from "./admin/AdminDealers";
+import AdminStaff from "./admin/AdminStaff";
 import AdminHealth from "./admin/AdminHealth";
 import AgingReport from "./admin/AgingReport";
 import SalesOrder from "./admin/SalesOrder";
@@ -74,6 +77,7 @@ export default function App() {
           <Route path="/admin/orders" element={<AdminOrders />} />
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/dealers" element={<AdminDealers />} />
+          <Route path="/admin/staff" element={<AdminStaff />} />
           <Route path="/admin/health" element={<AdminHealth />} />
           <Route path="/admin/aging" element={<AgingReport />} />
         </Route>
@@ -89,6 +93,20 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/catalogue" element={<Catalogue />} />
         <Route path="/ledger" element={<Ledger />} />
+      </Route>
+
+      {/* Staff routes — full-width, outside PhoneFrame (internal desktop tools).
+          Every path below renders the same placeholder today; each swaps to
+          its real department dashboard independently as those get built. */}
+      <Route element={<StaffRoute />}>
+        <Route path="/staff" element={<StaffHome />} />
+        <Route path="/staff/sales" element={<StaffHome />} />
+        <Route path="/staff/after-sales" element={<StaffHome />} />
+        <Route path="/staff/dispatch" element={<StaffHome />} />
+        <Route path="/staff/logistics" element={<StaffHome />} />
+        <Route path="/staff/back-office" element={<StaffHome />} />
+        <Route path="/staff/support-desk" element={<StaffHome />} />
+        <Route path="/staff/content" element={<StaffHome />} />
       </Route>
 
       <Route path="/store" element={<Store />} />

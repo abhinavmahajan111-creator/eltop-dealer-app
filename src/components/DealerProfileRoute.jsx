@@ -4,9 +4,9 @@ import { useApp } from "../context/AppContext";
 // Like DealerRoute, but allows pending dealers through to /profile.
 // Blocked dealers are already signed out by AppContext before this renders.
 export default function DealerProfileRoute() {
-  const { isDealer, isAdmin, isCustomer, sessionChecked, profileLoaded, adminChecked, session } = useApp();
+  const { isDealer, isAdmin, isCustomer, isStaff, sessionChecked, profileLoaded, adminChecked, staffChecked, session } = useApp();
 
-  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked))) {
+  if (!sessionChecked || (session?.user && (!profileLoaded || !adminChecked || !staffChecked))) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", fontSize: 14, color: "#94a3b8" }}>
         Loading…
@@ -16,6 +16,7 @@ export default function DealerProfileRoute() {
 
   if (isDealer)   return <Outlet />;
   if (isAdmin)    return <Navigate to="/admin" replace />;
+  if (isStaff)    return <Navigate to="/staff" replace />;
   if (isCustomer) return <Navigate to="/store" replace />;
   return <Navigate to="/login" replace />;
 }
