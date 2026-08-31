@@ -252,12 +252,22 @@ export default function Login() {
         if (user) {
           // Link this staff_profiles row to the auth id on first successful
           // login (the row starts with id = null — Admin creates it by
-          // email only, before the person ever logs in).
-          await supabase.from("staff_profiles").update({ id: user.id }).eq("email", user.email).is("id", null);
+          // email only, before the person ever logs in). ilike (not eq) so
+          // this never depends on exact case matching between what Supabase
+          // Auth stored and what's in staff_profiles.
+          const { error: linkErr } = await supabase
+            .from("staff_profiles").update({ id: user.id }).ilike("email", user.email).is("id", null);
+          if (linkErr) console.error('[staff-login] link error:', linkErr);
+
           const { data: sp, error: spErr } = await supabase
             .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
           if (spErr || !sp) {
-            setLocalError("Unable to verify your staff account. Please try again.");
+            console.error('[staff-login] lookup failed:', { linkErr, spErr, email: user.email, id: user.id });
+            setLocalError(
+              "Unable to verify your staff account" +
+              (linkErr?.message || spErr?.message ? ` (${linkErr?.message || spErr?.message})` : "") +
+              ". Please try again or contact admin."
+            );
             await supabase.auth.signOut();
             setLocalBusy(false);
             setStep(1);
