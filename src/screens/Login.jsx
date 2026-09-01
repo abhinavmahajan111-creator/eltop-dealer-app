@@ -255,15 +255,28 @@ export default function Login() {
           // email only, before the person ever logs in). ilike (not eq) so
           // this never depends on exact case matching between what Supabase
           // Auth stored and what's in staff_profiles.
-          // .select() here is deliberate and important for diagnostics: without
-          // it, supabase-js sends Prefer: return=minimal and we get back no
-          // rows either way, so a silent "0 rows matched" (RLS mismatch, or
-          // the email filter not matching) looks identical to a real success.
-          // With .select(), linkedRows tells us the truth: [] means the
-          // UPDATE ran but matched nothing; [{...}] means it actually linked.
-          const { data: linkedRows, error: linkErr } = await supabase
-            .from("staff_profiles").update({ id: user.id }).ilike("email", user.email).is("id", null).select();
-          console.log('[staff-login] link result:', { linkedRows, linkErr, matchedCount: linkedRows?.length ?? null, email: user.email, authId: user.id });
+          // Two independent diagnostics on this UPDATE:
+          // 1) { count: "exact" } asks PostgREST for the real matched/updated
+          //    row count straight from Postgres (Content-Range header) — this
+          //    is true regardless of whether RLS's SELECT policy would allow
+          //    the updated row to be returned, so it can't be fooled by a
+          //    RETURNING-visibility quirk the way an empty .select() array can.
+          // 2) Logging the raw email as JSON with its length catches an
+          //    invisible character (stray space, non-breaking space) that
+          //    would make `ilike` treat two visually-identical emails as
+          //    different strings.
+          const { data: linkedRows, error: linkErr, count: linkCount } = await supabase
+            .from("staff_profiles")
+            .update({ id: user.id }, { count: "exact" })
+            .ilike("email", user.email)
+            .is("id", null)
+            .select();
+          console.log('[staff-login] link result:', {
+            linkedRows, linkErr, linkCount,
+            matchedCount: linkedRows?.length ?? null,
+            email: user.email, emailJSON: JSON.stringify(user.email), emailLen: user.email?.length,
+            authId: user.id,
+          });
 
           const { data: sp, error: spErr } = await supabase
             .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
