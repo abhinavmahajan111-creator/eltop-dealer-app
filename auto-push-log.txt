@@ -526,4 +526,7 @@ To https://github.com/abhinavmahajan111-creator/eltop-dealer-app.git
  3 files changed, 74 insertions(+)
  create mode 100644 staff_email_case_fix.patch
  create mode 100644 staff_link_diag.patch
+^C[master 843eef3] Auto-backup: 01/09/2026 11:00:00.85
+ 3 files changed, 53 insertions(+), 5 deletions(-)
+ create mode 100644 staff_link_select_diag.patch
 ^C
