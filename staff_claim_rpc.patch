@@ -1,0 +1,89 @@
+diff --git a/src/screens/Login.jsx b/src/screens/Login.jsx
+index 09b6cc4..c55f687 100644
+--- a/src/screens/Login.jsx
++++ b/src/screens/Login.jsx
+@@ -248,61 +248,30 @@ export default function Login() {
+     // ── Staff ──
+     if (isStaff) {
+       if (isSupabaseConfigured) {
+-        const { data: { user } } = await supabase.auth.getUser();
+-        if (user) {
+-          // Link this staff_profiles row to the auth id on first successful
+-          // login (the row starts with id = null — Admin creates it by
+-          // email only, before the person ever logs in). ilike (not eq) so
+-          // this never depends on exact case matching between what Supabase
+-          // Auth stored and what's in staff_profiles.
+-          // Two independent diagnostics on this UPDATE:
+-          // 1) { count: "exact" } asks PostgREST for the real matched/updated
+-          //    row count straight from Postgres (Content-Range header) — this
+-          //    is true regardless of whether RLS's SELECT policy would allow
+-          //    the updated row to be returned, so it can't be fooled by a
+-          //    RETURNING-visibility quirk the way an empty .select() array can.
+-          // 2) Logging the raw email as JSON with its length catches an
+-          //    invisible character (stray space, non-breaking space) that
+-          //    would make `ilike` treat two visually-identical emails as
+-          //    different strings.
+-          const { data: linkedRows, error: linkErr, count: linkCount } = await supabase
+-            .from("staff_profiles")
+-            .update({ id: user.id }, { count: "exact" })
+-            .ilike("email", user.email)
+-            .is("id", null)
+-            .select();
+-          console.log('[staff-login] link result:', {
+-            linkedRows, linkErr, linkCount,
+-            matchedCount: linkedRows?.length ?? null,
+-            email: user.email, emailJSON: JSON.stringify(user.email), emailLen: user.email?.length,
+-            authId: user.id,
+-          });
+-
+-          const { data: sp, error: spErr } = await supabase
+-            .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
+-          if (spErr || !sp) {
+-            console.error('[staff-login] lookup failed:', { linkErr, spErr, linkedRows, email: user.email, id: user.id });
+-            const reason = linkErr?.message || spErr?.message
+-              || (linkedRows && linkedRows.length === 0 ? "claim update matched 0 rows" : null);
+-            setLocalError(
+-              "Unable to verify your staff account" +
+-              (reason ? ` (${reason})` : "") +
+-              ". Please try again or contact admin."
+-            );
+-            await supabase.auth.signOut();
+-            setLocalBusy(false);
+-            setStep(1);
+-            return;
+-          }
+-          if (!sp.is_active) {
+-            setLocalError("Your staff account has been deactivated. Contact admin.");
+-            await supabase.auth.signOut();
+-            setLocalBusy(false);
+-            setStep(1);
+-            return;
+-          }
+-          navigate(staffRolePath(sp.role));
++        // The whole "link this staff_profiles row to my auth id" step now
++        // happens inside one database function (claim_staff_profile) instead
++        // of a client-side filtered UPDATE. The UPDATE approach consistently
++        // matched zero rows through the real API even when the row, the RLS
++        // policy, the auth token, and a fully-open test policy all checked
++        // out individually — so this moves the operation into a SECURITY
++        // DEFINER function that looks up the email itself (via auth.uid())
++        // and returns one clear reason on failure instead of a silent 0.
++        const { data, error } = await supabase.rpc("claim_staff_profile");
++        const result = Array.isArray(data) ? data[0] : data;
++        console.log('[staff-login] claim_staff_profile result:', { data, error });
++        if (error || !result?.success) {
++          const reason = error?.message || result?.message;
++          setLocalError(
++            "Unable to verify your staff account" +
++            (reason ? ` (${reason})` : "") +
++            ". Please try again or contact admin."
++          );
++          await supabase.auth.signOut();
++          setLocalBusy(false);
++          setStep(1);
++          return;
+         }
++        navigate(staffRolePath(result.role));
+       } else {
+         navigate("/staff");
+       }
