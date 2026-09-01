@@ -255,17 +255,25 @@ export default function Login() {
           // email only, before the person ever logs in). ilike (not eq) so
           // this never depends on exact case matching between what Supabase
           // Auth stored and what's in staff_profiles.
-          const { error: linkErr } = await supabase
-            .from("staff_profiles").update({ id: user.id }).ilike("email", user.email).is("id", null);
-          if (linkErr) console.error('[staff-login] link error:', linkErr);
+          // .select() here is deliberate and important for diagnostics: without
+          // it, supabase-js sends Prefer: return=minimal and we get back no
+          // rows either way, so a silent "0 rows matched" (RLS mismatch, or
+          // the email filter not matching) looks identical to a real success.
+          // With .select(), linkedRows tells us the truth: [] means the
+          // UPDATE ran but matched nothing; [{...}] means it actually linked.
+          const { data: linkedRows, error: linkErr } = await supabase
+            .from("staff_profiles").update({ id: user.id }).ilike("email", user.email).is("id", null).select();
+          console.log('[staff-login] link result:', { linkedRows, linkErr, matchedCount: linkedRows?.length ?? null, email: user.email, authId: user.id });
 
           const { data: sp, error: spErr } = await supabase
             .from("staff_profiles").select("role, is_active").eq("id", user.id).maybeSingle();
           if (spErr || !sp) {
-            console.error('[staff-login] lookup failed:', { linkErr, spErr, email: user.email, id: user.id });
+            console.error('[staff-login] lookup failed:', { linkErr, spErr, linkedRows, email: user.email, id: user.id });
+            const reason = linkErr?.message || spErr?.message
+              || (linkedRows && linkedRows.length === 0 ? "claim update matched 0 rows" : null);
             setLocalError(
               "Unable to verify your staff account" +
-              (linkErr?.message || spErr?.message ? ` (${linkErr?.message || spErr?.message})` : "") +
+              (reason ? ` (${reason})` : "") +
               ". Please try again or contact admin."
             );
             await supabase.auth.signOut();
