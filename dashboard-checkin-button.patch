@@ -1,0 +1,440 @@
+From ec9ba57788a593d186a140e79961e4d88e774a0d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 13:42:34 +0000
+Subject: [PATCH] =?UTF-8?q?Add=20"Check=20In=20/=20Start=20Day"=20button?=
+ =?UTF-8?q?=20=E2=80=94=20pick=20dealer=20after,=20not=20before?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Flips the check-in flow around per user feedback: previously a rep had
+to open a specific dealer's page to find the check-in button. Now the
+Sales dashboard shows a prominent "Check In / Start Day" button (only
+when not already checked in somewhere); tapping it opens a new
+pick-a-dealer screen (search + list from get_my_dealers()), then the
+duty-on photo capture, then calls start_dealer_visit() same as before
+and lands on that dealer's detail page. The original per-dealer check-in
+UI on the dealer detail screen is left in place for reps who navigate
+there directly.
+
+Extracted the duty-on/board/shop/card photo capture UI into a shared
+src/components/staff/PhotoSlot.jsx so both entry points use the same
+component instead of duplicating it.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                          |   2 +
+ src/components/staff/PhotoSlot.jsx   |  44 ++++++
+ src/screens/staff/CheckIn.jsx        | 210 +++++++++++++++++++++++++++
+ src/screens/staff/DealerDetail.jsx   |  44 +-----
+ src/screens/staff/SalesDashboard.jsx |  20 ++-
+ 5 files changed, 276 insertions(+), 44 deletions(-)
+ create mode 100644 src/components/staff/PhotoSlot.jsx
+ create mode 100644 src/screens/staff/CheckIn.jsx
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 12c20c3..d80a60f 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -24,6 +24,7 @@ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
++import CheckIn from "./screens/staff/CheckIn";
+ import ComingSoon from "./screens/staff/ComingSoon";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+@@ -104,6 +105,7 @@ export default function App() {
+       <Route element={<StaffRoute />}>
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
++        <Route path="/staff/sales/check-in" element={<CheckIn />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+diff --git a/src/components/staff/PhotoSlot.jsx b/src/components/staff/PhotoSlot.jsx
+new file mode 100644
+index 0000000..7e501a5
+--- /dev/null
++++ b/src/components/staff/PhotoSlot.jsx
+@@ -0,0 +1,44 @@
++import { useRef } from "react";
++
++// A single required-photo capture slot: shows a thumbnail once chosen, a
++// ✓ once done. Uses the native camera via capture="environment" — far
++// more reliable across mobile browsers than a custom getUserMedia
++// pipeline. Shared between the dealer detail check-in/out flow and the
++// dashboard "Check In" (pick-a-dealer-first) flow.
++export default function PhotoSlot({ label, file, onChange, disabled }) {
++  const inputRef = useRef(null);
++  const previewUrl = file ? URL.createObjectURL(file) : null;
++  return (
++    <div style={{ textAlign: "center" }}>
++      <div
++        onClick={() => !disabled && inputRef.current?.click()}
++        style={{
++          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
++          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc",
++          background: file ? "#000" : "#fafafa",
++          display: "flex", alignItems: "center", justifyContent: "center",
++          cursor: disabled ? "default" : "pointer", position: "relative",
++        }}
++      >
++        {previewUrl ? (
++          <img src={previewUrl} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
++        ) : (
++          <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
++        )}
++        {file && (
++          <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
++        )}
++      </div>
++      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
++      <input
++        ref={inputRef}
++        type="file"
++        accept="image/*"
++        capture="environment"
++        disabled={disabled}
++        onChange={(e) => onChange(e.target.files?.[0] || null)}
++        style={{ display: "none" }}
++      />
++    </div>
++  );
++}
+diff --git a/src/screens/staff/CheckIn.jsx b/src/screens/staff/CheckIn.jsx
+new file mode 100644
+index 0000000..b8f49d0
+--- /dev/null
++++ b/src/screens/staff/CheckIn.jsx
+@@ -0,0 +1,210 @@
++import { useEffect, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import { getCurrentPosition, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
++import PhotoSlot from "../../components/staff/PhotoSlot";
++
++// "Start Day" / Check In entry point reached from the Sales dashboard's
++// big Check In button — flips the old flow (open a dealer, then find the
++// check-in button inside it) around: pick the dealer first, right here,
++// then capture the duty-on photo and check in. Lands on that dealer's
++// detail screen afterwards, ready for check-out later.
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++export default function CheckIn() {
++  const navigate = useNavigate();
++
++  const [dealers, setDealers] = useState([]);
++  const [loadingDealers, setLoadingDealers] = useState(true);
++  const [dealerError, setDealerError] = useState(null);
++  const [search, setSearch] = useState("");
++
++  const [openVisit, setOpenVisit] = useState(null);
++  const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
++
++  const [step, setStep] = useState("select"); // 'select' | 'photo'
++  const [selectedDealer, setSelectedDealer] = useState(null);
++  const [dutyOnFile, setDutyOnFile] = useState(null);
++  const [checkingIn, setCheckingIn] = useState(false);
++  const [status, setStatus] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingOpenVisit(false); return; }
++    let cancelled = false;
++    supabase.rpc("get_my_dealers").then(({ data, error }) => {
++      if (cancelled) return;
++      if (error) setDealerError(error.message);
++      else setDealers(data || []);
++      setLoadingDealers(false);
++    });
++    supabase.rpc("get_my_open_visit").then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) {
++        const row = Array.isArray(data) ? data[0] : data;
++        setOpenVisit(row || null);
++      }
++      setLoadingOpenVisit(false);
++    });
++    return () => { cancelled = true; };
++  }, []);
++
++  const filteredDealers = dealers.filter((d) => {
++    if (!search.trim()) return true;
++    const q = search.trim().toLowerCase();
++    return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
++  });
++
++  const pickDealer = (d) => {
++    setSelectedDealer(d);
++    setStep("photo");
++    setStatus(null);
++  };
++
++  const handleCheckIn = async () => {
++    setStatus(null);
++    if (!dutyOnFile) {
++      setStatus({ type: "error", message: "Take your duty-on photo first." });
++      return;
++    }
++    setCheckingIn(true);
++    try {
++      const pos = await getCurrentPosition();
++      const tagged = await tagPhoto(dutyOnFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Duty On" });
++      const url = await uploadVisitMedia(tagged, { dealerId: selectedDealer.id, kind: "duty-on" });
++      const { data, error } = await supabase.rpc("start_dealer_visit", {
++        p_dealer_id: selectedDealer.id,
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++        p_duty_on_photo_url: url,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
++        setCheckingIn(false);
++      } else {
++        navigate(`/staff/sales/dealer/${selectedDealer.id}`);
++      }
++    } catch (err) {
++      setStatus({ type: "error", message: err.message || "Couldn't check in." });
++      setCheckingIn(false);
++    }
++  };
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 34px", color: "#fff" }}>
++        <button
++          onClick={() => (step === "photo" ? setStep("select") : navigate(-1))}
++          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}
++        >
++          ← {step === "photo" ? "Change dealer" : "Back"}
++        </button>
++        <div style={{ fontSize: 20, fontWeight: 800 }}>📍 Check In</div>
++        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>
++          {step === "select" ? "Which dealer are you visiting?" : "Almost there — one photo to go."}
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 560, margin: "-18px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        {loadingOpenVisit ? null : openVisit ? (
++          <div style={{
++            background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "14px 16px",
++            marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", lineHeight: 1.6,
++          }}>
++            You're already checked in at <b>{openVisit.dealer_name}</b>. Check out there before starting a new visit.
++            <button
++              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++              style={{ display: "block", marginTop: 10, width: "100%", padding: "9px", border: "1.5px solid #8a6100", borderRadius: 8, background: "#fff", color: "#8a6100", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
++            >
++              Go check out at {openVisit.dealer_name}
++            </button>
++          </div>
++        ) : step === "select" ? (
++          <>
++            <input
++              value={search}
++              onChange={(e) => setSearch(e.target.value)}
++              placeholder="Search your dealers…"
++              style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #eee", borderRadius: 10, fontSize: 13.5, marginBottom: 14, boxSizing: "border-box", background: "#fff" }}
++            />
++            <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++              {loadingDealers ? (
++                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++              ) : dealerError ? (
++                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load your dealers ({dealerError}).</div>
++              ) : filteredDealers.length === 0 ? (
++                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>
++                  {dealers.length === 0 ? "No dealers assigned to you yet." : "No dealers match your search."}
++                </div>
++              ) : (
++                filteredDealers.map((d) => (
++                  <div
++                    key={d.id}
++                    onClick={() => pickDealer(d)}
++                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
++                  >
++                    <div style={{
++                      width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
++                      display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
++                    }}>
++                      {initials(d.name)}
++                    </div>
++                    <div style={{ flex: 1, minWidth: 0 }}>
++                      <div style={{ fontSize: 13.5, fontWeight: 700 }}>{d.name || "Unnamed"}</div>
++                      <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
++                    </div>
++                    <div style={{ color: "#ccc", fontSize: 14 }}>›</div>
++                  </div>
++                ))
++              )}
++            </div>
++          </>
++        ) : (
++          <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", padding: "20px 18px" }}>
++            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
++              <div style={{
++                width: 40, height: 40, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
++                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0,
++              }}>
++                {initials(selectedDealer?.name)}
++              </div>
++              <div>
++                <div style={{ fontSize: 14.5, fontWeight: 800 }}>{selectedDealer?.name}</div>
++                <div style={{ fontSize: 11.5, color: "#999" }}>{selectedDealer?.dealer_code || "—"}</div>
++              </div>
++            </div>
++
++            <div style={{ fontSize: 11.5, color: "#999", marginBottom: 14, lineHeight: 1.5 }}>
++              You must be within 100m of this dealer. Snap your duty-on photo to confirm check-in.
++            </div>
++
++            <div style={{ maxWidth: 140, margin: "0 auto 18px" }}>
++              <PhotoSlot label="Duty-on photo" file={dutyOnFile} onChange={setDutyOnFile} disabled={checkingIn} />
++            </div>
++
++            <button
++              onClick={handleCheckIn}
++              disabled={checkingIn}
++              style={{
++                width: "100%", padding: "12px", border: "none", borderRadius: 10,
++                background: checkingIn ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 700,
++                cursor: checkingIn ? "default" : "pointer",
++              }}
++            >
++              {checkingIn ? "Checking in…" : "📍 Confirm Check In"}
++            </button>
++            {status && (
++              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: status.type === "success" ? "#2fa84f" : "#d64545" }}>
++                {status.message}
++              </div>
++            )}
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index e05dccd..fd1aaf1 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -1,7 +1,8 @@
+-import { useEffect, useRef, useState } from "react";
++import { useEffect, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { getCurrentPosition, getVideoDuration, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
++import PhotoSlot from "../../components/staff/PhotoSlot";
+ 
+ // Dealer detail screen for Sales staff — reached by tapping a dealer in
+ // "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
+@@ -68,47 +69,6 @@ function StatusBadge({ status }) {
+   );
+ }
+ 
+-// A single required-photo capture slot: shows a thumbnail once chosen, a
+-// ✓ once done. Uses the native camera via capture="environment" — far more
+-// reliable across mobile browsers than a custom getUserMedia pipeline.
+-function PhotoSlot({ label, file, onChange, disabled }) {
+-  const inputRef = useRef(null);
+-  const previewUrl = file ? URL.createObjectURL(file) : null;
+-  return (
+-    <div style={{ textAlign: "center" }}>
+-      <div
+-        onClick={() => !disabled && inputRef.current?.click()}
+-        style={{
+-          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
+-          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc",
+-          background: file ? "#000" : "#fafafa",
+-          display: "flex", alignItems: "center", justifyContent: "center",
+-          cursor: disabled ? "default" : "pointer", position: "relative",
+-        }}
+-      >
+-        {previewUrl ? (
+-          <img src={previewUrl} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+-        ) : (
+-          <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
+-        )}
+-        {file && (
+-          <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
+-        )}
+-      </div>
+-      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
+-      <input
+-        ref={inputRef}
+-        type="file"
+-        accept="image/*"
+-        capture="environment"
+-        disabled={disabled}
+-        onChange={(e) => onChange(e.target.files?.[0] || null)}
+-        style={{ display: "none" }}
+-      />
+-    </div>
+-  );
+-}
+-
+ export default function DealerDetail() {
+   const { id } = useParams();
+   const navigate = useNavigate();
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 1abb728..9291ddd 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -139,9 +139,10 @@ export default function SalesDashboard() {
+   const [loadingVisits, setLoadingVisits] = useState(true);
+ 
+   const [openVisit, setOpenVisit] = useState(null);
++  const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
+ 
+   useEffect(() => {
+-    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); return; }
++    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); return; }
+     let cancelled = false;
+     supabase.rpc("get_my_dealers").then(({ data, error }) => {
+       if (cancelled) return;
+@@ -164,6 +165,7 @@ export default function SalesDashboard() {
+         const row = Array.isArray(data) ? data[0] : data;
+         setOpenVisit(row || null);
+       }
++      setLoadingOpenVisit(false);
+     });
+     return () => { cancelled = true; };
+   }, []);
+@@ -210,7 +212,7 @@ export default function SalesDashboard() {
+       </div>
+ 
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+-        {openVisit && (
++        {!loadingOpenVisit && openVisit && (
+           <div
+             onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+             style={{
+@@ -224,6 +226,20 @@ export default function SalesDashboard() {
+           </div>
+         )}
+ 
++        {!loadingOpenVisit && !openVisit && (
++          <button
++            onClick={() => navigate("/staff/sales/check-in")}
++            style={{
++              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
++              background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", border: "none", borderRadius: 14,
++              padding: "16px", marginBottom: 16, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
++              boxShadow: "0 4px 14px rgba(123,45,139,0.3)",
++            }}
++          >
++            <span style={{ fontSize: 20 }}>📍</span> Check In / Start Day
++          </button>
++        )}
++
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+           <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
+-- 
+2.43.0
+

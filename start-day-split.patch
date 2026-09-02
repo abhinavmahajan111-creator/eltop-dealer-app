@@ -1,0 +1,954 @@
+From d837d9b0e35f4e63146fbaa8cb8cceed75a2eff5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 14:04:46 +0000
+Subject: [PATCH] Split Start Day from shop check-in; move dashboard CTA into
+ header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Start Day is now its own step: a rep can start their day anywhere (no
+geofence), confirmed with a photo of their bike/vehicle's meter reading,
+once per (IST) calendar day. Checking in at a shop stays geofenced to
+100m but no longer needs its own photo — a rep must have started their
+day first, or they're prompted to.
+
+- New sales_day_starts table + get_my_day_start()/start_day() RPCs;
+  start_dealer_visit() drops its photo param and gains the day-started
+  gate (drop-then-recreate since the signature changes).
+- New StartDay.jsx screen (GPS + mandatory meter photo, no geofence).
+- CheckIn.jsx: dealer list only, tap-to-confirm, no photo step; blocks
+  with a "start your day first" prompt if today's day isn't started.
+- DealerDetail.jsx: same day-started guard on its inline check-in;
+  duty-on photo capture removed from check-in.
+- visitMedia.js: uploadVisitMedia's dealerId param generalized to
+  folder, since day-start photos aren't tied to a dealer.
+- SalesDashboard.jsx: the Check In/Start Day button now lives inside
+  the purple header (was straddling the header/content boundary,
+  creating a purple-on-purple overlap seam) and branches three ways —
+  Start Day, Check In at a Shop, or the existing "checked in" banner.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                             |   2 +
+ src/screens/staff/CheckIn.jsx           | 143 ++++++--------
+ src/screens/staff/DealerDetail.jsx      |  48 +++--
+ src/screens/staff/SalesDashboard.jsx    |  96 ++++++---
+ src/screens/staff/StartDay.jsx          | 121 ++++++++++++
+ src/utils/visitMedia.js                 |  13 +-
+ supabase/migrations/sales_start_day.sql | 250 ++++++++++++++++++++++++
+ 7 files changed, 542 insertions(+), 131 deletions(-)
+ create mode 100644 src/screens/staff/StartDay.jsx
+ create mode 100644 supabase/migrations/sales_start_day.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index d80a60f..ce973ed 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -25,6 +25,7 @@ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
+ import CheckIn from "./screens/staff/CheckIn";
++import StartDay from "./screens/staff/StartDay";
+ import ComingSoon from "./screens/staff/ComingSoon";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+@@ -106,6 +107,7 @@ export default function App() {
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
+         <Route path="/staff/sales/check-in" element={<CheckIn />} />
++        <Route path="/staff/sales/start-day" element={<StartDay />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+diff --git a/src/screens/staff/CheckIn.jsx b/src/screens/staff/CheckIn.jsx
+index b8f49d0..26a567c 100644
+--- a/src/screens/staff/CheckIn.jsx
++++ b/src/screens/staff/CheckIn.jsx
+@@ -1,14 +1,14 @@
+ import { useEffect, useState } from "react";
+ import { useNavigate } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+-import { getCurrentPosition, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
+-import PhotoSlot from "../../components/staff/PhotoSlot";
++import { getCurrentPosition } from "../../utils/visitMedia";
+ 
+-// "Start Day" / Check In entry point reached from the Sales dashboard's
+-// big Check In button — flips the old flow (open a dealer, then find the
+-// check-in button inside it) around: pick the dealer first, right here,
+-// then capture the duty-on photo and check in. Lands on that dealer's
+-// detail screen afterwards, ready for check-out later.
++// "Check In" entry point reached from the Sales dashboard's Check In
++// button (only shown once the day is started) — pick the dealer here,
++// then confirm check-in. No photo required at shop check-in anymore —
++// that moved to Start Day (bike/vehicle meter reading, captured once per
++// day, anywhere). Lands on that dealer's detail screen afterwards, ready
++// for check-out later.
+ 
+ function initials(name) {
+   if (!name) return "?";
+@@ -26,14 +26,17 @@ export default function CheckIn() {
+   const [openVisit, setOpenVisit] = useState(null);
+   const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
+ 
+-  const [step, setStep] = useState("select"); // 'select' | 'photo'
+-  const [selectedDealer, setSelectedDealer] = useState(null);
+-  const [dutyOnFile, setDutyOnFile] = useState(null);
+-  const [checkingIn, setCheckingIn] = useState(false);
++  const [dayStart, setDayStart] = useState(null);
++  const [loadingDayStart, setLoadingDayStart] = useState(true);
++
++  const [checkingInId, setCheckingInId] = useState(null);
+   const [status, setStatus] = useState(null);
+ 
+   useEffect(() => {
+-    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingOpenVisit(false); return; }
++    if (!isSupabaseConfigured) {
++      setLoadingDealers(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
++      return;
++    }
+     let cancelled = false;
+     supabase.rpc("get_my_dealers").then(({ data, error }) => {
+       if (cancelled) return;
+@@ -49,6 +52,14 @@ export default function CheckIn() {
+       }
+       setLoadingOpenVisit(false);
+     });
++    supabase.rpc("get_my_day_start").then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) {
++        const row = Array.isArray(data) ? data[0] : data;
++        setDayStart(row || null);
++      }
++      setLoadingDayStart(false);
++    });
+     return () => { cancelled = true; };
+   }, []);
+ 
+@@ -58,59 +69,59 @@ export default function CheckIn() {
+     return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
+   });
+ 
+-  const pickDealer = (d) => {
+-    setSelectedDealer(d);
+-    setStep("photo");
+-    setStatus(null);
+-  };
+-
+-  const handleCheckIn = async () => {
++  const handleCheckIn = async (dealer) => {
+     setStatus(null);
+-    if (!dutyOnFile) {
+-      setStatus({ type: "error", message: "Take your duty-on photo first." });
+-      return;
+-    }
+-    setCheckingIn(true);
++    setCheckingInId(dealer.id);
+     try {
+       const pos = await getCurrentPosition();
+-      const tagged = await tagPhoto(dutyOnFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Duty On" });
+-      const url = await uploadVisitMedia(tagged, { dealerId: selectedDealer.id, kind: "duty-on" });
+       const { data, error } = await supabase.rpc("start_dealer_visit", {
+-        p_dealer_id: selectedDealer.id,
++        p_dealer_id: dealer.id,
+         p_latitude: pos.latitude,
+         p_longitude: pos.longitude,
+-        p_duty_on_photo_url: url,
+       });
+       const result = Array.isArray(data) ? data[0] : data;
+       if (error || !result?.success) {
+         setStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
+-        setCheckingIn(false);
++        setCheckingInId(null);
+       } else {
+-        navigate(`/staff/sales/dealer/${selectedDealer.id}`);
++        navigate(`/staff/sales/dealer/${dealer.id}`);
+       }
+     } catch (err) {
+       setStatus({ type: "error", message: err.message || "Couldn't check in." });
+-      setCheckingIn(false);
++      setCheckingInId(null);
+     }
+   };
+ 
++  const loading = loadingDealers || loadingOpenVisit || loadingDayStart;
++
+   return (
+     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 34px", color: "#fff" }}>
+         <button
+-          onClick={() => (step === "photo" ? setStep("select") : navigate(-1))}
++          onClick={() => navigate(-1)}
+           style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}
+         >
+-          ← {step === "photo" ? "Change dealer" : "Back"}
++          ← Back
+         </button>
+         <div style={{ fontSize: 20, fontWeight: 800 }}>📍 Check In</div>
+-        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>
+-          {step === "select" ? "Which dealer are you visiting?" : "Almost there — one photo to go."}
+-        </div>
++        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>Which dealer are you visiting?</div>
+       </div>
+ 
+       <div style={{ maxWidth: 560, margin: "-18px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+-        {loadingOpenVisit ? null : openVisit ? (
++        {loading ? null : !dayStart ? (
++          <div style={{
++            background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "14px 16px",
++            marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", lineHeight: 1.6,
++          }}>
++            You haven't started your day yet. Start your day first (a quick meter-reading photo), then come back to check in.
++            <button
++              onClick={() => navigate("/staff/sales/start-day")}
++              style={{ display: "block", marginTop: 10, width: "100%", padding: "9px", border: "1.5px solid #8a6100", borderRadius: 8, background: "#fff", color: "#8a6100", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
++            >
++              🛵 Start Day
++            </button>
++          </div>
++        ) : openVisit ? (
+           <div style={{
+             background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "14px 16px",
+             marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", lineHeight: 1.6,
+@@ -123,7 +134,7 @@ export default function CheckIn() {
+               Go check out at {openVisit.dealer_name}
+             </button>
+           </div>
+-        ) : step === "select" ? (
++        ) : (
+           <>
+             <input
+               value={search}
+@@ -131,6 +142,14 @@ export default function CheckIn() {
+               placeholder="Search your dealers…"
+               style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #eee", borderRadius: 10, fontSize: 13.5, marginBottom: 14, boxSizing: "border-box", background: "#fff" }}
+             />
++            {status && (
++              <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: "#d64545" }}>
++                {status.message}
++              </div>
++            )}
++            <div style={{ fontSize: 11, color: "#999", marginBottom: 10, lineHeight: 1.5 }}>
++              You must be within 100m of a dealer to check in there. Tap a dealer to confirm.
++            </div>
+             <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+               {loadingDealers ? (
+                 <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+@@ -144,8 +163,8 @@ export default function CheckIn() {
+                 filteredDealers.map((d) => (
+                   <div
+                     key={d.id}
+-                    onClick={() => pickDealer(d)}
+-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
++                    onClick={() => (checkingInId ? null : handleCheckIn(d))}
++                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: checkingInId ? "default" : "pointer", opacity: checkingInId && checkingInId !== d.id ? 0.5 : 1 }}
+                   >
+                     <div style={{
+                       width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
+@@ -157,52 +176,14 @@ export default function CheckIn() {
+                       <div style={{ fontSize: 13.5, fontWeight: 700 }}>{d.name || "Unnamed"}</div>
+                       <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
+                     </div>
+-                    <div style={{ color: "#ccc", fontSize: 14 }}>›</div>
++                    <div style={{ fontSize: 11.5, fontWeight: 700, color: "#7B2D8B" }}>
++                      {checkingInId === d.id ? "Checking in…" : "Check in ›"}
++                    </div>
+                   </div>
+                 ))
+               )}
+             </div>
+           </>
+-        ) : (
+-          <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", padding: "20px 18px" }}>
+-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+-              <div style={{
+-                width: 40, height: 40, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
+-                display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0,
+-              }}>
+-                {initials(selectedDealer?.name)}
+-              </div>
+-              <div>
+-                <div style={{ fontSize: 14.5, fontWeight: 800 }}>{selectedDealer?.name}</div>
+-                <div style={{ fontSize: 11.5, color: "#999" }}>{selectedDealer?.dealer_code || "—"}</div>
+-              </div>
+-            </div>
+-
+-            <div style={{ fontSize: 11.5, color: "#999", marginBottom: 14, lineHeight: 1.5 }}>
+-              You must be within 100m of this dealer. Snap your duty-on photo to confirm check-in.
+-            </div>
+-
+-            <div style={{ maxWidth: 140, margin: "0 auto 18px" }}>
+-              <PhotoSlot label="Duty-on photo" file={dutyOnFile} onChange={setDutyOnFile} disabled={checkingIn} />
+-            </div>
+-
+-            <button
+-              onClick={handleCheckIn}
+-              disabled={checkingIn}
+-              style={{
+-                width: "100%", padding: "12px", border: "none", borderRadius: 10,
+-                background: checkingIn ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 700,
+-                cursor: checkingIn ? "default" : "pointer",
+-              }}
+-            >
+-              {checkingIn ? "Checking in…" : "📍 Confirm Check In"}
+-            </button>
+-            {status && (
+-              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: status.type === "success" ? "#2fa84f" : "#d64545" }}>
+-                {status.message}
+-              </div>
+-            )}
+-          </div>
+         )}
+       </div>
+     </div>
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index fd1aaf1..bf1c6c6 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -83,10 +83,14 @@ export default function DealerDetail() {
+   const [openVisit, setOpenVisit] = useState(null);
+   const [openVisitLoading, setOpenVisitLoading] = useState(true);
+ 
+-  const [dutyOnFile, setDutyOnFile] = useState(null);
+   const [checkingIn, setCheckingIn] = useState(false);
+   const [checkInStatus, setCheckInStatus] = useState(null);
+ 
++  // Whether the rep has started their day (bike/vehicle meter-reading
++  // photo) yet today — required before checking in at any shop.
++  const [dayStart, setDayStart] = useState(null);
++  const [loadingDayStart, setLoadingDayStart] = useState(true);
++
+   const [boardFile, setBoardFile] = useState(null);
+   const [shopFile, setShopFile] = useState(null);
+   const [cardFile, setCardFile] = useState(null);
+@@ -120,7 +124,8 @@ export default function DealerDetail() {
+       supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
+       supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }),
+       supabase.rpc("get_my_open_visit"),
+-    ]).then(([detailRes, ordersRes, visitsRes, openRes]) => {
++      supabase.rpc("get_my_day_start"),
++    ]).then(([detailRes, ordersRes, visitsRes, openRes, dayStartRes]) => {
+       if (cancelled) return;
+       if (detailRes.error) {
+         setError(detailRes.error.message);
+@@ -138,8 +143,13 @@ export default function DealerDetail() {
+         const row = Array.isArray(openRes.data) ? openRes.data[0] : openRes.data;
+         setOpenVisit(row || null);
+       }
++      if (!dayStartRes.error) {
++        const row = Array.isArray(dayStartRes.data) ? dayStartRes.data[0] : dayStartRes.data;
++        setDayStart(row || null);
++      }
+       setLoading(false);
+       setOpenVisitLoading(false);
++      setLoadingDayStart(false);
+     });
+     return () => { cancelled = true; };
+   }, [id]);
+@@ -149,27 +159,19 @@ export default function DealerDetail() {
+ 
+   const handleCheckIn = async () => {
+     setCheckInStatus(null);
+-    if (!dutyOnFile) {
+-      setCheckInStatus({ type: "error", message: "Take your duty-on photo first." });
+-      return;
+-    }
+     setCheckingIn(true);
+     try {
+       const pos = await getCurrentPosition();
+-      const tagged = await tagPhoto(dutyOnFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Duty On" });
+-      const url = await uploadVisitMedia(tagged, { dealerId: id, kind: "duty-on" });
+       const { data, error } = await supabase.rpc("start_dealer_visit", {
+         p_dealer_id: id,
+         p_latitude: pos.latitude,
+         p_longitude: pos.longitude,
+-        p_duty_on_photo_url: url,
+       });
+       const result = Array.isArray(data) ? data[0] : data;
+       if (error || !result?.success) {
+         setCheckInStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
+       } else {
+         setCheckInStatus(null);
+-        setDutyOnFile(null);
+         loadOpenVisit();
+         loadVisits();
+       }
+@@ -206,10 +208,10 @@ export default function DealerDetail() {
+       ]);
+ 
+       const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
+-        uploadVisitMedia(boardTagged, { dealerId: id, kind: "board" }),
+-        uploadVisitMedia(shopTagged, { dealerId: id, kind: "shop" }),
+-        uploadVisitMedia(cardTagged, { dealerId: id, kind: "card" }),
+-        uploadVisitMedia(videoFile, { dealerId: id, kind: "video" }),
++        uploadVisitMedia(boardTagged, { folder: id, kind: "board" }),
++        uploadVisitMedia(shopTagged, { folder: id, kind: "shop" }),
++        uploadVisitMedia(cardTagged, { folder: id, kind: "card" }),
++        uploadVisitMedia(videoFile, { folder: id, kind: "video" }),
+       ]);
+ 
+       const { data, error } = await supabase.rpc("complete_dealer_visit", {
+@@ -415,10 +417,24 @@ export default function DealerDetail() {
+                 </div>
+               )}
+             </>
++          ) : loadingDayStart ? (
++            <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
++          ) : !dayStart ? (
++            <div>
++              <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
++                You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
++              </div>
++              <button
++                onClick={() => navigate("/staff/sales/start-day")}
++                style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
++              >
++                🛵 Start Day
++              </button>
++            </div>
+           ) : (
+             <>
+-              <div style={{ maxWidth: 140, marginBottom: 12 }}>
+-                <PhotoSlot label="Duty-on photo" file={dutyOnFile} onChange={setDutyOnFile} disabled={checkingIn} />
++              <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12 }}>
++                Tap below to confirm — you must be within 100m of this dealer.
+               </div>
+               <button
+                 onClick={handleCheckIn}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 9291ddd..562e551 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -141,8 +141,17 @@ export default function SalesDashboard() {
+   const [openVisit, setOpenVisit] = useState(null);
+   const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
+ 
++  // Whether the rep has started their day (bike/vehicle meter-reading
++  // photo) yet today — separate from, and required before, checking in
++  // at any shop. See supabase/migrations/sales_start_day.sql.
++  const [dayStart, setDayStart] = useState(null);
++  const [loadingDayStart, setLoadingDayStart] = useState(true);
++
+   useEffect(() => {
+-    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); return; }
++    if (!isSupabaseConfigured) {
++      setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
++      return;
++    }
+     let cancelled = false;
+     supabase.rpc("get_my_dealers").then(({ data, error }) => {
+       if (cancelled) return;
+@@ -167,6 +176,14 @@ export default function SalesDashboard() {
+       }
+       setLoadingOpenVisit(false);
+     });
++    supabase.rpc("get_my_day_start").then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) {
++        const row = Array.isArray(data) ? data[0] : data;
++        setDayStart(row || null);
++      }
++      setLoadingDayStart(false);
++    });
+     return () => { cancelled = true; };
+   }, []);
+ 
+@@ -209,37 +226,58 @@ export default function SalesDashboard() {
+             </div>
+           </div>
+         </div>
+-      </div>
+ 
+-      <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+-        {!loadingOpenVisit && openVisit && (
+-          <div
+-            onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+-            style={{
+-              background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
+-              marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
+-              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+-            }}
+-          >
+-            <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
+-            <span style={{ fontSize: 14 }}>›</span>
+-          </div>
+-        )}
++        {/* Day-start / check-in CTA lives inside the purple header itself —
++            keeping it out of the white content area below (which uses a
++            negative top-margin to float its stat cards over the header's
++            bottom edge) avoids the purple-on-purple seam a gradient button
++            created there before. */}
++        <div style={{ marginTop: 20 }}>
++          {!loadingOpenVisit && openVisit && (
++            <div
++              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++              style={{
++                background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
++                fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
++                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
++              }}
++            >
++              <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
++              <span style={{ fontSize: 14 }}>›</span>
++            </div>
++          )}
+ 
+-        {!loadingOpenVisit && !openVisit && (
+-          <button
+-            onClick={() => navigate("/staff/sales/check-in")}
+-            style={{
+-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+-              background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", border: "none", borderRadius: 14,
+-              padding: "16px", marginBottom: 16, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
+-              boxShadow: "0 4px 14px rgba(123,45,139,0.3)",
+-            }}
+-          >
+-            <span style={{ fontSize: 20 }}>📍</span> Check In / Start Day
+-          </button>
+-        )}
++          {!loadingOpenVisit && !openVisit && !loadingDayStart && !dayStart && (
++            <button
++              onClick={() => navigate("/staff/sales/start-day")}
++              style={{
++                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
++                background: "#fff", border: "none", borderRadius: 14,
++                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
++                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
++              }}
++            >
++              <span style={{ fontSize: 20 }}>🛵</span> Start Day
++            </button>
++          )}
+ 
++          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && (
++            <button
++              onClick={() => navigate("/staff/sales/check-in")}
++              style={{
++                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
++                background: "#fff", border: "none", borderRadius: 14,
++                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
++                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
++              }}
++            >
++              <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
++            </button>
++          )}
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+           <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
+diff --git a/src/screens/staff/StartDay.jsx b/src/screens/staff/StartDay.jsx
+new file mode 100644
+index 0000000..f1c1fbf
+--- /dev/null
++++ b/src/screens/staff/StartDay.jsx
+@@ -0,0 +1,121 @@
++import { useEffect, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import { getCurrentPosition, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
++import PhotoSlot from "../../components/staff/PhotoSlot";
++
++// "Start Day" — separate from checking in at a shop. A rep can start their
++// day anywhere (no geofence): home, office, on the road. The only
++// requirement is a photo of their bike/vehicle's meter (odometer) reading.
++// Once the day is started, they're free to go check in at their first shop.
++// One start per (IST) calendar day — see supabase/migrations/
++// sales_start_day.sql. If today's day is already started, this screen
++// just forwards straight to Check In.
++
++export default function StartDay() {
++  const navigate = useNavigate();
++
++  const [checking, setChecking] = useState(true);
++  const [meterFile, setMeterFile] = useState(null);
++  const [starting, setStarting] = useState(false);
++  const [status, setStatus] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setChecking(false); return; }
++    let cancelled = false;
++    supabase.rpc("get_my_day_start").then(({ data, error }) => {
++      if (cancelled) return;
++      const row = Array.isArray(data) ? data[0] : data;
++      if (!error && row) {
++        // Already started today — nothing to do here, move on to Check In.
++        navigate("/staff/sales/check-in", { replace: true });
++        return;
++      }
++      setChecking(false);
++    });
++    return () => { cancelled = true; };
++  }, [navigate]);
++
++  const handleStartDay = async () => {
++    setStatus(null);
++    if (!meterFile) {
++      setStatus({ type: "error", message: "Take a photo of your bike/vehicle meter reading first." });
++      return;
++    }
++    setStarting(true);
++    try {
++      const pos = await getCurrentPosition();
++      const tagged = await tagPhoto(meterFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Day Start" });
++      const url = await uploadVisitMedia(tagged, { folder: "day-start", kind: "meter" });
++      const { data, error } = await supabase.rpc("start_day", {
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++        p_meter_photo_url: url,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setStatus({ type: "error", message: error?.message || result?.message || "Couldn't start your day." });
++        setStarting(false);
++      } else {
++        navigate("/staff/sales/check-in");
++      }
++    } catch (err) {
++      setStatus({ type: "error", message: err.message || "Couldn't start your day." });
++      setStarting(false);
++    }
++  };
++
++  if (checking) {
++    return (
++      <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
++        Loading…
++      </div>
++    );
++  }
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 34px", color: "#fff" }}>
++        <button
++          onClick={() => navigate(-1)}
++          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}
++        >
++          ← Back
++        </button>
++        <div style={{ fontSize: 20, fontWeight: 800 }}>🛵 Start Day</div>
++        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>
++          You can start your day from anywhere — just snap your bike/vehicle's meter reading.
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 560, margin: "-18px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", padding: "20px 18px" }}>
++          <div style={{ fontSize: 11.5, color: "#999", marginBottom: 14, lineHeight: 1.5 }}>
++            This confirms you're on duty for the day. No location restriction here — check-in at shops is geofenced separately.
++          </div>
++
++          <div style={{ maxWidth: 140, margin: "0 auto 18px" }}>
++            <PhotoSlot label="Meter reading" file={meterFile} onChange={setMeterFile} disabled={starting} />
++          </div>
++
++          <button
++            onClick={handleStartDay}
++            disabled={starting}
++            style={{
++              width: "100%", padding: "12px", border: "none", borderRadius: 10,
++              background: starting ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 700,
++              cursor: starting ? "default" : "pointer",
++            }}
++          >
++            {starting ? "Starting your day…" : "🛵 Confirm Start Day"}
++          </button>
++          {status && (
++            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: status.type === "success" ? "#2fa84f" : "#d64545" }}>
++              {status.message}
++            </div>
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/utils/visitMedia.js b/src/utils/visitMedia.js
+index 6b910df..68bb105 100644
+--- a/src/utils/visitMedia.js
++++ b/src/utils/visitMedia.js
+@@ -98,12 +98,15 @@ export async function tagPhoto(file, { latitude, longitude, label } = {}) {
+   });
+ }
+ 
+-// Uploads a Blob/File to the visit-media bucket under a per-visit path and
+-// returns its public URL. `kind` is a short filename hint, e.g.
+-// "duty-on", "board", "shop", "card", "video".
+-export async function uploadVisitMedia(blobOrFile, { dealerId, kind, ext }) {
++// Uploads a Blob/File to the visit-media bucket under a per-folder path and
++// returns its public URL. `folder` scopes the path — a dealer id for
++// shop check-in/out media, or a fixed folder like "day-start" for the
++// bike/vehicle meter-reading photo, which isn't tied to any dealer.
++// `kind` is a short filename hint, e.g. "duty-on", "board", "shop",
++// "card", "video", "meter".
++export async function uploadVisitMedia(blobOrFile, { folder, kind, ext }) {
+   const resolvedExt = ext || (blobOrFile.type && blobOrFile.type.includes("video") ? "webm" : "jpg");
+-  const path = `${dealerId}/${Date.now()}-${kind}.${resolvedExt}`;
++  const path = `${folder}/${Date.now()}-${kind}.${resolvedExt}`;
+   const { error } = await supabase.storage.from(BUCKET).upload(path, blobOrFile, {
+     upsert: true,
+     contentType: blobOrFile.type || undefined,
+diff --git a/supabase/migrations/sales_start_day.sql b/supabase/migrations/sales_start_day.sql
+new file mode 100644
+index 0000000..6a141ef
+--- /dev/null
++++ b/supabase/migrations/sales_start_day.sql
+@@ -0,0 +1,250 @@
++-- sales_start_day.sql
++--
++-- Separates "starting the day" from "checking in at a shop" — per
++-- feedback: a rep can start their day somewhere else entirely (not at a
++-- dealer), with a photo of their bike/vehicle's meter (odometer) reading,
++-- and then go on to check in at their first shop. So:
++--   - Start Day: once per (IST) calendar day, no geofence (can happen
++--     anywhere), requires a meter-reading photo.
++--   - Check In at a shop: unchanged 100m geofence, but no longer requires
++--     its own "duty on" photo — that concept now lives in Start Day. A
++--     rep must have started their day before they can check in anywhere.
++--
++-- Run in Supabase SQL Editor, after sales_visits_checkinout.sql.
++
++-- ── 1. sales_day_starts table ───────────────────────────────────────────
++
++create table if not exists public.sales_day_starts (
++  id               uuid primary key default gen_random_uuid(),
++  staff_email      text not null references public.staff_profiles(email) on delete cascade,
++  work_date        date not null,
++  started_at       timestamptz not null default now(),
++  latitude         numeric,
++  longitude        numeric,
++  meter_photo_url  text not null
++);
++
++-- One start per staff per (IST) calendar day.
++create unique index if not exists idx_sales_day_starts_one_per_day
++  on public.sales_day_starts (staff_email, work_date);
++
++alter table public.sales_day_starts enable row level security;
++-- No policies — every read/write goes through the SECURITY DEFINER
++-- functions below, same pattern as sales_visits.
++
++-- ── 2. get_my_day_start() — today's start, if any ───────────────────────
++
++create or replace function public.get_my_day_start()
++returns table (
++  id              uuid,
++  work_date       date,
++  started_at      timestamptz,
++  latitude        numeric,
++  longitude       numeric,
++  meter_photo_url text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  return query
++    select sds.id, sds.work_date, sds.started_at, sds.latitude, sds.longitude, sds.meter_photo_url
++    from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++    limit 1;
++end;
++$$;
++
++grant execute on function public.get_my_day_start() to authenticated;
++
++-- ── 3. start_day() — no geofence, meter photo required ──────────────────
++
++create or replace function public.start_day(
++  p_latitude numeric,
++  p_longitude numeric,
++  p_meter_photo_url text
++)
++returns table (success boolean, message text, day_start_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++  v_existing_id uuid;
++  v_new_id uuid;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_meter_photo_url is null or length(trim(p_meter_photo_url)) = 0 then
++    return query select false, 'a photo of your bike/vehicle meter reading is required to start your day'::text, null::uuid;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  select sds.id into v_existing_id
++  from public.sales_day_starts sds
++  where sds.staff_email = v_email and sds.work_date = v_today;
++
++  if v_existing_id is not null then
++    -- Idempotent — resume rather than error, same pattern as start_dealer_visit.
++    return query select true, 'day already started'::text, v_existing_id;
++    return;
++  end if;
++
++  insert into public.sales_day_starts (staff_email, work_date, latitude, longitude, meter_photo_url)
++  values (v_email, v_today, p_latitude, p_longitude, p_meter_photo_url)
++  returning id into v_new_id;
++
++  return query select true, 'day started'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.start_day(numeric, numeric, text) to authenticated;
++
++-- ── 4. start_dealer_visit() — drop the duty-on-photo requirement, add ──
++-- ── the "day must be started" gate instead ──────────────────────────────
++-- Signature is changing (losing the p_duty_on_photo_url param), so the
++-- old 4-arg version must be dropped explicitly first — CREATE OR REPLACE
++-- can't change a function's parameter list, only its body.
++
++drop function if exists public.start_dealer_visit(uuid, numeric, numeric, text);
++
++create or replace function public.start_dealer_visit(
++  p_dealer_id uuid,
++  p_latitude numeric,
++  p_longitude numeric
++)
++returns table (success boolean, message text, visit_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++  v_today date;
++  v_dealer_lat double precision;
++  v_dealer_lng double precision;
++  v_distance double precision;
++  v_open_id uuid;
++  v_open_dealer_id uuid;
++  v_new_id uuid;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to check in'::text, null::uuid;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++  if not exists (
++    select 1 from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++  ) then
++    return query select false, 'start your day first'::text, null::uuid;
++    return;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return query select false, 'dealer not in your assigned list'::text, null::uuid;
++    return;
++  end if;
++
++  -- Only one open visit per rep at a time.
++  select sv.id, sv.dealer_id into v_open_id, v_open_dealer_id
++  from public.sales_visits sv
++  where sv.staff_email = v_email and sv.status = 'open'
++  limit 1;
++
++  if v_open_id is not null then
++    if v_open_dealer_id = p_dealer_id then
++      return query select true, 'already checked in'::text, v_open_id;
++      return;
++    else
++      return query select false, 'you are already checked in at another dealer — check out there first'::text, null::uuid;
++      return;
++    end if;
++  end if;
++
++  select p.location_lat, p.location_lng into v_dealer_lat, v_dealer_lng
++  from public.profiles p where p.id = p_dealer_id;
++
++  if v_dealer_lat is null or v_dealer_lng is null then
++    -- First-ever check-in for this dealer sets its location.
++    update public.profiles
++    set location_lat = p_latitude, location_lng = p_longitude
++    where id = p_dealer_id;
++  else
++    v_distance := public._haversine_meters(v_dealer_lat, v_dealer_lng, p_latitude::double precision, p_longitude::double precision);
++    if v_distance > 100 then
++      return query select false,
++        format('you are about %s m from this dealer — you must be within 100m to check in', round(v_distance)::int)::text,
++        null::uuid;
++      return;
++    end if;
++  end if;
++
++  insert into public.sales_visits (
++    dealer_id, staff_email, status,
++    check_in_at, check_in_lat, check_in_lng,
++    visited_at, latitude, longitude
++  )
++  values (
++    p_dealer_id, v_email, 'open',
++    now(), p_latitude, p_longitude,
++    now(), p_latitude, p_longitude
++  )
++  returning id into v_new_id;
++
++  return query select true, 'checked in'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.start_dealer_visit(uuid, numeric, numeric) to authenticated;
+-- 
+2.43.0
+
