@@ -22,6 +22,7 @@ import Profile from "./screens/Profile";
 import Schemes from "./screens/Schemes";
 import Support from "./screens/Support";
 import StaffHome from "./screens/StaffHome";
+import SalesDashboard from "./screens/staff/SalesDashboard";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
 import AdminOrders from "./admin/AdminOrders";
@@ -100,7 +101,7 @@ export default function App() {
           its real department dashboard independently as those get built. */}
       <Route element={<StaffRoute />}>
         <Route path="/staff" element={<StaffHome />} />
-        <Route path="/staff/sales" element={<StaffHome />} />
+        <Route path="/staff/sales" element={<SalesDashboard />} />
         <Route path="/staff/after-sales" element={<StaffHome />} />
         <Route path="/staff/dispatch" element={<StaffHome />} />
         <Route path="/staff/logistics" element={<StaffHome />} />

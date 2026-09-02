@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
+import { staffRoleLabel } from "../utils/staffRoles";
 
 const BUCKET = "dealer-media";
 
@@ -393,6 +394,23 @@ export default function AdminDealers() {
       if (dgRes.data)   setDeletedGuests(dgRes.data);
       setLoading(false);
     });
+  }, []);
+
+  // Active Sales-department staff, for the "Assigned Sales Rep" dropdown
+  // below — feeds the get_my_dealers() RPC on the Sales dashboard, which
+  // matches dealers to a rep by exact staff_profiles.email.
+  const [salesStaffOptions, setSalesStaffOptions] = useState([]);
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase.from('staff_profiles')
+      .select('email, name, role')
+      .eq('department', 'Sales')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data, error }) => {
+        if (error) { console.warn('[AdminDealers] sales staff fetch failed:', error.message); return; }
+        setSalesStaffOptions(data || []);
+      });
   }, []);
 
   // Lazy cleanup: permanently delete profiles soft-deleted over 1 year ago
@@ -830,6 +848,7 @@ export default function AdminDealers() {
       shop_address:               selected.shop_address               || "",
       godown_address:             selected.godown_address             || "",
       staff_assigned:             selected.staff_assigned             || "",
+      assigned_sales_rep:         selected.assigned_sales_rep         || "",
       staff1_name:                selected.staff1_name                || "",
       staff2_name:                selected.staff2_name                || "",
       website:                    selected.website                    || "",
@@ -866,6 +885,7 @@ export default function AdminDealers() {
       shop_address:               edits.shop_address,
       godown_address:             edits.godown_address,
       staff_assigned:             edits.staff_assigned,
+      assigned_sales_rep:         edits.assigned_sales_rep || null,
       staff1_name:                edits.staff1_name,
       staff2_name:                edits.staff2_name,
       website:                    edits.website,
@@ -1451,6 +1471,15 @@ export default function AdminDealers() {
 
                 <EditField label="Website" field="website" value={E("website")} onChange={set} />
                 <EditField label="Staff Assigned" field="staff_assigned" value={E("staff_assigned")} onChange={set} />
+                <EditField label="Assigned Sales Rep" field="assigned_sales_rep" value={E("assigned_sales_rep")} onChange={set}>
+                  <select value={E("assigned_sales_rep")} onChange={e => set("assigned_sales_rep", e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, marginBottom: 0 }}>
+                    <option value="">— Unassigned —</option>
+                    {salesStaffOptions.map(s => (
+                      <option key={s.email} value={s.email}>{s.name || s.email} ({staffRoleLabel(s.role)})</option>
+                    ))}
+                  </select>
+                </EditField>
                 <EditField label="Discount 1 (%)" field="discount1" value={E("discount1")} onChange={set} type="number" />
                 <EditField label="Discount 2 (%)" field="discount2" value={E("discount2")} onChange={set} type="number" />
                 <EditField label="Credit Limit (Rs.)" field="credit_limit" value={E("credit_limit")} onChange={set} type="number" span />
@@ -1466,6 +1495,11 @@ export default function AdminDealers() {
                 )}
                 <ReadField label="Website" value={S("website")} />
                 <ReadField label="Staff Assigned" value={S("staff_assigned")} />
+                <ReadField label="Assigned Sales Rep" value={
+                  selected.assigned_sales_rep
+                    ? (salesStaffOptions.find(s => s.email === selected.assigned_sales_rep)?.name || selected.assigned_sales_rep)
+                    : "— Unassigned —"
+                } />
                 <ReadField label="Discount 1 (%)" value={String(selected.discount1 ?? "—")} />
                 <ReadField label="Discount 2 (%)" value={String(selected.discount2 ?? "—")} />
                 {(selected.discount1 || selected.discount2) ? (
