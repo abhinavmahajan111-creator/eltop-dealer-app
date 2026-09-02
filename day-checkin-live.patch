@@ -1,0 +1,1939 @@
+From d6c6a7b2900e8a66dfb3dffc38adfb1d4a1da61b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 15:20:50 +0000
+Subject: [PATCH] Combine Start Day / Check In into one tabbed screen;
+ camera-only capture
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Replaces the separate Start Day and Check In screens with a single
+DayCheckIn.jsx (two tabs: Day, Check In) built from an approved mockup,
+and closes a real attendance gap: a rep could previously still check in
+after ending their day.
+
+- Day tab: start/end the day, plus a running Day Activity log (day
+  start/end, check-ins/outs, and free-text notes the rep adds) via new
+  sales_day_notes table + get_my_day_activity()/add_day_note() RPCs.
+- End Day is blocked while a visit is still open (checkout first), and
+  once the day is ended, Check In is fully blocked until a new day is
+  started tomorrow — sales_day_starts.ended_at + a new end_day() RPC,
+  with start_dealer_visit() checking it.
+- Check In tab: tapping a dealer checks in immediately (no confirm
+  step) and this same tab becomes the checkout screen and stays that
+  way — one open check-in at a time, mandatory checkout, never drops
+  back to the Day tab.
+- New CameraCapture.jsx (CameraPhotoSlot/CameraVideoSlot): every photo
+  and video now comes from a live getUserMedia stream, never a file/
+  gallery picker, so an old or fake photo can't be substituted. Geo-tag
+  + timestamp are burned onto every photo at capture time. Replaces
+  PhotoSlot.jsx and the native <input capture> pattern everywhere
+  (DealerDetail's checkout, the day-start meter photo).
+- Purple border added to every plain white card across the Sales
+  screens (dashboard stat cards, dealer/visit lists, feature tiles,
+  dealer detail cards).
+- Old /staff/sales/start-day and /staff/sales/check-in routes now
+  redirect to the new /staff/sales/day-checkin.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                                   |  10 +-
+ src/components/staff/CameraCapture.jsx        | 227 ++++++++
+ src/components/staff/PhotoSlot.jsx            |  44 --
+ src/screens/staff/CheckIn.jsx                 | 191 -------
+ src/screens/staff/DayCheckIn.jsx              | 530 ++++++++++++++++++
+ src/screens/staff/DealerDetail.jsx            |  65 +--
+ src/screens/staff/SalesDashboard.jsx          |  32 +-
+ src/screens/staff/StartDay.jsx                | 121 ----
+ src/utils/visitMedia.js                       |  82 +--
+ .../migrations/sales_day_end_and_activity.sql | 376 +++++++++++++
+ 10 files changed, 1199 insertions(+), 479 deletions(-)
+ create mode 100644 src/components/staff/CameraCapture.jsx
+ delete mode 100644 src/components/staff/PhotoSlot.jsx
+ delete mode 100644 src/screens/staff/CheckIn.jsx
+ create mode 100644 src/screens/staff/DayCheckIn.jsx
+ delete mode 100644 src/screens/staff/StartDay.jsx
+ create mode 100644 supabase/migrations/sales_day_end_and_activity.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index ce973ed..c0134e1 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -24,8 +24,7 @@ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
+-import CheckIn from "./screens/staff/CheckIn";
+-import StartDay from "./screens/staff/StartDay";
++import DayCheckIn from "./screens/staff/DayCheckIn";
+ import ComingSoon from "./screens/staff/ComingSoon";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+@@ -106,8 +105,11 @@ export default function App() {
+       <Route element={<StaffRoute />}>
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
+-        <Route path="/staff/sales/check-in" element={<CheckIn />} />
+-        <Route path="/staff/sales/start-day" element={<StartDay />} />
++        <Route path="/staff/sales/day-checkin" element={<DayCheckIn />} />
++        {/* Old separate Start Day / Check In routes — redirect to the
++            combined tabbed screen that replaced them. */}
++        <Route path="/staff/sales/check-in" element={<Navigate to="/staff/sales/day-checkin" replace />} />
++        <Route path="/staff/sales/start-day" element={<Navigate to="/staff/sales/day-checkin" replace />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+diff --git a/src/components/staff/CameraCapture.jsx b/src/components/staff/CameraCapture.jsx
+new file mode 100644
+index 0000000..ad2f95d
+--- /dev/null
++++ b/src/components/staff/CameraCapture.jsx
+@@ -0,0 +1,227 @@
++import { useEffect, useRef, useState } from "react";
++import { getCurrentPosition } from "../../utils/visitMedia";
++
++// Live camera capture — no file input anywhere, so there's no "choose from
++// gallery" fallback a rep could use to submit an old/fake photo. Every
++// photo is captured straight from a live getUserMedia stream and has its
++// geo-coordinates + timestamp burned directly onto the pixels before it's
++// handed back, so the tag can't be stripped or edited out afterward.
++//
++// CameraPhotoSlot renders like the old PhotoSlot (a square preview box —
++// tap to open the camera, shows the captured photo once done, tap again
++// to retake) but the `file` prop/`onChange` callback now carry a Blob
++// produced here instead of a File chosen from a picker.
++//
++// CameraVideoSlot is the equivalent for the short shop-interior video,
++// using MediaRecorder instead of a canvas snapshot.
++
++const MODAL_STYLE = {
++  position: "fixed", inset: 0, background: "#000", zIndex: 100,
++  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
++};
++
++function CameraModal({ title, videoRef, error, hint, children, onClose }) {
++  return (
++    <div style={MODAL_STYLE}>
++      <div style={{ position: "absolute", top: 0, left: 0, right: 0, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", color: "#fff", fontSize: 12.5, fontWeight: 700 }}>
++        <span>{title}</span>
++        <button onClick={onClose} style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "#fff", borderRadius: "50%", width: 32, height: 32, fontSize: 16, cursor: "pointer" }}>✕</button>
++      </div>
++      {hint && (
++        <div style={{ position: "absolute", top: 54, left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: 11, opacity: 0.8 }}>{hint}</div>
++      )}
++      <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", maxHeight: "70vh", objectFit: "cover", background: "#111" }} />
++      <div style={{ position: "absolute", bottom: 26, left: 0, right: 0, display: "flex", justifyContent: "center", gap: 16 }}>
++        {children}
++      </div>
++      {error && (
++        <div style={{ position: "absolute", bottom: 100, left: 20, right: 20, background: "rgba(214,69,69,0.9)", color: "#fff", fontSize: 12, fontWeight: 700, padding: "10px 14px", borderRadius: 10, textAlign: "center" }}>
++          {error}
++        </div>
++      )}
++    </div>
++  );
++}
++
++function useCameraStream(open, wantsAudio) {
++  const videoRef = useRef(null);
++  const streamRef = useRef(null);
++  const [error, setError] = useState(null);
++
++  useEffect(() => {
++    if (!open) return;
++    let cancelled = false;
++    setError(null);
++    navigator.mediaDevices
++      ?.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: !!wantsAudio })
++      .then((stream) => {
++        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
++        streamRef.current = stream;
++        if (videoRef.current) videoRef.current.srcObject = stream;
++      })
++      .catch((err) => {
++        if (!cancelled) setError("Could not access the camera (" + err.message + "). Camera permission is required — there's no gallery fallback.");
++      });
++    return () => {
++      cancelled = true;
++      if (streamRef.current) {
++        streamRef.current.getTracks().forEach((t) => t.stop());
++        streamRef.current = null;
++      }
++    };
++  }, [open, wantsAudio]);
++
++  return { videoRef, streamRef, error };
++}
++
++function drawGeotagBar(ctx, width, height, { coordsText, timestamp }) {
++  const barHeight = Math.max(40, Math.round(height * 0.09));
++  ctx.fillStyle = "rgba(0,0,0,0.55)";
++  ctx.fillRect(0, height - barHeight, width, barHeight);
++  const pad = Math.round(barHeight * 0.18);
++  const line1 = Math.max(11, Math.round(barHeight * 0.32));
++  const line2 = Math.max(9, Math.round(barHeight * 0.24));
++  ctx.fillStyle = "#fff";
++  ctx.textBaseline = "top";
++  ctx.font = `700 ${line1}px Arial, sans-serif`;
++  ctx.fillText(coordsText, pad, height - barHeight + pad);
++  ctx.font = `400 ${line2}px Arial, sans-serif`;
++  ctx.fillText(timestamp, pad, height - barHeight + pad + line1 + 4);
++}
++
++function geotagLabel(coords) {
++  const timestamp = new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
++  const coordsText = coords ? `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)}` : "Location unavailable";
++  return { coordsText, timestamp };
++}
++
++export function CameraPhotoSlot({ label, file, onChange, disabled }) {
++  const [open, setOpen] = useState(false);
++  const [coords, setCoords] = useState(null);
++  const [locating, setLocating] = useState(false);
++  const { videoRef, error } = useCameraStream(open, false);
++  const previewUrl = file ? URL.createObjectURL(file) : null;
++
++  const handleOpen = () => {
++    if (disabled) return;
++    setCoords(null);
++    setLocating(true);
++    getCurrentPosition().then(setCoords).catch(() => setCoords(null)).finally(() => setLocating(false));
++    setOpen(true);
++  };
++
++  const handleCapture = () => {
++    const video = videoRef.current;
++    if (!video) return;
++    const canvas = document.createElement("canvas");
++    canvas.width = video.videoWidth || 640;
++    canvas.height = video.videoHeight || 480;
++    const ctx = canvas.getContext("2d");
++    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
++    drawGeotagBar(ctx, canvas.width, canvas.height, geotagLabel(coords));
++    canvas.toBlob((blob) => { if (blob) onChange(blob); }, "image/jpeg", 0.86);
++    setOpen(false);
++  };
++
++  return (
++    <div style={{ textAlign: "center" }}>
++      <div
++        onClick={handleOpen}
++        style={{
++          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
++          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc",
++          background: file ? "#000" : "#fafafa",
++          display: "flex", alignItems: "center", justifyContent: "center",
++          cursor: disabled ? "default" : "pointer", position: "relative",
++        }}
++      >
++        {previewUrl ? (
++          <img src={previewUrl} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
++        ) : (
++          <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
++        )}
++        {file && (
++          <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
++        )}
++      </div>
++      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
++
++      {open && (
++        <CameraModal
++          title="Take photo"
++          videoRef={videoRef}
++          error={error}
++          hint={locating ? "📍 Getting your location…" : coords ? "📍 Location locked" : "📍 Location unavailable"}
++          onClose={() => setOpen(false)}
++        >
++          <button
++            onClick={handleCapture}
++            style={{ width: 66, height: 66, borderRadius: "50%", background: "#fff", border: "4px solid rgba(255,255,255,0.4)", cursor: "pointer" }}
++          />
++        </CameraModal>
++      )}
++    </div>
++  );
++}
++
++export function CameraVideoSlot({ label = "Record ~5s video of shop interior", file, onChange, disabled }) {
++  const [open, setOpen] = useState(false);
++  const [recording, setRecording] = useState(false);
++  const { videoRef, streamRef, error } = useCameraStream(open, true);
++  const recorderRef = useRef(null);
++  const chunksRef = useRef([]);
++
++  const handleOpen = () => { if (!disabled) setOpen(true); };
++
++  const startRecording = () => {
++    if (!streamRef.current) return;
++    chunksRef.current = [];
++    const recorder = new MediaRecorder(streamRef.current);
++    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
++    recorder.onstop = () => {
++      const blob = new Blob(chunksRef.current, { type: "video/webm" });
++      onChange(blob);
++      setOpen(false);
++      setRecording(false);
++    };
++    recorder.start();
++    recorderRef.current = recorder;
++    setRecording(true);
++  };
++
++  const stopRecording = () => {
++    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
++  };
++
++  return (
++    <div>
++      <div
++        onClick={handleOpen}
++        style={{
++          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
++          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc", borderRadius: 8,
++          padding: "10px", fontSize: 12.5, fontWeight: 700, color: file ? "#2fa84f" : "#888",
++          cursor: disabled ? "default" : "pointer",
++        }}
++      >
++        {file ? "✓ Video captured" : `🎥 ${label}`}
++      </div>
++
++      {open && (
++        <CameraModal title="Record video" videoRef={videoRef} error={error} onClose={() => { stopRecording(); setOpen(false); }}>
++          {!recording ? (
++            <button
++              onClick={startRecording}
++              style={{ width: 66, height: 66, borderRadius: "50%", background: "#e23c3c", border: "4px solid rgba(255,255,255,0.4)", cursor: "pointer" }}
++            />
++          ) : (
++            <button
++              onClick={stopRecording}
++              style={{ width: 66, height: 66, borderRadius: 14, background: "#e23c3c", border: "4px solid rgba(255,255,255,0.4)", cursor: "pointer" }}
++            />
++          )}
++        </CameraModal>
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/staff/PhotoSlot.jsx b/src/components/staff/PhotoSlot.jsx
+deleted file mode 100644
+index 7e501a5..0000000
+--- a/src/components/staff/PhotoSlot.jsx
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import { useRef } from "react";
+-
+-// A single required-photo capture slot: shows a thumbnail once chosen, a
+-// ✓ once done. Uses the native camera via capture="environment" — far
+-// more reliable across mobile browsers than a custom getUserMedia
+-// pipeline. Shared between the dealer detail check-in/out flow and the
+-// dashboard "Check In" (pick-a-dealer-first) flow.
+-export default function PhotoSlot({ label, file, onChange, disabled }) {
+-  const inputRef = useRef(null);
+-  const previewUrl = file ? URL.createObjectURL(file) : null;
+-  return (
+-    <div style={{ textAlign: "center" }}>
+-      <div
+-        onClick={() => !disabled && inputRef.current?.click()}
+-        style={{
+-          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
+-          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc",
+-          background: file ? "#000" : "#fafafa",
+-          display: "flex", alignItems: "center", justifyContent: "center",
+-          cursor: disabled ? "default" : "pointer", position: "relative",
+-        }}
+-      >
+-        {previewUrl ? (
+-          <img src={previewUrl} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+-        ) : (
+-          <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
+-        )}
+-        {file && (
+-          <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
+-        )}
+-      </div>
+-      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
+-      <input
+-        ref={inputRef}
+-        type="file"
+-        accept="image/*"
+-        capture="environment"
+-        disabled={disabled}
+-        onChange={(e) => onChange(e.target.files?.[0] || null)}
+-        style={{ display: "none" }}
+-      />
+-    </div>
+-  );
+-}
+diff --git a/src/screens/staff/CheckIn.jsx b/src/screens/staff/CheckIn.jsx
+deleted file mode 100644
+index 26a567c..0000000
+--- a/src/screens/staff/CheckIn.jsx
++++ /dev/null
+@@ -1,191 +0,0 @@
+-import { useEffect, useState } from "react";
+-import { useNavigate } from "react-router-dom";
+-import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+-import { getCurrentPosition } from "../../utils/visitMedia";
+-
+-// "Check In" entry point reached from the Sales dashboard's Check In
+-// button (only shown once the day is started) — pick the dealer here,
+-// then confirm check-in. No photo required at shop check-in anymore —
+-// that moved to Start Day (bike/vehicle meter reading, captured once per
+-// day, anywhere). Lands on that dealer's detail screen afterwards, ready
+-// for check-out later.
+-
+-function initials(name) {
+-  if (!name) return "?";
+-  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+-}
+-
+-export default function CheckIn() {
+-  const navigate = useNavigate();
+-
+-  const [dealers, setDealers] = useState([]);
+-  const [loadingDealers, setLoadingDealers] = useState(true);
+-  const [dealerError, setDealerError] = useState(null);
+-  const [search, setSearch] = useState("");
+-
+-  const [openVisit, setOpenVisit] = useState(null);
+-  const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
+-
+-  const [dayStart, setDayStart] = useState(null);
+-  const [loadingDayStart, setLoadingDayStart] = useState(true);
+-
+-  const [checkingInId, setCheckingInId] = useState(null);
+-  const [status, setStatus] = useState(null);
+-
+-  useEffect(() => {
+-    if (!isSupabaseConfigured) {
+-      setLoadingDealers(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
+-      return;
+-    }
+-    let cancelled = false;
+-    supabase.rpc("get_my_dealers").then(({ data, error }) => {
+-      if (cancelled) return;
+-      if (error) setDealerError(error.message);
+-      else setDealers(data || []);
+-      setLoadingDealers(false);
+-    });
+-    supabase.rpc("get_my_open_visit").then(({ data, error }) => {
+-      if (cancelled) return;
+-      if (!error) {
+-        const row = Array.isArray(data) ? data[0] : data;
+-        setOpenVisit(row || null);
+-      }
+-      setLoadingOpenVisit(false);
+-    });
+-    supabase.rpc("get_my_day_start").then(({ data, error }) => {
+-      if (cancelled) return;
+-      if (!error) {
+-        const row = Array.isArray(data) ? data[0] : data;
+-        setDayStart(row || null);
+-      }
+-      setLoadingDayStart(false);
+-    });
+-    return () => { cancelled = true; };
+-  }, []);
+-
+-  const filteredDealers = dealers.filter((d) => {
+-    if (!search.trim()) return true;
+-    const q = search.trim().toLowerCase();
+-    return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
+-  });
+-
+-  const handleCheckIn = async (dealer) => {
+-    setStatus(null);
+-    setCheckingInId(dealer.id);
+-    try {
+-      const pos = await getCurrentPosition();
+-      const { data, error } = await supabase.rpc("start_dealer_visit", {
+-        p_dealer_id: dealer.id,
+-        p_latitude: pos.latitude,
+-        p_longitude: pos.longitude,
+-      });
+-      const result = Array.isArray(data) ? data[0] : data;
+-      if (error || !result?.success) {
+-        setStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
+-        setCheckingInId(null);
+-      } else {
+-        navigate(`/staff/sales/dealer/${dealer.id}`);
+-      }
+-    } catch (err) {
+-      setStatus({ type: "error", message: err.message || "Couldn't check in." });
+-      setCheckingInId(null);
+-    }
+-  };
+-
+-  const loading = loadingDealers || loadingOpenVisit || loadingDayStart;
+-
+-  return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+-      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 34px", color: "#fff" }}>
+-        <button
+-          onClick={() => navigate(-1)}
+-          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}
+-        >
+-          ← Back
+-        </button>
+-        <div style={{ fontSize: 20, fontWeight: 800 }}>📍 Check In</div>
+-        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>Which dealer are you visiting?</div>
+-      </div>
+-
+-      <div style={{ maxWidth: 560, margin: "-18px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+-        {loading ? null : !dayStart ? (
+-          <div style={{
+-            background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "14px 16px",
+-            marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", lineHeight: 1.6,
+-          }}>
+-            You haven't started your day yet. Start your day first (a quick meter-reading photo), then come back to check in.
+-            <button
+-              onClick={() => navigate("/staff/sales/start-day")}
+-              style={{ display: "block", marginTop: 10, width: "100%", padding: "9px", border: "1.5px solid #8a6100", borderRadius: 8, background: "#fff", color: "#8a6100", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+-            >
+-              🛵 Start Day
+-            </button>
+-          </div>
+-        ) : openVisit ? (
+-          <div style={{
+-            background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "14px 16px",
+-            marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", lineHeight: 1.6,
+-          }}>
+-            You're already checked in at <b>{openVisit.dealer_name}</b>. Check out there before starting a new visit.
+-            <button
+-              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+-              style={{ display: "block", marginTop: 10, width: "100%", padding: "9px", border: "1.5px solid #8a6100", borderRadius: 8, background: "#fff", color: "#8a6100", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+-            >
+-              Go check out at {openVisit.dealer_name}
+-            </button>
+-          </div>
+-        ) : (
+-          <>
+-            <input
+-              value={search}
+-              onChange={(e) => setSearch(e.target.value)}
+-              placeholder="Search your dealers…"
+-              style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #eee", borderRadius: 10, fontSize: 13.5, marginBottom: 14, boxSizing: "border-box", background: "#fff" }}
+-            />
+-            {status && (
+-              <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: "#d64545" }}>
+-                {status.message}
+-              </div>
+-            )}
+-            <div style={{ fontSize: 11, color: "#999", marginBottom: 10, lineHeight: 1.5 }}>
+-              You must be within 100m of a dealer to check in there. Tap a dealer to confirm.
+-            </div>
+-            <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+-              {loadingDealers ? (
+-                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+-              ) : dealerError ? (
+-                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load your dealers ({dealerError}).</div>
+-              ) : filteredDealers.length === 0 ? (
+-                <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>
+-                  {dealers.length === 0 ? "No dealers assigned to you yet." : "No dealers match your search."}
+-                </div>
+-              ) : (
+-                filteredDealers.map((d) => (
+-                  <div
+-                    key={d.id}
+-                    onClick={() => (checkingInId ? null : handleCheckIn(d))}
+-                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: checkingInId ? "default" : "pointer", opacity: checkingInId && checkingInId !== d.id ? 0.5 : 1 }}
+-                  >
+-                    <div style={{
+-                      width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
+-                      display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
+-                    }}>
+-                      {initials(d.name)}
+-                    </div>
+-                    <div style={{ flex: 1, minWidth: 0 }}>
+-                      <div style={{ fontSize: 13.5, fontWeight: 700 }}>{d.name || "Unnamed"}</div>
+-                      <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
+-                    </div>
+-                    <div style={{ fontSize: 11.5, fontWeight: 700, color: "#7B2D8B" }}>
+-                      {checkingInId === d.id ? "Checking in…" : "Check in ›"}
+-                    </div>
+-                  </div>
+-                ))
+-              )}
+-            </div>
+-          </>
+-        )}
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+new file mode 100644
+index 0000000..6f85293
+--- /dev/null
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -0,0 +1,530 @@
++import { useEffect, useRef, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
++import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
++
++// Combined "Day" + "Check In" screen, replacing the old separate
++// StartDay.jsx / CheckIn.jsx screens — approved from a mockup. Two tabs:
++//
++//   🛵 Day — start the day (bike/vehicle meter-reading photo, no
++//   geofence), end the day (blocked while a visit is still open — no
++//   hanging open visits), and a running Day Activity log (day start/end,
++//   check-ins/outs, plus free-text notes the rep adds themselves).
++//
++//   📍 Check In — pick a dealer to check in at (blocked until the day is
++//   started, and fully blocked once the day has ended — no check-ins
++//   after "End Day", to avoid attendance confusion). Only one open
++//   check-in at a time: once checked in, this tab becomes the checkout
++//   screen and stays that way — mandatory checkout, no picking another
++//   dealer — until checkout is confirmed.
++//
++// Every photo/video capture point uses CameraPhotoSlot/CameraVideoSlot —
++// a live camera stream, never a file/gallery picker — with geo-tag +
++// timestamp burned onto every photo.
++
++const BOX_STYLE = {
++  background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14,
++  padding: 16, marginBottom: 14, boxShadow: "0 2px 8px rgba(123,45,139,0.06)",
++};
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++function timeLabel(iso) {
++  if (!iso) return "";
++  return new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
++}
++
++const ACTIVITY_ICON = { start: "🛵", end: "⏹", checkin: "📍", checkout: "✅", note: "📝" };
++
++export default function DayCheckIn() {
++  const navigate = useNavigate();
++
++  const [activeTab, setActiveTab] = useState("day");
++  const defaultTabSetRef = useRef(false);
++
++  const [dayStart, setDayStart] = useState(null);
++  const [loadingDayStart, setLoadingDayStart] = useState(true);
++
++  const [openVisit, setOpenVisit] = useState(null);
++  const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
++
++  const [dealers, setDealers] = useState([]);
++  const [loadingDealers, setLoadingDealers] = useState(true);
++  const [dealerError, setDealerError] = useState(null);
++  const [search, setSearch] = useState("");
++
++  const [activity, setActivity] = useState([]);
++  const [loadingActivity, setLoadingActivity] = useState(true);
++
++  const [meterFile, setMeterFile] = useState(null);
++  const [starting, setStarting] = useState(false);
++  const [startError, setStartError] = useState(null);
++
++  const [endingDay, setEndingDay] = useState(false);
++  const [endDayError, setEndDayError] = useState(null);
++
++  const [noteInput, setNoteInput] = useState("");
++  const [addingNote, setAddingNote] = useState(false);
++
++  const [checkingInId, setCheckingInId] = useState(null);
++  const [checkInError, setCheckInError] = useState(null);
++
++  const [boardFile, setBoardFile] = useState(null);
++  const [shopFile, setShopFile] = useState(null);
++  const [cardFile, setCardFile] = useState(null);
++  const [videoFile, setVideoFile] = useState(null);
++  const [checkoutNotes, setCheckoutNotes] = useState("");
++  const [checkingOut, setCheckingOut] = useState(false);
++  const [checkOutError, setCheckOutError] = useState(null);
++
++  const loadDayStart = () => {
++    setLoadingDayStart(true);
++    return supabase.rpc("get_my_day_start").then(({ data, error }) => {
++      if (!error) setDayStart((Array.isArray(data) ? data[0] : data) || null);
++      setLoadingDayStart(false);
++    });
++  };
++
++  const loadOpenVisit = () => {
++    setLoadingOpenVisit(true);
++    return supabase.rpc("get_my_open_visit").then(({ data, error }) => {
++      if (!error) setOpenVisit((Array.isArray(data) ? data[0] : data) || null);
++      setLoadingOpenVisit(false);
++    });
++  };
++
++  const loadActivity = () => {
++    setLoadingActivity(true);
++    return supabase.rpc("get_my_day_activity").then(({ data, error }) => {
++      if (!error) setActivity(data || []);
++      setLoadingActivity(false);
++    });
++  };
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) {
++      setLoadingDayStart(false); setLoadingOpenVisit(false); setLoadingDealers(false); setLoadingActivity(false);
++      return;
++    }
++    let cancelled = false;
++    Promise.all([
++      supabase.rpc("get_my_dealers"),
++      supabase.rpc("get_my_open_visit"),
++      supabase.rpc("get_my_day_start"),
++      supabase.rpc("get_my_day_activity"),
++    ]).then(([dealersRes, openRes, dayRes, activityRes]) => {
++      if (cancelled) return;
++      if (dealersRes.error) setDealerError(dealersRes.error.message);
++      else setDealers(dealersRes.data || []);
++      const open = (Array.isArray(openRes.data) ? openRes.data[0] : openRes.data) || null;
++      setOpenVisit(open);
++      const day = (Array.isArray(dayRes.data) ? dayRes.data[0] : dayRes.data) || null;
++      setDayStart(day);
++      setActivity(activityRes.data || []);
++
++      if (!defaultTabSetRef.current) {
++        defaultTabSetRef.current = true;
++        // Default lands on whichever tab is actionable: Day if there's
++        // nothing to check in for yet (not started / already ended),
++        // otherwise Check In — which, if already checked in somewhere,
++        // is the checkout screen. Never defaults back to Day after a
++        // check-in.
++        if (!day || day.ended_at) setActiveTab("day");
++        else setActiveTab("checkin");
++      }
++
++      setLoadingDealers(false);
++      setLoadingOpenVisit(false);
++      setLoadingDayStart(false);
++      setLoadingActivity(false);
++    });
++    return () => { cancelled = true; };
++  }, []);
++
++  const filteredDealers = dealers.filter((d) => {
++    if (!search.trim()) return true;
++    const q = search.trim().toLowerCase();
++    return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
++  });
++
++  const handleStartDay = async () => {
++    setStartError(null);
++    if (!meterFile) { setStartError("Take your meter-reading photo first."); return; }
++    setStarting(true);
++    try {
++      const pos = await getCurrentPosition();
++      const url = await uploadVisitMedia(meterFile, { folder: "day-start", kind: "meter" });
++      const { data, error } = await supabase.rpc("start_day", {
++        p_latitude: pos.latitude, p_longitude: pos.longitude, p_meter_photo_url: url,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setStartError(error?.message || result?.message || "Couldn't start your day.");
++      } else {
++        setMeterFile(null);
++        await Promise.all([loadDayStart(), loadActivity()]);
++        setActiveTab("checkin");
++      }
++    } catch (err) {
++      setStartError(err.message || "Couldn't start your day.");
++    } finally {
++      setStarting(false);
++    }
++  };
++
++  const handleEndDay = async () => {
++    setEndDayError(null);
++    setEndingDay(true);
++    try {
++      const { data, error } = await supabase.rpc("end_day");
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setEndDayError(error?.message || result?.message || "Couldn't end your day.");
++      } else {
++        await Promise.all([loadDayStart(), loadActivity()]);
++      }
++    } catch (err) {
++      setEndDayError(err.message || "Couldn't end your day.");
++    } finally {
++      setEndingDay(false);
++    }
++  };
++
++  const handleAddNote = async () => {
++    const note = noteInput.trim();
++    if (!note) return;
++    setAddingNote(true);
++    try {
++      const { data, error } = await supabase.rpc("add_day_note", { p_note: note });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (!error && result?.success) {
++        setNoteInput("");
++        await loadActivity();
++      }
++    } finally {
++      setAddingNote(false);
++    }
++  };
++
++  const handleCheckIn = async (dealer) => {
++    setCheckInError(null);
++    setCheckingInId(dealer.id);
++    try {
++      const pos = await getCurrentPosition();
++      const { data, error } = await supabase.rpc("start_dealer_visit", {
++        p_dealer_id: dealer.id, p_latitude: pos.latitude, p_longitude: pos.longitude,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setCheckInError(error?.message || result?.message || "Couldn't check in.");
++        setCheckingInId(null);
++      } else {
++        await Promise.all([loadOpenVisit(), loadActivity()]);
++        setCheckingInId(null);
++      }
++    } catch (err) {
++      setCheckInError(err.message || "Couldn't check in.");
++      setCheckingInId(null);
++    }
++  };
++
++  const handleCheckOut = async () => {
++    setCheckOutError(null);
++    if (!boardFile || !shopFile || !cardFile || !videoFile) {
++      setCheckOutError("Board photo, shop photo, card photo, and a short video are all required to check out.");
++      return;
++    }
++    setCheckingOut(true);
++    try {
++      const pos = await getCurrentPosition();
++      const duration = await getVideoDuration(videoFile);
++      if (duration != null && duration > 20) {
++        setCheckOutError(`That video is ${Math.round(duration)}s — please re-record a short ~5 second clip.`);
++        setCheckingOut(false);
++        return;
++      }
++      const dealerId = openVisit.dealer_id;
++      const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
++        uploadVisitMedia(boardFile, { folder: dealerId, kind: "board" }),
++        uploadVisitMedia(shopFile, { folder: dealerId, kind: "shop" }),
++        uploadVisitMedia(cardFile, { folder: dealerId, kind: "card" }),
++        uploadVisitMedia(videoFile, { folder: dealerId, kind: "video" }),
++      ]);
++      const { data, error } = await supabase.rpc("complete_dealer_visit", {
++        p_visit_id: openVisit.visit_id,
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++        p_board_photo_url: boardUrl,
++        p_shop_photo_url: shopUrl,
++        p_card_photo_url: cardUrl,
++        p_video_url: videoUrl,
++        p_notes: checkoutNotes,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setCheckOutError(error?.message || result?.message || "Couldn't check out.");
++      } else {
++        setBoardFile(null); setShopFile(null); setCardFile(null); setVideoFile(null); setCheckoutNotes("");
++        await Promise.all([loadOpenVisit(), loadActivity()]);
++      }
++    } catch (err) {
++      setCheckOutError(err.message || "Couldn't check out.");
++    } finally {
++      setCheckingOut(false);
++    }
++  };
++
++  const dayEnded = !!dayStart?.ended_at;
++  const dayStarted = !!dayStart;
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 0", color: "#fff" }}>
++        <button onClick={() => navigate("/staff/sales")} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
++          ← Dashboard
++        </button>
++
++        <div style={{ display: "flex", gap: 8, marginTop: 6, background: "rgba(255,255,255,0.14)", borderRadius: 12, padding: 4 }}>
++          <div
++            onClick={() => setActiveTab("day")}
++            style={{
++              flex: 1, textAlign: "center", padding: "10px 8px", borderRadius: 9, fontSize: 12.5, fontWeight: 800,
++              cursor: "pointer", userSelect: "none",
++              background: activeTab === "day" ? "#fff" : "transparent",
++              color: activeTab === "day" ? "#7B2D8B" : "#fff",
++              opacity: activeTab === "day" ? 1 : 0.75,
++            }}
++          >
++            🛵 Day
++          </div>
++          <div
++            onClick={() => setActiveTab("checkin")}
++            style={{
++              flex: 1, textAlign: "center", padding: "10px 8px", borderRadius: 9, fontSize: 12.5, fontWeight: 800,
++              cursor: "pointer", userSelect: "none",
++              background: activeTab === "checkin" ? "#fff" : "transparent",
++              color: activeTab === "checkin" ? "#7B2D8B" : "#fff",
++              opacity: activeTab === "checkin" ? 1 : 0.75,
++            }}
++          >
++            {openVisit ? "🔴 Check Out" : "📍 Check In"}
++          </div>
++        </div>
++        <div style={{ height: 20 }} />
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "0 auto", padding: "18px 20px 60px" }}>
++
++        {/* ============ DAY TAB ============ */}
++        {activeTab === "day" && (
++          <>
++            {loadingDayStart ? null : !dayStarted ? (
++              <div style={BOX_STYLE}>
++                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Start your day</div>
++                <div style={{ fontSize: 11.5, color: "#888", lineHeight: 1.5, marginBottom: 12 }}>
++                  Snap a photo of your bike/vehicle's meter reading to start your day. You can do this from anywhere — no location restriction.
++                </div>
++                <div style={{ maxWidth: 140, margin: "0 auto 14px" }}>
++                  <CameraPhotoSlot label="Meter reading" file={meterFile} onChange={setMeterFile} disabled={starting} />
++                </div>
++                <button
++                  onClick={handleStartDay}
++                  disabled={starting}
++                  style={{ width: "100%", padding: 13, border: "none", borderRadius: 10, background: starting ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 800, cursor: starting ? "default" : "pointer" }}
++                >
++                  {starting ? "Starting your day…" : "🛵 Confirm Start Day"}
++                </button>
++                {startError && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: "#d64545" }}>{startError}</div>}
++              </div>
++            ) : (
++              <>
++                <div style={BOX_STYLE}>
++                  <span style={{
++                    display: "inline-block", fontSize: 10.5, fontWeight: 800, borderRadius: 999, padding: "3px 10px",
++                    background: dayEnded ? "#f2f2f2" : "#e6f7ec", color: dayEnded ? "#888" : "#2fa84f",
++                  }}>
++                    {dayEnded ? `⏹ Day ended · ${timeLabel(dayStart.ended_at)}` : `🟢 Day started · ${timeLabel(dayStart.started_at)}`}
++                  </span>
++                  {!dayEnded && (
++                    <>
++                      <button
++                        onClick={handleEndDay}
++                        disabled={endingDay || !!openVisit}
++                        style={{
++                          display: "block", width: "100%", marginTop: 12, padding: 12, borderRadius: 10,
++                          background: "#fff", color: "#c94545", border: "1.5px solid #c94545", fontSize: 13.5, fontWeight: 800,
++                          cursor: endingDay || !!openVisit ? "default" : "pointer", opacity: openVisit ? 0.5 : 1,
++                        }}
++                      >
++                        {endingDay ? "Ending day…" : "🔴 End Day"}
++                      </button>
++                      {openVisit && <div style={{ fontSize: 11, color: "#888", marginTop: 8 }}>Check out at your current dealer before ending the day.</div>}
++                      {endDayError && <div style={{ fontSize: 12, fontWeight: 600, color: "#d64545", marginTop: 8 }}>{endDayError}</div>}
++                    </>
++                  )}
++                </div>
++
++                <div style={BOX_STYLE}>
++                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Day Activity</div>
++                  <div style={{ fontSize: 11.5, color: "#888", lineHeight: 1.5, marginBottom: 10 }}>
++                    A running log of your day — check-ins, check-outs, and anything you add yourself.
++                  </div>
++                  {loadingActivity ? (
++                    <div style={{ fontSize: 12.5, color: "#999" }}>Loading…</div>
++                  ) : activity.length === 0 ? (
++                    <div style={{ fontSize: 12.5, color: "#999" }}>Nothing logged yet today.</div>
++                  ) : (
++                    activity.map((a, i) => (
++                      <div key={i} style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: i < activity.length - 1 ? "1px solid #f2e6f4" : "none" }}>
++                        <div style={{ width: 26, height: 26, borderRadius: "50%", background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
++                          {ACTIVITY_ICON[a.kind] || "•"}
++                        </div>
++                        <div>
++                          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333" }}>{a.description}</div>
++                          <div style={{ fontSize: 10.5, color: "#999", marginTop: 1 }}>{timeLabel(a.occurred_at)}</div>
++                          {a.note && <div style={{ fontSize: 11.5, color: "#666", marginTop: 3 }}>{a.note}</div>}
++                        </div>
++                      </div>
++                    ))
++                  )}
++                  {!dayEnded && (
++                    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
++                      <input
++                        value={noteInput}
++                        onChange={(e) => setNoteInput(e.target.value)}
++                        placeholder="Add a note (e.g. met distributor)…"
++                        style={{ flex: 1, padding: "9px 10px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 12 }}
++                        onKeyDown={(e) => { if (e.key === "Enter") handleAddNote(); }}
++                      />
++                      <button
++                        onClick={handleAddNote}
++                        disabled={addingNote || !noteInput.trim()}
++                        style={{ background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 8, padding: "0 14px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}
++                      >
++                        Add
++                      </button>
++                    </div>
++                  )}
++                </div>
++              </>
++            )}
++          </>
++        )}
++
++        {/* ============ CHECK-IN TAB ============ */}
++        {activeTab === "checkin" && (
++          <>
++            {loadingDayStart || loadingOpenVisit ? null : dayEnded ? (
++              <div style={BOX_STYLE}>
++                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>Your day has ended</div>
++                <div style={{ fontSize: 11.5, color: "#888", lineHeight: 1.5 }}>
++                  You ended your day for today, so you can't check in anywhere else until you start a new day tomorrow.
++                </div>
++              </div>
++            ) : !dayStarted ? (
++              <div style={BOX_STYLE}>
++                <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>Start your day to check in</div>
++                <div style={{ fontSize: 11.5, color: "#888", lineHeight: 1.5, marginBottom: 12 }}>
++                  You haven't started your day yet.
++                </div>
++                <button
++                  onClick={() => setActiveTab("day")}
++                  style={{ width: "100%", padding: 11, border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
++                >
++                  🛵 Go to Start Day
++                </button>
++              </div>
++            ) : openVisit ? (
++              <>
++                <div style={BOX_STYLE}>
++                  <span style={{ fontSize: 10.5, fontWeight: 800, borderRadius: 999, padding: "3px 10px", background: "#fff4e0", color: "#c98400" }}>
++                    🟢 Checked in at {openVisit.dealer_name} · since {timeLabel(openVisit.check_in_at)}
++                  </span>
++                  <div style={{ fontSize: 11.5, color: "#888", marginTop: 10, lineHeight: 1.5 }}>
++                    Complete checkout below — board photo, shop photo, dealer card photo, and a short video, all re-checked against the same 100m geofence.
++                  </div>
++                </div>
++
++                <div style={BOX_STYLE}>
++                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Checkout photos</div>
++                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
++                    <CameraPhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
++                    <CameraPhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
++                    <CameraPhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
++                  </div>
++                  <CameraVideoSlot file={videoFile} onChange={setVideoFile} disabled={checkingOut} />
++                  <textarea
++                    value={checkoutNotes}
++                    onChange={(e) => setCheckoutNotes(e.target.value)}
++                    placeholder="Notes for this visit (optional)"
++                    rows={2}
++                    style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", margin: "12px 0", boxSizing: "border-box" }}
++                  />
++                  <button
++                    onClick={handleCheckOut}
++                    disabled={checkingOut}
++                    style={{ width: "100%", padding: 12, border: "none", borderRadius: 10, background: checkingOut ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 800, cursor: checkingOut ? "default" : "pointer" }}
++                  >
++                    {checkingOut ? "Checking out…" : "✅ Confirm Check Out"}
++                  </button>
++                  {checkOutError && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: "#d64545" }}>{checkOutError}</div>}
++                </div>
++              </>
++            ) : (
++              <>
++                <input
++                  value={search}
++                  onChange={(e) => setSearch(e.target.value)}
++                  placeholder="Search your dealers…"
++                  style={{ width: "100%", padding: "12px 14px", border: "1.5px solid #7B2D8B", borderRadius: 10, fontSize: 13.5, marginBottom: 12, boxSizing: "border-box", background: "#fff" }}
++                />
++                {checkInError && <div style={{ marginBottom: 12, fontSize: 12, fontWeight: 600, color: "#d64545" }}>{checkInError}</div>}
++                <div style={{ fontSize: 11, color: "#7B2D8B", background: "#f8f0f9", borderRadius: 8, padding: "8px 10px", marginBottom: 14, lineHeight: 1.5, fontWeight: 600 }}>
++                  📍 You must be within 100m of a dealer to check in there. Tap a dealer to confirm.
++                </div>
++                <div style={BOX_STYLE}>
++                  {loadingDealers ? (
++                    <div style={{ padding: "12px 4px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++                  ) : dealerError ? (
++                    <div style={{ padding: "12px 4px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load your dealers ({dealerError}).</div>
++                  ) : filteredDealers.length === 0 ? (
++                    <div style={{ padding: "12px 4px", textAlign: "center", fontSize: 13, color: "#999" }}>
++                      {dealers.length === 0 ? "No dealers assigned to you yet." : "No dealers match your search."}
++                    </div>
++                  ) : (
++                    filteredDealers.map((d) => (
++                      <div
++                        key={d.id}
++                        onClick={() => (checkingInId ? null : handleCheckIn(d))}
++                        style={{
++                          display: "flex", alignItems: "center", gap: 12, padding: "12px 4px", borderBottom: "1px solid #f2e6f4",
++                          cursor: checkingInId ? "default" : "pointer", opacity: checkingInId && checkingInId !== d.id ? 0.5 : 1,
++                        }}
++                      >
++                        <div style={{ width: 34, height: 34, borderRadius: 9, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 12, flexShrink: 0 }}>
++                          {initials(d.name)}
++                        </div>
++                        <div style={{ flex: 1, minWidth: 0 }}>
++                          <div style={{ fontSize: 13, fontWeight: 700 }}>{d.name || "Unnamed"}</div>
++                          <div style={{ fontSize: 11, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
++                        </div>
++                        <div style={{ fontSize: 11, fontWeight: 800, color: "#7B2D8B" }}>
++                          {checkingInId === d.id ? "Checking in…" : "Check in ›"}
++                        </div>
++                      </div>
++                    ))
++                  )}
++                </div>
++              </>
++            )}
++          </>
++        )}
++
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index bf1c6c6..4c81b17 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -1,18 +1,20 @@
+ import { useEffect, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+-import { getCurrentPosition, getVideoDuration, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
+-import PhotoSlot from "../../components/staff/PhotoSlot";
++import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
++import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
+ 
+ // Dealer detail screen for Sales staff — reached by tapping a dealer in
+ // "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
+ // before/during a call: contact info, credit terms, recent order history,
+-// and a full check-in/check-out visit workflow (not a simple log button):
+-// check-in requires GPS within 100m of the dealer plus a "duty on" photo;
+-// check-out requires a board photo, a shop-interior photo, a dealer
+-// visiting-card photo, and a short shop video, all re-checked against the
+-// same 100m geofence. A dealer's first-ever check-in sets its saved
+-// location if it doesn't have one yet (profiles.location_lat/lng).
++// and an inline check-in/check-out visit workflow: check-in requires GPS
++// within 100m of the dealer and that the rep has already started their
++// day (see DayCheckIn.jsx) — no photo needed here, that's Start Day's
++// job. Check-out requires a board photo, a shop-interior photo, a dealer
++// visiting-card photo, and a short shop video (all captured live via
++// CameraCapture — no gallery picker, geo-tag burned in), re-checked
++// against the same 100m geofence. A dealer's first-ever check-in sets its
++// saved location if it doesn't have one yet (profiles.location_lat/lng).
+ //
+ // Every RPC here (get_dealer_detail, get_dealer_orders, get_dealer_visits,
+ // get_my_open_visit, start_dealer_visit, complete_dealer_visit) re-checks
+@@ -22,6 +24,7 @@ import PhotoSlot from "../../components/staff/PhotoSlot";
+ 
+ const CARD_STYLE = {
+   background: "#fff",
++  border: "1.5px solid #7B2D8B",
+   borderRadius: 14,
+   padding: "16px 18px",
+   marginBottom: 14,
+@@ -201,16 +204,12 @@ export default function DealerDetail() {
+         return;
+       }
+ 
+-      const [boardTagged, shopTagged, cardTagged] = await Promise.all([
+-        tagPhoto(boardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Board" }),
+-        tagPhoto(shopFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Interior" }),
+-        tagPhoto(cardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Dealer Card" }),
+-      ]);
+-
++      // Each file is already geo-tagged — CameraPhotoSlot burns the tag in
++      // at capture time — so this just uploads them straight through.
+       const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
+-        uploadVisitMedia(boardTagged, { folder: id, kind: "board" }),
+-        uploadVisitMedia(shopTagged, { folder: id, kind: "shop" }),
+-        uploadVisitMedia(cardTagged, { folder: id, kind: "card" }),
++        uploadVisitMedia(boardFile, { folder: id, kind: "board" }),
++        uploadVisitMedia(shopFile, { folder: id, kind: "shop" }),
++        uploadVisitMedia(cardFile, { folder: id, kind: "card" }),
+         uploadVisitMedia(videoFile, { folder: id, kind: "video" }),
+       ]);
+ 
+@@ -372,26 +371,12 @@ export default function DealerDetail() {
+                 🟢 Checked in since {formatTime(openVisit.check_in_at)} — complete check-out below.
+               </div>
+               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+-                <PhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
+-                <PhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
+-                <PhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
++                <CameraPhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
++                <CameraPhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
++                <CameraPhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
+               </div>
+               <div style={{ marginBottom: 12 }}>
+-                <label style={{
+-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+-                  border: videoFile ? "2px solid #2fa84f" : "1.5px dashed #ccc", borderRadius: 8,
+-                  padding: "10px", fontSize: 12.5, fontWeight: 700, color: videoFile ? "#2fa84f" : "#888", cursor: "pointer",
+-                }}>
+-                  {videoFile ? `✓ Video selected (${videoFile.name})` : "🎥 Record ~5s video of shop interior"}
+-                  <input
+-                    type="file"
+-                    accept="video/*"
+-                    capture="environment"
+-                    disabled={checkingOut}
+-                    onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+-                    style={{ display: "none" }}
+-                  />
+-                </label>
++                <CameraVideoSlot file={videoFile} onChange={setVideoFile} disabled={checkingOut} />
+               </div>
+               <textarea
+                 value={checkoutNotes}
+@@ -419,13 +404,17 @@ export default function DealerDetail() {
+             </>
+           ) : loadingDayStart ? (
+             <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
++          ) : dayStart?.ended_at ? (
++            <div style={{ fontSize: 12.5, color: "#888", fontWeight: 600, background: "#f2f2f2", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>
++              Your day has ended — you can't check in anywhere else until you start a new day tomorrow.
++            </div>
+           ) : !dayStart ? (
+             <div>
+               <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+                 You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
+               </div>
+               <button
+-                onClick={() => navigate("/staff/sales/start-day")}
++                onClick={() => navigate("/staff/sales/day-checkin")}
+                 style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+               >
+                 🛵 Start Day
+@@ -457,7 +446,7 @@ export default function DealerDetail() {
+         </div>
+ 
+         <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Recent Visits</div>
+-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {visits.length === 0 ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No visits logged yet.</div>
+           ) : (
+@@ -495,7 +484,7 @@ export default function DealerDetail() {
+         </div>
+ 
+         <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Order History</div>
+-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+           {orders.length === 0 ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No orders yet.</div>
+           ) : (
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 562e551..6ac4392 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -29,6 +29,7 @@ function initials(name) {
+ 
+ const CARD_STYLE = {
+   background: "#fff",
++  border: "1.5px solid #7B2D8B",
+   borderRadius: 14,
+   padding: "16px 18px",
+   marginBottom: 14,
+@@ -105,7 +106,7 @@ function FeatureTile({ icon, title, onClick }) {
+     <div
+       onClick={onClick}
+       style={{
+-        background: "#fff", borderRadius: 14, padding: "16px 8px", textAlign: "center",
++        background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "16px 8px", textAlign: "center",
+         boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative",
+       }}
+     >
+@@ -231,11 +232,12 @@ export default function SalesDashboard() {
+             keeping it out of the white content area below (which uses a
+             negative top-margin to float its stat cards over the header's
+             bottom edge) avoids the purple-on-purple seam a gradient button
+-            created there before. */}
++            created there before. Everything here routes into the combined
++            Day / Check In screen — its own tabs handle the rest. */}
+         <div style={{ marginTop: 20 }}>
+           {!loadingOpenVisit && openVisit && (
+             <div
+-              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++              onClick={() => navigate("/staff/sales/day-checkin")}
+               style={{
+                 background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
+                 fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
+@@ -249,7 +251,7 @@ export default function SalesDashboard() {
+ 
+           {!loadingOpenVisit && !openVisit && !loadingDayStart && !dayStart && (
+             <button
+-              onClick={() => navigate("/staff/sales/start-day")}
++              onClick={() => navigate("/staff/sales/day-checkin")}
+               style={{
+                 width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                 background: "#fff", border: "none", borderRadius: 14,
+@@ -261,9 +263,9 @@ export default function SalesDashboard() {
+             </button>
+           )}
+ 
+-          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && (
++          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && !dayStart.ended_at && (
+             <button
+-              onClick={() => navigate("/staff/sales/check-in")}
++              onClick={() => navigate("/staff/sales/day-checkin")}
+               style={{
+                 width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                 background: "#fff", border: "none", borderRadius: 14,
+@@ -274,6 +276,20 @@ export default function SalesDashboard() {
+               <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
+             </button>
+           )}
++
++          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart?.ended_at && (
++            <button
++              onClick={() => navigate("/staff/sales/day-checkin")}
++              style={{
++                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
++                background: "#fff", border: "none", borderRadius: 14,
++                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
++                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
++              }}
++            >
++              <span style={{ fontSize: 20 }}>✅</span> Day ended — view summary
++            </button>
++          )}
+         </div>
+       </div>
+ 
+@@ -284,7 +300,7 @@ export default function SalesDashboard() {
+         </div>
+ 
+         <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
+-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingDealers ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+           ) : dealerError ? (
+@@ -301,7 +317,7 @@ export default function SalesDashboard() {
+         </div>
+ 
+         <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
+-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingVisits ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+           ) : visits.length === 0 ? (
+diff --git a/src/screens/staff/StartDay.jsx b/src/screens/staff/StartDay.jsx
+deleted file mode 100644
+index f1c1fbf..0000000
+--- a/src/screens/staff/StartDay.jsx
++++ /dev/null
+@@ -1,121 +0,0 @@
+-import { useEffect, useState } from "react";
+-import { useNavigate } from "react-router-dom";
+-import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+-import { getCurrentPosition, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
+-import PhotoSlot from "../../components/staff/PhotoSlot";
+-
+-// "Start Day" — separate from checking in at a shop. A rep can start their
+-// day anywhere (no geofence): home, office, on the road. The only
+-// requirement is a photo of their bike/vehicle's meter (odometer) reading.
+-// Once the day is started, they're free to go check in at their first shop.
+-// One start per (IST) calendar day — see supabase/migrations/
+-// sales_start_day.sql. If today's day is already started, this screen
+-// just forwards straight to Check In.
+-
+-export default function StartDay() {
+-  const navigate = useNavigate();
+-
+-  const [checking, setChecking] = useState(true);
+-  const [meterFile, setMeterFile] = useState(null);
+-  const [starting, setStarting] = useState(false);
+-  const [status, setStatus] = useState(null);
+-
+-  useEffect(() => {
+-    if (!isSupabaseConfigured) { setChecking(false); return; }
+-    let cancelled = false;
+-    supabase.rpc("get_my_day_start").then(({ data, error }) => {
+-      if (cancelled) return;
+-      const row = Array.isArray(data) ? data[0] : data;
+-      if (!error && row) {
+-        // Already started today — nothing to do here, move on to Check In.
+-        navigate("/staff/sales/check-in", { replace: true });
+-        return;
+-      }
+-      setChecking(false);
+-    });
+-    return () => { cancelled = true; };
+-  }, [navigate]);
+-
+-  const handleStartDay = async () => {
+-    setStatus(null);
+-    if (!meterFile) {
+-      setStatus({ type: "error", message: "Take a photo of your bike/vehicle meter reading first." });
+-      return;
+-    }
+-    setStarting(true);
+-    try {
+-      const pos = await getCurrentPosition();
+-      const tagged = await tagPhoto(meterFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Day Start" });
+-      const url = await uploadVisitMedia(tagged, { folder: "day-start", kind: "meter" });
+-      const { data, error } = await supabase.rpc("start_day", {
+-        p_latitude: pos.latitude,
+-        p_longitude: pos.longitude,
+-        p_meter_photo_url: url,
+-      });
+-      const result = Array.isArray(data) ? data[0] : data;
+-      if (error || !result?.success) {
+-        setStatus({ type: "error", message: error?.message || result?.message || "Couldn't start your day." });
+-        setStarting(false);
+-      } else {
+-        navigate("/staff/sales/check-in");
+-      }
+-    } catch (err) {
+-      setStatus({ type: "error", message: err.message || "Couldn't start your day." });
+-      setStarting(false);
+-    }
+-  };
+-
+-  if (checking) {
+-    return (
+-      <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
+-        Loading…
+-      </div>
+-    );
+-  }
+-
+-  return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+-      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 34px", color: "#fff" }}>
+-        <button
+-          onClick={() => navigate(-1)}
+-          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}
+-        >
+-          ← Back
+-        </button>
+-        <div style={{ fontSize: 20, fontWeight: 800 }}>🛵 Start Day</div>
+-        <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>
+-          You can start your day from anywhere — just snap your bike/vehicle's meter reading.
+-        </div>
+-      </div>
+-
+-      <div style={{ maxWidth: 560, margin: "-18px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", padding: "20px 18px" }}>
+-          <div style={{ fontSize: 11.5, color: "#999", marginBottom: 14, lineHeight: 1.5 }}>
+-            This confirms you're on duty for the day. No location restriction here — check-in at shops is geofenced separately.
+-          </div>
+-
+-          <div style={{ maxWidth: 140, margin: "0 auto 18px" }}>
+-            <PhotoSlot label="Meter reading" file={meterFile} onChange={setMeterFile} disabled={starting} />
+-          </div>
+-
+-          <button
+-            onClick={handleStartDay}
+-            disabled={starting}
+-            style={{
+-              width: "100%", padding: "12px", border: "none", borderRadius: 10,
+-              background: starting ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 700,
+-              cursor: starting ? "default" : "pointer",
+-            }}
+-          >
+-            {starting ? "Starting your day…" : "🛵 Confirm Start Day"}
+-          </button>
+-          {status && (
+-            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: status.type === "success" ? "#2fa84f" : "#d64545" }}>
+-              {status.message}
+-            </div>
+-          )}
+-        </div>
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/src/utils/visitMedia.js b/src/utils/visitMedia.js
+index 68bb105..4f3c426 100644
+--- a/src/utils/visitMedia.js
++++ b/src/utils/visitMedia.js
+@@ -1,15 +1,13 @@
+-// Helpers for the Sales check-in/check-out visit flow: GPS capture,
+-// burning a geo-tag onto a captured photo (canvas overlay — more reliable
+-// than relying on EXIF, which mobile browsers frequently strip), and
+-// uploading the result to the "visit-media" Storage bucket.
++// Helpers for the Sales check-in/check-out visit flow: GPS capture and
++// uploading captured media to the "visit-media" Storage bucket.
+ //
+-// Photos/video are captured via <input type="file" accept="image/*"
+-// capture="environment"> (and accept="video/*" for the clip) rather than a
+-// custom getUserMedia/MediaRecorder pipeline — simpler and far more
+-// reliable across mobile browsers, especially iOS Safari. This also means
+-// there's no way to hard-cap the video at exactly 5 seconds; the UI guides
+-// the rep to keep it short and does a soft (non-blocking) duration check
+-// instead of rejecting longer clips outright.
++// Photos and video are captured live via getUserMedia (see
++// components/staff/CameraCapture.jsx) rather than a file/gallery picker —
++// there's no way to substitute an old or fake photo, since capture and
++// the geo-tag/timestamp burn-in both happen at the moment of shooting.
++// There's also no way to hard-cap the video at exactly 5 seconds; the UI
++// guides the rep to keep it short and does a soft (non-blocking) duration
++// check instead of rejecting longer clips outright.
+ 
+ import { supabase } from "../lib/supabase";
+ 
+@@ -36,68 +34,6 @@ export function getCurrentPosition({ timeout = 10000 } = {}) {
+   });
+ }
+ 
+-function loadImage(file) {
+-  return new Promise((resolve, reject) => {
+-    const img = new Image();
+-    const url = URL.createObjectURL(file);
+-    img.onload = () => { resolve(img); };
+-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that photo.")); };
+-    img.src = url;
+-  });
+-}
+-
+-// Draws the captured photo onto a canvas (downscaled if very large, to
+-// keep uploads reasonable) with a geo-tag bar burned onto the bottom:
+-// lat/long, timestamp, and an optional label (e.g. "Duty On", "Shop
+-// Board"). Returns a Promise<Blob> (image/jpeg).
+-export async function tagPhoto(file, { latitude, longitude, label } = {}) {
+-  const img = await loadImage(file);
+-  const MAX_DIM = 1600;
+-  let { width, height } = img;
+-  if (width > MAX_DIM || height > MAX_DIM) {
+-    const scale = MAX_DIM / Math.max(width, height);
+-    width = Math.round(width * scale);
+-    height = Math.round(height * scale);
+-  }
+-
+-  const canvas = document.createElement("canvas");
+-  canvas.width = width;
+-  canvas.height = height;
+-  const ctx = canvas.getContext("2d");
+-  ctx.drawImage(img, 0, 0, width, height);
+-  URL.revokeObjectURL(img.src);
+-
+-  const barHeight = Math.max(46, Math.round(height * 0.09));
+-  ctx.fillStyle = "rgba(0,0,0,0.55)";
+-  ctx.fillRect(0, height - barHeight, width, barHeight);
+-
+-  const pad = Math.round(barHeight * 0.18);
+-  const line1FontSize = Math.max(11, Math.round(barHeight * 0.32));
+-  const line2FontSize = Math.max(9, Math.round(barHeight * 0.24));
+-  ctx.fillStyle = "#fff";
+-  ctx.textBaseline = "top";
+-
+-  const timestamp = new Date().toLocaleString("en-IN", {
+-    day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
+-  });
+-  const coordsText = latitude != null && longitude != null
+-    ? `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`
+-    : "Location unavailable";
+-
+-  ctx.font = `700 ${line1FontSize}px Arial, sans-serif`;
+-  ctx.fillText(label ? `${label} · ${coordsText}` : coordsText, pad, height - barHeight + pad);
+-  ctx.font = `400 ${line2FontSize}px Arial, sans-serif`;
+-  ctx.fillText(timestamp, pad, height - barHeight + pad + line1FontSize + 4);
+-
+-  return new Promise((resolve, reject) => {
+-    canvas.toBlob(
+-      (blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that photo."))),
+-      "image/jpeg",
+-      0.86
+-    );
+-  });
+-}
+-
+ // Uploads a Blob/File to the visit-media bucket under a per-folder path and
+ // returns its public URL. `folder` scopes the path — a dealer id for
+ // shop check-in/out media, or a fixed folder like "day-start" for the
+diff --git a/supabase/migrations/sales_day_end_and_activity.sql b/supabase/migrations/sales_day_end_and_activity.sql
+new file mode 100644
+index 0000000..d528285
+--- /dev/null
++++ b/supabase/migrations/sales_day_end_and_activity.sql
+@@ -0,0 +1,376 @@
++-- sales_day_end_and_activity.sql
++--
++-- Builds out the Day / Check-In split approved in the mockup:
++--   - A day can be explicitly ended (sales_day_starts.ended_at). Once
++--     ended, no more check-ins are allowed until a new day is started
++--     tomorrow — closes the attendance-confusion gap where a check-in
++--     could still be logged after the rep had "ended" their day.
++--   - A day can't be ended while a visit is still open — must check out
++--     first, otherwise that visit would hang open forever.
++--   - A running "Day Activity" log — day start/end, check-ins/outs, and
++--     free-text notes the rep adds themselves — all scoped to today
++--     (IST) and the caller.
++--
++-- Run in Supabase SQL Editor, after sales_start_day.sql.
++
++-- ── 1. sales_day_starts gains an end time ───────────────────────────────
++
++alter table public.sales_day_starts add column if not exists ended_at timestamptz;
++
++-- ── 2. sales_day_notes — free-text entries a rep adds to their own day ──
++
++create table if not exists public.sales_day_notes (
++  id          uuid primary key default gen_random_uuid(),
++  staff_email text not null references public.staff_profiles(email) on delete cascade,
++  work_date   date not null,
++  note        text not null,
++  created_at  timestamptz not null default now()
++);
++
++alter table public.sales_day_notes enable row level security;
++-- No policies — SECURITY DEFINER functions only, same pattern as sales_visits.
++
++-- ── 3. get_my_day_start() — widen to include ended_at ───────────────────
++-- Return shape is changing, so the old version must be dropped first.
++
++drop function if exists public.get_my_day_start();
++
++create or replace function public.get_my_day_start()
++returns table (
++  id              uuid,
++  work_date       date,
++  started_at      timestamptz,
++  ended_at        timestamptz,
++  latitude        numeric,
++  longitude       numeric,
++  meter_photo_url text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  return query
++    select sds.id, sds.work_date, sds.started_at, sds.ended_at, sds.latitude, sds.longitude, sds.meter_photo_url
++    from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++    limit 1;
++end;
++$$;
++
++grant execute on function public.get_my_day_start() to authenticated;
++
++-- ── 4. end_day() — blocked by an open visit ─────────────────────────────
++
++create or replace function public.end_day()
++returns table (success boolean, message text)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++  v_day_id uuid;
++  v_open_visit_id uuid;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  select sds.id into v_day_id
++  from public.sales_day_starts sds
++  where sds.staff_email = v_email and sds.work_date = v_today;
++
++  if v_day_id is null then
++    return query select false, 'you have not started your day yet'::text;
++    return;
++  end if;
++
++  select sv.id into v_open_visit_id
++  from public.sales_visits sv
++  where sv.staff_email = v_email and sv.status = 'open'
++  limit 1;
++
++  if v_open_visit_id is not null then
++    return query select false, 'check out at your current dealer before ending the day'::text;
++    return;
++  end if;
++
++  update public.sales_day_starts
++  set ended_at = now()
++  where id = v_day_id and ended_at is null;
++
++  return query select true, 'day ended'::text;
++end;
++$$;
++
++grant execute on function public.end_day() to authenticated;
++
++-- ── 5. add_day_note() — a rep's own free-text activity entry ────────────
++
++create or replace function public.add_day_note(p_note text)
++returns table (success boolean, message text)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text;
++    return;
++  end if;
++
++  if p_note is null or length(trim(p_note)) = 0 then
++    return query select false, 'note cannot be empty'::text;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  if not exists (
++    select 1 from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++  ) then
++    return query select false, 'start your day first'::text;
++    return;
++  end if;
++
++  insert into public.sales_day_notes (staff_email, work_date, note)
++  values (v_email, v_today, trim(p_note));
++
++  return query select true, 'note added'::text;
++end;
++$$;
++
++grant execute on function public.add_day_note(text) to authenticated;
++
++-- ── 6. get_my_day_activity() — the unified timeline for today ───────────
++
++create or replace function public.get_my_day_activity()
++returns table (
++  kind        text,
++  description text,
++  note        text,
++  occurred_at timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_today date;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  return query
++    select 'start'::text, 'Day started'::text, null::text, sds.started_at
++    from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++
++    union all
++
++    select 'end'::text, 'Day ended'::text, null::text, sds.ended_at
++    from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today and sds.ended_at is not null
++
++    union all
++
++    select
++      'checkin'::text,
++      'Checked in at ' || coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name, 'dealer'),
++      null::text,
++      sv.check_in_at
++    from public.sales_visits sv
++    join public.profiles p on p.id = sv.dealer_id
++    where sv.staff_email = v_email
++      and sv.check_in_at is not null
++      and (sv.check_in_at at time zone 'Asia/Kolkata')::date = v_today
++
++    union all
++
++    select
++      'checkout'::text,
++      'Checked out from ' || coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name, 'dealer'),
++      sv.notes,
++      sv.check_out_at
++    from public.sales_visits sv
++    join public.profiles p on p.id = sv.dealer_id
++    where sv.staff_email = v_email
++      and sv.check_out_at is not null
++      and (sv.check_out_at at time zone 'Asia/Kolkata')::date = v_today
++
++    union all
++
++    select 'note'::text, 'Note added'::text, sdn.note, sdn.created_at
++    from public.sales_day_notes sdn
++    where sdn.staff_email = v_email and sdn.work_date = v_today
++
++    order by 4 asc;
++end;
++$$;
++
++grant execute on function public.get_my_day_activity() to authenticated;
++
++-- ── 7. start_dealer_visit() — also block once the day has ended ─────────
++-- Same signature as before (uuid, numeric, numeric), so CREATE OR REPLACE
++-- can just swap the body — no drop needed this time.
++
++create or replace function public.start_dealer_visit(
++  p_dealer_id uuid,
++  p_latitude numeric,
++  p_longitude numeric
++)
++returns table (success boolean, message text, visit_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++  v_today date;
++  v_day_ended timestamptz;
++  v_dealer_lat double precision;
++  v_dealer_lng double precision;
++  v_distance double precision;
++  v_open_id uuid;
++  v_open_dealer_id uuid;
++  v_new_id uuid;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to check in'::text, null::uuid;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  select sds.ended_at into v_day_ended
++  from public.sales_day_starts sds
++  where sds.staff_email = v_email and sds.work_date = v_today;
++
++  if v_day_ended is not null then
++    return query select false, 'your day has ended — start a new day tomorrow'::text, null::uuid;
++    return;
++  end if;
++
++  if not exists (
++    select 1 from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++  ) then
++    return query select false, 'start your day first'::text, null::uuid;
++    return;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return query select false, 'dealer not in your assigned list'::text, null::uuid;
++    return;
++  end if;
++
++  -- Only one open visit per rep at a time.
++  select sv.id, sv.dealer_id into v_open_id, v_open_dealer_id
++  from public.sales_visits sv
++  where sv.staff_email = v_email and sv.status = 'open'
++  limit 1;
++
++  if v_open_id is not null then
++    if v_open_dealer_id = p_dealer_id then
++      return query select true, 'already checked in'::text, v_open_id;
++      return;
++    else
++      return query select false, 'you are already checked in at another dealer — check out there first'::text, null::uuid;
++      return;
++    end if;
++  end if;
++
++  select p.location_lat, p.location_lng into v_dealer_lat, v_dealer_lng
++  from public.profiles p where p.id = p_dealer_id;
++
++  if v_dealer_lat is null or v_dealer_lng is null then
++    -- First-ever check-in for this dealer sets its location.
++    update public.profiles
++    set location_lat = p_latitude, location_lng = p_longitude
++    where id = p_dealer_id;
++  else
++    v_distance := public._haversine_meters(v_dealer_lat, v_dealer_lng, p_latitude::double precision, p_longitude::double precision);
++    if v_distance > 100 then
++      return query select false,
++        format('you are about %s m from this dealer — you must be within 100m to check in', round(v_distance)::int)::text,
++        null::uuid;
++      return;
++    end if;
++  end if;
++
++  insert into public.sales_visits (
++    dealer_id, staff_email, status,
++    check_in_at, check_in_lat, check_in_lng,
++    visited_at, latitude, longitude
++  )
++  values (
++    p_dealer_id, v_email, 'open',
++    now(), p_latitude, p_longitude,
++    now(), p_latitude, p_longitude
++  )
++  returning id into v_new_id;
++
++  return query select true, 'checked in'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.start_dealer_visit(uuid, numeric, numeric) to authenticated;
+-- 
+2.43.0
+
