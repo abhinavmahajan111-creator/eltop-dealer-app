@@ -1,0 +1,572 @@
+From 51d3e32e6a9e4374f5e67454fd9c1c1d79085dee Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 06:10:36 +0000
+Subject: [PATCH] Add dealer detail screen for Sales staff (contact, credit,
+ order history)
+
+Tapping a dealer in "My Dealers / Parties" now opens a real detail
+screen so a rep can pull up everything needed before or during a call:
+
+- get_dealer_detail() RPC: contact info (phone/email/address/GSTIN),
+  credit limit + live outstanding (same ledger calc as
+  get_my_dealers()), discount terms with net-rate calc, territory tags.
+- get_dealer_orders() RPC: recent order history (status, amount, date).
+- Both re-check the caller's role-based scope server-side (same rules
+  as get_my_dealers()) before returning anything, so a rep can't view
+  a dealer outside their own list by guessing its id.
+- New DealerDetail.jsx screen at /staff/sales/dealer/:id, with
+  tap-to-call/email links and a credit-used progress bar.
+
+Also includes sales_dealer_assignment_fix.sql (already applied
+directly in Supabase earlier) for the repo's migration history to
+match what's actually live.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                                   |   2 +
+ src/screens/staff/DealerDetail.jsx            | 209 ++++++++++++++++++
+ src/screens/staff/SalesDashboard.jsx          |  10 +-
+ supabase/migrations/get_dealer_detail.sql     | 169 ++++++++++++++
+ .../sales_dealer_assignment_fix.sql           |  80 +++++++
+ 5 files changed, 467 insertions(+), 3 deletions(-)
+ create mode 100644 src/screens/staff/DealerDetail.jsx
+ create mode 100644 supabase/migrations/get_dealer_detail.sql
+ create mode 100644 supabase/migrations/sales_dealer_assignment_fix.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 6041803..ba92c7d 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -23,6 +23,7 @@ import Schemes from "./screens/Schemes";
+ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
++import DealerDetail from "./screens/staff/DealerDetail";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+ import AdminOrders from "./admin/AdminOrders";
+@@ -102,6 +103,7 @@ export default function App() {
+       <Route element={<StaffRoute />}>
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
++        <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+         <Route path="/staff/dispatch" element={<StaffHome />} />
+         <Route path="/staff/logistics" element={<StaffHome />} />
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+new file mode 100644
+index 0000000..a7d3b3b
+--- /dev/null
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -0,0 +1,209 @@
++import { useEffect, useState } from "react";
++import { useNavigate, useParams } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++
++// Dealer detail screen for Sales staff — reached by tapping a dealer in
++// "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
++// before/during a call: contact info, credit terms, and recent order
++// history, all in one place. Both RPCs (get_dealer_detail,
++// get_dealer_orders) re-check that this dealer is within the caller's own
++// scope server-side — a rep can't view another rep's dealer just by
++// knowing/guessing its id.
++
++const CARD_STYLE = {
++  background: "#fff",
++  borderRadius: 14,
++  padding: "16px 18px",
++  marginBottom: 14,
++  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
++};
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++function formatDate(iso) {
++  if (!iso) return "";
++  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
++}
++
++function StatusBadge({ status }) {
++  const label = (status || "unknown").replace(/_/g, " ");
++  const colors = {
++    delivered: { bg: "#e6f7ec", fg: "#2fa84f" },
++    dispatched: { bg: "#e6f0fb", fg: "#3564c9" },
++    out_for_delivery: { bg: "#e6f0fb", fg: "#3564c9" },
++    confirmed: { bg: "#fff4e0", fg: "#c98400" },
++    pending: { bg: "#f3f3f3", fg: "#888" },
++    cancelled: { bg: "#fdeaea", fg: "#d64545" },
++  };
++  const c = colors[status] || { bg: "#f3f3f3", fg: "#888" };
++  return (
++    <span style={{
++      fontSize: 10.5, fontWeight: 700, textTransform: "capitalize",
++      background: c.bg, color: c.fg, borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap",
++    }}>
++      {label}
++    </span>
++  );
++}
++
++export default function DealerDetail() {
++  const { id } = useParams();
++  const navigate = useNavigate();
++
++  const [dealer, setDealer] = useState(null);
++  const [orders, setOrders] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured || !id) { setLoading(false); return; }
++    let cancelled = false;
++    Promise.all([
++      supabase.rpc("get_dealer_detail", { p_dealer_id: id }),
++      supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
++    ]).then(([detailRes, ordersRes]) => {
++      if (cancelled) return;
++      if (detailRes.error) {
++        setError(detailRes.error.message);
++      } else {
++        const row = Array.isArray(detailRes.data) ? detailRes.data[0] : detailRes.data;
++        if (!row) {
++          setError("This dealer isn't in your assigned list.");
++        } else {
++          setDealer(row);
++        }
++      }
++      if (!ordersRes.error) setOrders(ordersRes.data || []);
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, [id]);
++
++  if (loading) {
++    return (
++      <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
++        Loading…
++      </div>
++    );
++  }
++
++  if (error || !dealer) {
++    return (
++      <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++        <div style={{ padding: "18px 24px" }}>
++          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
++            ← Back
++          </button>
++        </div>
++        <div style={{ textAlign: "center", padding: "60px 24px", color: "#999", fontSize: 13.5 }}>
++          {error || "Dealer not found."}
++        </div>
++      </div>
++    );
++  }
++
++  const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
++  const creditLimit = Number(dealer.credit_limit || 0);
++  const outstanding = Number(dealer.outstanding || 0);
++  const usedPct = creditLimit > 0 ? Math.min(100, Math.round((outstanding / creditLimit) * 100)) : null;
++  const netRate = (dealer.discount1 || dealer.discount2)
++    ? ((1 - (dealer.discount1 || 0) / 100) * (1 - (dealer.discount2 || 0) / 100) * 100).toFixed(2)
++    : null;
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 40px", color: "#fff" }}>
++        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 16 }}>
++          ← Back
++        </button>
++        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
++          <div style={{
++            width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
++            border: "2px solid rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
++            fontSize: 19, fontWeight: 800, color: "#fff", flexShrink: 0,
++          }}>
++            {initials(dealer.name)}
++          </div>
++          <div>
++            <div style={{ fontSize: 20, fontWeight: 800 }}>{dealer.name}</div>
++            <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>{dealer.dealer_code || "—"}</div>
++          </div>
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "-20px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        <div style={CARD_STYLE}>
++          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
++            <span>Outstanding</span>
++            <span style={{ color: outstanding > 0 ? "#d64545" : "#2fa84f" }}>₹{outstanding.toLocaleString("en-IN")}</span>
++          </div>
++          {creditLimit > 0 && (
++            <>
++              <div style={{ height: 8, background: "#f0eaf2", borderRadius: 999, overflow: "hidden" }}>
++                <div style={{ height: "100%", width: `${usedPct}%`, background: usedPct >= 90 ? "#d64545" : "linear-gradient(90deg, #7B2D8B, #c65fd3)", borderRadius: 999 }} />
++              </div>
++              <div style={{ fontSize: 11.5, color: "#999", marginTop: 6 }}>
++                {usedPct}% of ₹{creditLimit.toLocaleString("en-IN")} credit limit used
++              </div>
++            </>
++          )}
++          {netRate && (
++            <div style={{ marginTop: 10, fontSize: 12, color: "#7B2D8B", fontWeight: 700, background: "#f8f4f8", borderRadius: 8, padding: "8px 12px" }}>
++              Net Rate = DLP × {netRate}% (Disc. {dealer.discount1 || 0}% + {dealer.discount2 || 0}%)
++            </div>
++          )}
++        </div>
++
++        <div style={CARD_STYLE}>
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Contact</div>
++          {dealer.phone && (
++            <a href={`tel:${dealer.phone}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
++              📞 {dealer.phone}{dealer.phone2 ? ` / ${dealer.phone2}` : ""}
++            </a>
++          )}
++          {dealer.email && (
++            <a href={`mailto:${dealer.email}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
++              ✉️ {dealer.email}
++            </a>
++          )}
++          {dealer.address && (
++            <div style={{ fontSize: 13.5, color: "#666", lineHeight: 1.5 }}>📍 {dealer.address}</div>
++          )}
++          {dealer.gstin && (
++            <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>GSTIN: {dealer.gstin}</div>
++          )}
++          {territories.length > 0 && (
++            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
++              {territories.map((t) => (
++                <span key={t} style={{ fontSize: 11, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6", borderRadius: 999, padding: "3px 10px" }}>{t}</span>
++              ))}
++            </div>
++          )}
++          {!dealer.phone && !dealer.email && !dealer.address && (
++            <div style={{ fontSize: 12.5, color: "#aaa" }}>No contact details on file yet.</div>
++          )}
++        </div>
++
++        <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Order History</div>
++        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++          {orders.length === 0 ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No orders yet.</div>
++          ) : (
++            orders.map((o) => (
++              <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
++                <div>
++                  <div style={{ fontSize: 13, fontWeight: 700 }}>₹{Number(o.total || 0).toLocaleString("en-IN")}</div>
++                  <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{formatDate(o.created_at)}</div>
++                </div>
++                <StatusBadge status={o.status} />
++              </div>
++            ))
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 77d6801..ca01f3c 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -42,10 +42,13 @@ function StatCard({ icon, value, label }) {
+   );
+ }
+ 
+-function DealerRow({ dealer }) {
++function DealerRow({ dealer, onClick }) {
+   const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
+   return (
+-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
++    <div
++      onClick={onClick}
++      style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
++    >
+       <div style={{
+         width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
+         display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
+@@ -61,6 +64,7 @@ function DealerRow({ dealer }) {
+       <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
+         ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
+       </div>
++      <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
+     </div>
+   );
+ }
+@@ -185,7 +189,7 @@ export default function SalesDashboard() {
+               No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
+             </div>
+           ) : (
+-            dealers.map((d) => <DealerRow key={d.id} dealer={d} />)
++            dealers.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => navigate(`/staff/sales/dealer/${d.id}`)} />)
+           )}
+         </div>
+ 
+diff --git a/supabase/migrations/get_dealer_detail.sql b/supabase/migrations/get_dealer_detail.sql
+new file mode 100644
+index 0000000..e60c947
+--- /dev/null
++++ b/supabase/migrations/get_dealer_detail.sql
+@@ -0,0 +1,169 @@
++-- get_dealer_detail.sql
++--
++-- Powers a dealer detail screen for Sales staff: contact info, credit/
++-- discount terms, and recent order history — so a rep can pull up
++-- everything they need before or during a call with a dealer, without
++-- leaving the Sales dashboard.
++--
++-- SECURITY DEFINER, same pattern as get_my_dealers() and
++-- claim_staff_profile(): reuses the exact same role-based visibility
++-- rules as get_my_dealers() (own dealers / own + direct reports' /
++-- whole Sales department) so a rep can't view a dealer outside their
++-- own scope just by knowing its id — every call is re-checked here,
++-- not just filtered in the list.
++--
++-- Run in Supabase SQL Editor.
++
++create or replace function public.get_dealer_detail(p_dealer_id uuid)
++returns table (
++  id            uuid,
++  name          text,
++  dealer_code   text,
++  phone         text,
++  phone2        text,
++  email         text,
++  address       text,
++  shop_address  text,
++  gstin         text,
++  territory     jsonb,
++  credit_limit  numeric,
++  discount1     numeric,
++  discount2     numeric,
++  outstanding   numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return; -- not a recognized staff member
++  end if;
++
++  -- Same scoping as get_my_dealers(): confirm this dealer is actually
++  -- within the caller's own visibility before returning anything.
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select email from public.staff_profiles where reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select email from public.staff_profiles where department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return; -- outside this rep's scope; return nothing rather than error
++  end if;
++
++  return query
++    select
++      p.id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as name,
++      p.dealer_code,
++      p.phone,
++      p.phone2,
++      p.email,
++      coalesce(nullif(p.shop_address, ''), p.address) as address,
++      p.shop_address,
++      p.gstin,
++      to_jsonb(p.territory) as territory,
++      p.credit_limit,
++      p.discount1,
++      p.discount2,
++      coalesce(led.balance, 0) as outstanding
++    from public.profiles p
++    left join (
++      select dealer_id,
++        sum(case
++              when type = 'order' or (type = 'journal' and dr_dealer) then amount
++              when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
++              else 0
++            end) as balance
++      from public.dealer_ledger
++      where dealer_id = p_dealer_id
++      group by dealer_id
++    ) led on led.dealer_id = p.id
++    where p.id = p_dealer_id;
++end;
++$$;
++
++grant execute on function public.get_dealer_detail(uuid) to authenticated;
++
++-- get_dealer_orders(): recent order history for the same dealer, same
++-- scope check, kept as a separate function so the detail screen can
++-- load contact/credit info and order history independently.
++create or replace function public.get_dealer_orders(p_dealer_id uuid, p_limit int default 20)
++returns table (
++  id         uuid,
++  status     text,
++  total      numeric,
++  created_at timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select email from public.staff_profiles where reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select email from public.staff_profiles where department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return;
++  end if;
++
++  return query
++    select o.id, o.status, o.total, o.created_at
++    from public.orders o
++    where o.dealer_id = p_dealer_id
++    order by o.created_at desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_dealer_orders(uuid, int) to authenticated;
+diff --git a/supabase/migrations/sales_dealer_assignment_fix.sql b/supabase/migrations/sales_dealer_assignment_fix.sql
+new file mode 100644
+index 0000000..8772df1
+--- /dev/null
++++ b/supabase/migrations/sales_dealer_assignment_fix.sql
+@@ -0,0 +1,80 @@
++-- sales_dealer_assignment_fix.sql
++--
++-- Fixes two accuracy bugs found during live testing of get_my_dealers()
++-- (see sales_dealer_assignment.sql for the original function):
++--
++-- 1. "Total outstanding" was reading profiles.outstanding directly, but
++--    that column isn't kept in sync with real activity — AdminDealers'
++--    own "Credit Used" figure is computed LIVE from dealer_ledger (sum of
++--    order/journal-dr minus payment/credit_note/journal-cr), never from
++--    that stored column. A dealer who genuinely owed money showed ₹0.
++--    Fixed by computing the same live ledger balance here.
++--
++-- 2. Dealer names showed the generic legacy `profiles.name` column
++--    (default 'New Dealer', often blank for older rows) instead of the
++--    actual business name Admin enters as shop_name/alias_name.
++--
++-- Only replaces the function — no table/column changes, safe to re-run.
++-- Run in Supabase SQL Editor.
++
++create or replace function public.get_my_dealers()
++returns table (
++  id          uuid,
++  name        text,
++  dealer_code text,
++  territory   jsonb,
++  outstanding numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return; -- not a recognized staff member; nothing to return
++  end if;
++
++  return query
++    select
++      p.id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as name,
++      p.dealer_code,
++      to_jsonb(p.territory) as territory,
++      coalesce(led.balance, 0) as outstanding
++    from public.profiles p
++    left join (
++      select dealer_id,
++        sum(case
++              when type = 'order' or (type = 'journal' and dr_dealer) then amount
++              when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
++              else 0
++            end) as balance
++      from public.dealer_ledger
++      group by dealer_id
++    ) led on led.dealer_id = p.id
++    where p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select email from public.staff_profiles where reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select email from public.staff_profiles where department = 'Sales'
++            ))
++      )
++    order by coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name);
++end;
++$$;
++
++grant execute on function public.get_my_dealers() to authenticated;
+-- 
+2.43.0
+

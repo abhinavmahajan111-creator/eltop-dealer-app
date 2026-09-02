@@ -1,0 +1,451 @@
+From e23722594e5977f3668d553cec2b92e1c082fb30 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 05:16:13 +0000
+Subject: [PATCH] Build real Sales dashboard: dealer/party list + rep
+ assignment
+
+Replaces the StaffHome placeholder on /staff/sales with a real
+dashboard for all three Sales roles, matching the approved mockup
+(gradient header, avatar, stat cards, dealer list).
+
+What's real:
+- New assigned_sales_rep field on profiles (dealers), FK'd to
+  staff_profiles.email. Kept separate from the existing free-text
+  staff_assigned column (used by AdminOrders' filter) to avoid
+  reinterpreting whatever values already live there.
+- AdminDealers: new "Assigned Sales Rep" dropdown, sourced from
+  active Sales-department staff.
+- get_my_dealers() RPC (SECURITY DEFINER, same pattern as
+  claim_staff_profile): returns the dealers a Sales staff member can
+  see, scoped by tier (own dealers / own + direct reports' dealers /
+  whole Sales department). Powers the dashboard's dealer list and its
+  two stat cards (count, total outstanding).
+
+What's still "coming soon" (no data model yet, intentionally not
+faked): visit logging, GPS check-in, territory map, targets,
+commission, and team-performance numbers for Senior tiers.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                                   |   3 +-
+ src/admin/AdminDealers.jsx                    |  34 +++
+ src/screens/staff/SalesDashboard.jsx          | 199 ++++++++++++++++++
+ .../migrations/sales_dealer_assignment.sql    |  98 +++++++++
+ 4 files changed, 333 insertions(+), 1 deletion(-)
+ create mode 100644 src/screens/staff/SalesDashboard.jsx
+ create mode 100644 supabase/migrations/sales_dealer_assignment.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 376654f..6041803 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -22,6 +22,7 @@ import Profile from "./screens/Profile";
+ import Schemes from "./screens/Schemes";
+ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
++import SalesDashboard from "./screens/staff/SalesDashboard";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+ import AdminOrders from "./admin/AdminOrders";
+@@ -100,7 +101,7 @@ export default function App() {
+           its real department dashboard independently as those get built. */}
+       <Route element={<StaffRoute />}>
+         <Route path="/staff" element={<StaffHome />} />
+-        <Route path="/staff/sales" element={<StaffHome />} />
++        <Route path="/staff/sales" element={<SalesDashboard />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+         <Route path="/staff/dispatch" element={<StaffHome />} />
+         <Route path="/staff/logistics" element={<StaffHome />} />
+diff --git a/src/admin/AdminDealers.jsx b/src/admin/AdminDealers.jsx
+index 6d8caf3..2d1af8c 100644
+--- a/src/admin/AdminDealers.jsx
++++ b/src/admin/AdminDealers.jsx
+@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
+ import * as XLSX from "xlsx";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ import ScrollFade from "../components/ScrollFade";
++import { staffRoleLabel } from "../utils/staffRoles";
+ 
+ const BUCKET = "dealer-media";
+ 
+@@ -395,6 +396,23 @@ export default function AdminDealers() {
+     });
+   }, []);
+ 
++  // Active Sales-department staff, for the "Assigned Sales Rep" dropdown
++  // below — feeds the get_my_dealers() RPC on the Sales dashboard, which
++  // matches dealers to a rep by exact staff_profiles.email.
++  const [salesStaffOptions, setSalesStaffOptions] = useState([]);
++  useEffect(() => {
++    if (!isSupabaseConfigured) return;
++    supabase.from('staff_profiles')
++      .select('email, name, role')
++      .eq('department', 'Sales')
++      .eq('is_active', true)
++      .order('name')
++      .then(({ data, error }) => {
++        if (error) { console.warn('[AdminDealers] sales staff fetch failed:', error.message); return; }
++        setSalesStaffOptions(data || []);
++      });
++  }, []);
++
+   // Lazy cleanup: permanently delete profiles soft-deleted over 1 year ago
+   useEffect(() => {
+     if (!isSupabaseConfigured) return;
+@@ -830,6 +848,7 @@ export default function AdminDealers() {
+       shop_address:               selected.shop_address               || "",
+       godown_address:             selected.godown_address             || "",
+       staff_assigned:             selected.staff_assigned             || "",
++      assigned_sales_rep:         selected.assigned_sales_rep         || "",
+       staff1_name:                selected.staff1_name                || "",
+       staff2_name:                selected.staff2_name                || "",
+       website:                    selected.website                    || "",
+@@ -866,6 +885,7 @@ export default function AdminDealers() {
+       shop_address:               edits.shop_address,
+       godown_address:             edits.godown_address,
+       staff_assigned:             edits.staff_assigned,
++      assigned_sales_rep:         edits.assigned_sales_rep || null,
+       staff1_name:                edits.staff1_name,
+       staff2_name:                edits.staff2_name,
+       website:                    edits.website,
+@@ -1451,6 +1471,15 @@ export default function AdminDealers() {
+ 
+                 <EditField label="Website" field="website" value={E("website")} onChange={set} />
+                 <EditField label="Staff Assigned" field="staff_assigned" value={E("staff_assigned")} onChange={set} />
++                <EditField label="Assigned Sales Rep" field="assigned_sales_rep" value={E("assigned_sales_rep")} onChange={set}>
++                  <select value={E("assigned_sales_rep")} onChange={e => set("assigned_sales_rep", e.target.value)}
++                    style={{ width: "100%", padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: 8, fontSize: 13, marginBottom: 0 }}>
++                    <option value="">— Unassigned —</option>
++                    {salesStaffOptions.map(s => (
++                      <option key={s.email} value={s.email}>{s.name || s.email} ({staffRoleLabel(s.role)})</option>
++                    ))}
++                  </select>
++                </EditField>
+                 <EditField label="Discount 1 (%)" field="discount1" value={E("discount1")} onChange={set} type="number" />
+                 <EditField label="Discount 2 (%)" field="discount2" value={E("discount2")} onChange={set} type="number" />
+                 <EditField label="Credit Limit (Rs.)" field="credit_limit" value={E("credit_limit")} onChange={set} type="number" span />
+@@ -1466,6 +1495,11 @@ export default function AdminDealers() {
+                 )}
+                 <ReadField label="Website" value={S("website")} />
+                 <ReadField label="Staff Assigned" value={S("staff_assigned")} />
++                <ReadField label="Assigned Sales Rep" value={
++                  selected.assigned_sales_rep
++                    ? (salesStaffOptions.find(s => s.email === selected.assigned_sales_rep)?.name || selected.assigned_sales_rep)
++                    : "— Unassigned —"
++                } />
+                 <ReadField label="Discount 1 (%)" value={String(selected.discount1 ?? "—")} />
+                 <ReadField label="Discount 2 (%)" value={String(selected.discount2 ?? "—")} />
+                 {(selected.discount1 || selected.discount2) ? (
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+new file mode 100644
+index 0000000..77d6801
+--- /dev/null
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -0,0 +1,199 @@
++import { useEffect, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { useApp } from "../../context/AppContext";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import { staffRoleLabel } from "../../utils/staffRoles";
++
++// Real dashboard for /staff/sales — all three Sales roles (sales_associate,
++// senior_sales_associate, senior_sales_executive). Design approved against
++// the "richer" mockup (avatar header, stat cards, dealer list).
++//
++// What's real here: the "My Dealers / Parties" list and its two stat cards
++// (count, total outstanding) — all come from get_my_dealers(), a SECURITY
++// DEFINER RPC scoped per role (see supabase/migrations/
++// sales_dealer_assignment.sql). Dealers only show up once Admin assigns
++// them to a rep via AdminDealers' new "Assigned Sales Rep" field.
++//
++// What's still "coming soon": visit logging, GPS check-in, targets,
++// commission, and (for Senior tiers) a real team-performance view — none
++// of those have a data model yet, so rather than show made-up numbers in a
++// live app, those sections stay clearly marked as not built yet.
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++const CARD_STYLE = {
++  background: "#fff",
++  borderRadius: 14,
++  padding: "16px 18px",
++  marginBottom: 14,
++  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
++};
++
++function StatCard({ icon, value, label }) {
++  return (
++    <div style={CARD_STYLE}>
++      <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
++      <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
++      <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
++    </div>
++  );
++}
++
++function DealerRow({ dealer }) {
++  const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
++  return (
++    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
++      <div style={{
++        width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
++        display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
++      }}>
++        {initials(dealer.name)}
++      </div>
++      <div style={{ flex: 1, minWidth: 0 }}>
++        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{dealer.name || "Unnamed"}</div>
++        <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
++          {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
++        </div>
++      </div>
++      <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
++        ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
++      </div>
++    </div>
++  );
++}
++
++function ComingSoonCard({ title, description }) {
++  return (
++    <div style={{ background: "#fff", border: "1.5px dashed #ddd", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
++      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
++        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#666" }}>{title}</div>
++        <span style={{
++          fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6",
++          borderRadius: 999, padding: "3px 9px", textTransform: "uppercase", letterSpacing: 0.3,
++        }}>
++          Coming soon
++        </span>
++      </div>
++      <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5 }}>{description}</div>
++    </div>
++  );
++}
++
++const OWN_WORK_COMING_SOON = [
++  { title: "My Visits", description: "Log dealer-onboarding visits and see your visit history." },
++  { title: "My Territory Map", description: "Visual map of your assigned counters and coverage area." },
++  { title: "My Targets & Achievement", description: "Your current targets and progress against them." },
++  { title: "My Commission / Salary Statement", description: "Your commission and salary statements by period." },
++];
++
++const COMING_SOON_BY_ROLE = {
++  sales_associate: OWN_WORK_COMING_SOON,
++  senior_sales_associate: [
++    { title: "My Team", description: "Review your team's onboarding submissions, approve or reject them, and adjust territory assignments." },
++    ...OWN_WORK_COMING_SOON,
++  ],
++  senior_sales_executive: [
++    { title: "Team Performance", description: "Performance rollup across every Sales Associate and Senior Sales Associate." },
++    { title: "Targets & Strategy", description: "Set targets for the Sales team and push strategy/mission messaging down the ladder." },
++  ],
++};
++
++export default function SalesDashboard() {
++  const navigate = useNavigate();
++  const { staffProfile, signOut } = useApp();
++
++  const [dealers, setDealers] = useState([]);
++  const [loadingDealers, setLoadingDealers] = useState(true);
++  const [dealerError, setDealerError] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoadingDealers(false); return; }
++    let cancelled = false;
++    supabase.rpc("get_my_dealers").then(({ data, error }) => {
++      if (cancelled) return;
++      if (error) {
++        console.error("[SalesDashboard] get_my_dealers failed:", error);
++        setDealerError(error.message);
++      } else {
++        setDealers(data || []);
++      }
++      setLoadingDealers(false);
++    });
++    return () => { cancelled = true; };
++  }, []);
++
++  const roleLabel = staffRoleLabel(staffProfile?.role);
++  const comingSoon = COMING_SOON_BY_ROLE[staffProfile?.role] || OWN_WORK_COMING_SOON;
++  const totalOutstanding = dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0);
++  const dealersLabel = staffProfile?.role === "senior_sales_executive" ? "Dealers, Sales dept." : "My dealers / parties";
++
++  const handleLogout = async () => {
++    await signOut();
++    navigate("/login");
++  };
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "22px 24px 44px", color: "#fff" }}>
++        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
++          <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
++          <button
++            onClick={handleLogout}
++            style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
++          >
++            Log out
++          </button>
++        </div>
++        <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 22 }}>
++          <div style={{
++            width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
++            border: "2px solid rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
++            fontSize: 22, fontWeight: 800, color: "#fff", flexShrink: 0,
++          }}>
++            {initials(staffProfile?.name)}
++          </div>
++          <div>
++            <div style={{ fontSize: 22, fontWeight: 800 }}>
++              {staffProfile?.name ? `Welcome, ${staffProfile.name}` : "Welcome"}
++            </div>
++            <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
++              {roleLabel}
++            </div>
++          </div>
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
++          <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
++          <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
++        </div>
++
++        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
++        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
++          {loadingDealers ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++          ) : dealerError ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>
++              Couldn't load your dealers ({dealerError}).
++            </div>
++          ) : dealers.length === 0 ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999", lineHeight: 1.6 }}>
++              No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
++            </div>
++          ) : (
++            dealers.map((d) => <DealerRow key={d.id} dealer={d} />)
++          )}
++        </div>
++
++        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>Also coming</div>
++        {comingSoon.map((c) => (
++          <ComingSoonCard key={c.title} title={c.title} description={c.description} />
++        ))}
++      </div>
++    </div>
++  );
++}
+diff --git a/supabase/migrations/sales_dealer_assignment.sql b/supabase/migrations/sales_dealer_assignment.sql
+new file mode 100644
+index 0000000..60b4e28
+--- /dev/null
++++ b/supabase/migrations/sales_dealer_assignment.sql
+@@ -0,0 +1,98 @@
++-- sales_dealer_assignment.sql
++--
++-- Links a dealer (profiles row) to the Sales staff member who owns/onboarded
++-- them, and gives Sales staff a safe, read-only way to see their own
++-- dealers/parties from the Sales dashboard.
++--
++-- This is a NEW field, separate from the pre-existing `staff_assigned` text
++-- column on profiles (used today by AdminOrders' staff filter). That column
++-- is free text typed by Admin with no fixed format, and existing dealers
++-- may already have arbitrary values in it — repurposing it risked breaking
++-- that filter and misreading old data. `assigned_sales_rep` is new, always
++-- either null or an exact staff_profiles.email (enforced by the FK below),
++-- and only powers this one feature.
++--
++-- Run in Supabase SQL Editor.
++
++alter table public.profiles
++  add column if not exists assigned_sales_rep text references public.staff_profiles(email) on delete set null;
++
++create index if not exists idx_profiles_assigned_sales_rep
++  on public.profiles(assigned_sales_rep);
++
++-- get_my_dealers()
++--
++-- Returns the dealers/parties a Sales staff member is allowed to see,
++-- scoped by their tier in the ladder:
++--   sales_associate         -> only dealers assigned directly to them
++--   senior_sales_associate  -> their own dealers + their direct reports' dealers
++--   senior_sales_executive  -> every dealer assigned to anyone in the Sales department
++--
++-- SECURITY DEFINER, same pattern as claim_staff_profile(): profiles' own RLS
++-- only lets a dealer see their own row, so a plain client-side query would
++-- return nothing for a staff member. This function runs under its own
++-- privileges, looks up the caller's email/role itself via auth.uid(), and
++-- returns only the columns the dashboard needs — never the dealer's full
++-- profile (no GST, no credit limit, no addresses).
++create or replace function public.get_my_dealers()
++returns table (
++  id          uuid,
++  name        text,
++  dealer_code text,
++  territory   jsonb,
++  outstanding numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return; -- not a recognized staff member; nothing to return
++  end if;
++
++  if v_role = 'sales_associate' then
++    return query
++      select p.id, p.name, p.dealer_code, to_jsonb(p.territory), p.outstanding
++      from public.profiles p
++      where p.assigned_sales_rep = v_email
++        and p.deleted_at is null
++      order by p.name;
++
++  elsif v_role = 'senior_sales_associate' then
++    return query
++      select p.id, p.name, p.dealer_code, to_jsonb(p.territory), p.outstanding
++      from public.profiles p
++      where p.deleted_at is null
++        and (
++          p.assigned_sales_rep = v_email
++          or p.assigned_sales_rep in (
++            select email from public.staff_profiles where reports_to = v_email
++          )
++        )
++      order by p.name;
++
++  elsif v_role = 'senior_sales_executive' then
++    return query
++      select p.id, p.name, p.dealer_code, to_jsonb(p.territory), p.outstanding
++      from public.profiles p
++      where p.deleted_at is null
++        and p.assigned_sales_rep in (
++          select email from public.staff_profiles where department = 'Sales'
++        )
++      order by p.name;
++
++  end if;
++  -- any other role: falls through, returns no rows
++end;
++$$;
++
++grant execute on function public.get_my_dealers() to authenticated;
+-- 
+2.43.0
+
