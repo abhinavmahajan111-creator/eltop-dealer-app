@@ -42,10 +42,13 @@ function StatCard({ icon, value, label }) {
   );
 }
 
-function DealerRow({ dealer }) {
+function DealerRow({ dealer, onClick }) {
   const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
+    <div
+      onClick={onClick}
+      style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
+    >
       <div style={{
         width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
         display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
@@ -61,6 +64,7 @@ function DealerRow({ dealer }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
         ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
       </div>
+      <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
     </div>
   );
 }
@@ -185,7 +189,7 @@ export default function SalesDashboard() {
               No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
             </div>
           ) : (
-            dealers.map((d) => <DealerRow key={d.id} dealer={d} />)
+            dealers.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => navigate(`/staff/sales/dealer/${d.id}`)} />)
           )}
         </div>
 
