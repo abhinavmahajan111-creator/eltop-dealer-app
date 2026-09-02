@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
 import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
@@ -42,6 +42,14 @@ const ACTIVITY_ICON = { start: "🛵", end: "⏹", checkin: "📍", checkout: "�
 
 export default function DayCheckIn() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Dashboard's two-button row (once the day is started) passes an explicit
+  // tab via navigation state — e.g. { state: { tab: "day" } } — so tapping
+  // "🛵 Day" there always lands on Day even though Check In is otherwise
+  // the default once the day has started. Falls back to the normal
+  // auto-selection below when nothing is passed (direct URL, redirects,
+  // the amber "checked in" banner, etc).
+  const requestedTab = location.state?.tab === "day" || location.state?.tab === "checkin" ? location.state.tab : null;
 
   const [activeTab, setActiveTab] = useState("day");
   const defaultTabSetRef = useRef(false);
@@ -128,13 +136,20 @@ export default function DayCheckIn() {
 
       if (!defaultTabSetRef.current) {
         defaultTabSetRef.current = true;
-        // Default lands on whichever tab is actionable: Day if there's
-        // nothing to check in for yet (not started / already ended),
-        // otherwise Check In — which, if already checked in somewhere,
-        // is the checkout screen. Never defaults back to Day after a
-        // check-in.
-        if (!day || day.ended_at) setActiveTab("day");
-        else setActiveTab("checkin");
+        if (requestedTab) {
+          // Explicit tab requested via navigation state (dashboard's
+          // "🛵 Day" / "📍 Check In" buttons) — honor it as-is.
+          setActiveTab(requestedTab);
+        } else if (!day || day.ended_at) {
+          // Default lands on whichever tab is actionable: Day if there's
+          // nothing to check in for yet (not started / already ended),
+          // otherwise Check In — which, if already checked in somewhere,
+          // is the checkout screen. Never defaults back to Day after a
+          // check-in.
+          setActiveTab("day");
+        } else {
+          setActiveTab("checkin");
+        }
       }
 
       setLoadingDealers(false);

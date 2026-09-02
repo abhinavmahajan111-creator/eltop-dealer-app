@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
@@ -36,12 +36,17 @@ const CARD_STYLE = {
   boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
 };
 
-function StatCard({ icon, value, label }) {
+function StatCard({ icon, value, label, onClick }) {
   return (
-    <div style={CARD_STYLE}>
+    <div
+      onClick={onClick}
+      style={onClick ? { ...CARD_STYLE, cursor: "pointer" } : CARD_STYLE}
+    >
       <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
       <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
-      <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>
+        {label}{onClick ? " ›" : ""}
+      </div>
     </div>
   );
 }
@@ -131,6 +136,7 @@ function FeatureTile({ icon, title, onClick }) {
 export default function SalesDashboard() {
   const navigate = useNavigate();
   const { staffProfile, signOut } = useApp();
+  const dealersSectionRef = useRef(null);
 
   const [dealers, setDealers] = useState([]);
   const [loadingDealers, setLoadingDealers] = useState(true);
@@ -264,17 +270,30 @@ export default function SalesDashboard() {
           )}
 
           {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && !dayStart.ended_at && (
-            <button
-              onClick={() => navigate("/staff/sales/day-checkin")}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-                background: "#fff", border: "none", borderRadius: 14,
-                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
-                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-              }}
-            >
-              <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
-            </button>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => navigate("/staff/sales/day-checkin", { state: { tab: "day" } })}
+                style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  background: "#fff", border: "none", borderRadius: 14,
+                  padding: "16px 8px", color: "#7B2D8B", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+                }}
+              >
+                <span style={{ fontSize: 18 }}>🛵</span> Day
+              </button>
+              <button
+                onClick={() => navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } })}
+                style={{
+                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  background: "#fff", border: "none", borderRadius: 14,
+                  padding: "16px 8px", color: "#7B2D8B", fontSize: 14, fontWeight: 800, cursor: "pointer",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+                }}
+              >
+                <span style={{ fontSize: 18 }}>📍</span> Check In
+              </button>
+            </div>
           )}
 
           {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart?.ended_at && (
@@ -296,10 +315,15 @@ export default function SalesDashboard() {
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
-          <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
+          <StatCard
+            icon="₹"
+            value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`}
+            label="Total outstanding"
+            onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          />
         </div>
 
-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
+        <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
           {loadingDealers ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
