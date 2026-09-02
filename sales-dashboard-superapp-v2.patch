@@ -1,0 +1,1475 @@
+From cae4b4464c289eb3d57a01c3361f810f7d603ce1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 11:02:58 +0000
+Subject: [PATCH 1/3] Rebuild visit logging as full check-in/check-out with
+ photo evidence
+
+Replaces the single-tap visit log with a real field-verification flow:
+check-in requires GPS within 100m of the dealer (hard block) plus a
+mandatory duty-on photo; check-out requires shop board, shop interior,
+and dealer visiting-card photos plus a short shop-interior video, all
+geo-tagged via a canvas overlay burned onto the image. A dealer's
+first-ever check-in sets its saved location if it has none yet. A rep
+can only have one open visit at a time, enforced both in the RPC and
+via a partial unique index.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/DealerDetail.jsx            | 366 +++++++++++---
+ src/utils/visitMedia.js                       | 132 +++++
+ .../migrations/sales_visits_checkinout.sql    | 476 ++++++++++++++++++
+ 3 files changed, 903 insertions(+), 71 deletions(-)
+ create mode 100644 src/utils/visitMedia.js
+ create mode 100644 supabase/migrations/sales_visits_checkinout.sql
+
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index bc6a847..e05dccd 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -1,15 +1,23 @@
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import { getCurrentPosition, getVideoDuration, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
+ 
+ // Dealer detail screen for Sales staff — reached by tapping a dealer in
+ // "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
+ // before/during a call: contact info, credit terms, recent order history,
+-// and now visit logging with GPS check-in. Every RPC here (get_dealer_
+-// detail, get_dealer_orders, get_dealer_visits, log_dealer_visit)
+-// re-checks that this dealer is within the caller's own scope server-side
+-// — a rep can't view or log against another rep's dealer just by
+-// knowing/guessing its id.
++// and a full check-in/check-out visit workflow (not a simple log button):
++// check-in requires GPS within 100m of the dealer plus a "duty on" photo;
++// check-out requires a board photo, a shop-interior photo, a dealer
++// visiting-card photo, and a short shop video, all re-checked against the
++// same 100m geofence. A dealer's first-ever check-in sets its saved
++// location if it doesn't have one yet (profiles.location_lat/lng).
++//
++// Every RPC here (get_dealer_detail, get_dealer_orders, get_dealer_visits,
++// get_my_open_visit, start_dealer_visit, complete_dealer_visit) re-checks
++// that this dealer is within the caller's own scope server-side — a rep
++// can't view or check in against another rep's dealer just by knowing/
++// guessing its id.
+ 
+ const CARD_STYLE = {
+   background: "#fff",
+@@ -34,6 +42,11 @@ function formatDateTime(iso) {
+   return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+ }
+ 
++function formatTime(iso) {
++  if (!iso) return "";
++  return new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
++}
++
+ function StatusBadge({ status }) {
+   const label = (status || "unknown").replace(/_/g, " ");
+   const colors = {
+@@ -55,6 +68,47 @@ function StatusBadge({ status }) {
+   );
+ }
+ 
++// A single required-photo capture slot: shows a thumbnail once chosen, a
++// ✓ once done. Uses the native camera via capture="environment" — far more
++// reliable across mobile browsers than a custom getUserMedia pipeline.
++function PhotoSlot({ label, file, onChange, disabled }) {
++  const inputRef = useRef(null);
++  const previewUrl = file ? URL.createObjectURL(file) : null;
++  return (
++    <div style={{ textAlign: "center" }}>
++      <div
++        onClick={() => !disabled && inputRef.current?.click()}
++        style={{
++          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
++          border: file ? "2px solid #2fa84f" : "1.5px dashed #ccc",
++          background: file ? "#000" : "#fafafa",
++          display: "flex", alignItems: "center", justifyContent: "center",
++          cursor: disabled ? "default" : "pointer", position: "relative",
++        }}
++      >
++        {previewUrl ? (
++          <img src={previewUrl} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
++        ) : (
++          <span style={{ fontSize: 22, color: "#bbb" }}>📷</span>
++        )}
++        {file && (
++          <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
++        )}
++      </div>
++      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
++      <input
++        ref={inputRef}
++        type="file"
++        accept="image/*"
++        capture="environment"
++        disabled={disabled}
++        onChange={(e) => onChange(e.target.files?.[0] || null)}
++        style={{ display: "none" }}
++      />
++    </div>
++  );
++}
++
+ export default function DealerDetail() {
+   const { id } = useParams();
+   const navigate = useNavigate();
+@@ -65,9 +119,21 @@ export default function DealerDetail() {
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+ 
+-  const [visitNotes, setVisitNotes] = useState("");
+-  const [logging, setLogging] = useState(false);
+-  const [logStatus, setLogStatus] = useState(null); // { type: 'success'|'error', message }
++  // Whichever dealer (anywhere) the rep currently has an open check-in at.
++  const [openVisit, setOpenVisit] = useState(null);
++  const [openVisitLoading, setOpenVisitLoading] = useState(true);
++
++  const [dutyOnFile, setDutyOnFile] = useState(null);
++  const [checkingIn, setCheckingIn] = useState(false);
++  const [checkInStatus, setCheckInStatus] = useState(null);
++
++  const [boardFile, setBoardFile] = useState(null);
++  const [shopFile, setShopFile] = useState(null);
++  const [cardFile, setCardFile] = useState(null);
++  const [videoFile, setVideoFile] = useState(null);
++  const [checkoutNotes, setCheckoutNotes] = useState("");
++  const [checkingOut, setCheckingOut] = useState(false);
++  const [checkOutStatus, setCheckOutStatus] = useState(null);
+ 
+   const loadVisits = () => {
+     supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }).then(({ data, error }) => {
+@@ -75,14 +141,26 @@ export default function DealerDetail() {
+     });
+   };
+ 
++  const loadOpenVisit = () => {
++    setOpenVisitLoading(true);
++    supabase.rpc("get_my_open_visit").then(({ data, error }) => {
++      if (!error) {
++        const row = Array.isArray(data) ? data[0] : data;
++        setOpenVisit(row || null);
++      }
++      setOpenVisitLoading(false);
++    });
++  };
++
+   useEffect(() => {
+-    if (!isSupabaseConfigured || !id) { setLoading(false); return; }
++    if (!isSupabaseConfigured || !id) { setLoading(false); setOpenVisitLoading(false); return; }
+     let cancelled = false;
+     Promise.all([
+       supabase.rpc("get_dealer_detail", { p_dealer_id: id }),
+       supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
+       supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }),
+-    ]).then(([detailRes, ordersRes, visitsRes]) => {
++      supabase.rpc("get_my_open_visit"),
++    ]).then(([detailRes, ordersRes, visitsRes, openRes]) => {
+       if (cancelled) return;
+       if (detailRes.error) {
+         setError(detailRes.error.message);
+@@ -96,43 +174,108 @@ export default function DealerDetail() {
+       }
+       if (!ordersRes.error) setOrders(ordersRes.data || []);
+       if (!visitsRes.error) setVisits(visitsRes.data || []);
++      if (!openRes.error) {
++        const row = Array.isArray(openRes.data) ? openRes.data[0] : openRes.data;
++        setOpenVisit(row || null);
++      }
+       setLoading(false);
++      setOpenVisitLoading(false);
+     });
+     return () => { cancelled = true; };
+   }, [id]);
+ 
+-  const handleLogVisit = () => {
+-    setLogging(true);
+-    setLogStatus(null);
++  const isCheckedInHere = openVisit && openVisit.dealer_id === id;
++  const isCheckedInElsewhere = openVisit && openVisit.dealer_id !== id;
+ 
+-    const submit = (lat, lng) => {
+-      supabase.rpc("log_dealer_visit", {
++  const handleCheckIn = async () => {
++    setCheckInStatus(null);
++    if (!dutyOnFile) {
++      setCheckInStatus({ type: "error", message: "Take your duty-on photo first." });
++      return;
++    }
++    setCheckingIn(true);
++    try {
++      const pos = await getCurrentPosition();
++      const tagged = await tagPhoto(dutyOnFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Duty On" });
++      const url = await uploadVisitMedia(tagged, { dealerId: id, kind: "duty-on" });
++      const { data, error } = await supabase.rpc("start_dealer_visit", {
+         p_dealer_id: id,
+-        p_notes: visitNotes,
+-        p_latitude: lat,
+-        p_longitude: lng,
+-      }).then(({ data, error }) => {
+-        const result = Array.isArray(data) ? data[0] : data;
+-        if (error || !result?.success) {
+-          setLogStatus({ type: "error", message: error?.message || result?.message || "Couldn't log visit." });
+-        } else {
+-          setLogStatus({ type: "success", message: lat != null ? "Visit logged with location." : "Visit logged (no location captured)." });
+-          setVisitNotes("");
+-          loadVisits();
+-        }
+-        setLogging(false);
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++        p_duty_on_photo_url: url,
+       });
+-    };
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setCheckInStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
++      } else {
++        setCheckInStatus(null);
++        setDutyOnFile(null);
++        loadOpenVisit();
++        loadVisits();
++      }
++    } catch (err) {
++      setCheckInStatus({ type: "error", message: err.message || "Couldn't check in." });
++    } finally {
++      setCheckingIn(false);
++    }
++  };
+ 
+-    if (!navigator.geolocation) {
+-      submit(null, null);
++  const handleCheckOut = async () => {
++    setCheckOutStatus(null);
++    if (!boardFile || !shopFile || !cardFile || !videoFile) {
++      setCheckOutStatus({ type: "error", message: "Board photo, shop photo, card photo, and a short video are all required to check out." });
+       return;
+     }
+-    navigator.geolocation.getCurrentPosition(
+-      (pos) => submit(pos.coords.latitude, pos.coords.longitude),
+-      () => submit(null, null), // location denied/unavailable — still log the visit, just without GPS
+-      { timeout: 8000 }
+-    );
++    setCheckingOut(true);
++    try {
++      const pos = await getCurrentPosition();
++
++      // Soft, non-blocking duration check — mobile browsers won't let us
++      // force an exact recording length through the native camera.
++      const duration = await getVideoDuration(videoFile);
++      if (duration != null && duration > 20) {
++        setCheckOutStatus({ type: "error", message: `That video is ${Math.round(duration)}s — please re-record a short ~5 second clip of the shop interior.` });
++        setCheckingOut(false);
++        return;
++      }
++
++      const [boardTagged, shopTagged, cardTagged] = await Promise.all([
++        tagPhoto(boardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Board" }),
++        tagPhoto(shopFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Interior" }),
++        tagPhoto(cardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Dealer Card" }),
++      ]);
++
++      const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
++        uploadVisitMedia(boardTagged, { dealerId: id, kind: "board" }),
++        uploadVisitMedia(shopTagged, { dealerId: id, kind: "shop" }),
++        uploadVisitMedia(cardTagged, { dealerId: id, kind: "card" }),
++        uploadVisitMedia(videoFile, { dealerId: id, kind: "video" }),
++      ]);
++
++      const { data, error } = await supabase.rpc("complete_dealer_visit", {
++        p_visit_id: openVisit.visit_id,
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++        p_board_photo_url: boardUrl,
++        p_shop_photo_url: shopUrl,
++        p_card_photo_url: cardUrl,
++        p_video_url: videoUrl,
++        p_notes: checkoutNotes,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setCheckOutStatus({ type: "error", message: error?.message || result?.message || "Couldn't check out." });
++      } else {
++        setCheckOutStatus(null);
++        setBoardFile(null); setShopFile(null); setCardFile(null); setVideoFile(null); setCheckoutNotes("");
++        loadOpenVisit();
++        loadVisits();
++      }
++    } catch (err) {
++      setCheckOutStatus({ type: "error", message: err.message || "Couldn't check out." });
++    } finally {
++      setCheckingOut(false);
++    }
+   };
+ 
+   if (loading) {
+@@ -240,30 +383,100 @@ export default function DealerDetail() {
+           )}
+         </div>
+ 
++        {/* ── Visit check-in / check-out ─────────────────────────────── */}
+         <div style={CARD_STYLE}>
+-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Log a Visit</div>
+-          <textarea
+-            value={visitNotes}
+-            onChange={(e) => setVisitNotes(e.target.value)}
+-            placeholder="What happened on this visit? (optional)"
+-            rows={3}
+-            style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10, boxSizing: "border-box" }}
+-          />
+-          <button
+-            onClick={handleLogVisit}
+-            disabled={logging}
+-            style={{
+-              width: "100%", padding: "11px", border: "none", borderRadius: 8,
+-              background: logging ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
+-              cursor: logging ? "default" : "pointer",
+-            }}
+-          >
+-            {logging ? "Logging…" : "📍 Log Visit"}
+-          </button>
+-          {logStatus && (
+-            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: logStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
+-              {logStatus.message}
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Visit</div>
++          <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12, lineHeight: 1.5 }}>
++            You must be within 100m of this dealer to check in or out. A dealer's first-ever check-in sets its saved location.
++          </div>
++
++          {openVisitLoading ? (
++            <div style={{ fontSize: 12.5, color: "#999" }}>Checking visit status…</div>
++          ) : isCheckedInElsewhere ? (
++            <div>
++              <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
++                You're checked in at <b>{openVisit.dealer_name}</b> since {formatTime(openVisit.check_in_at)}. Check out there before starting a visit here.
++              </div>
++              <button
++                onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++                style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
++              >
++                Go check out at {openVisit.dealer_name}
++              </button>
+             </div>
++          ) : isCheckedInHere ? (
++            <>
++              <div style={{ fontSize: 12, fontWeight: 700, color: "#2fa84f", marginBottom: 12 }}>
++                🟢 Checked in since {formatTime(openVisit.check_in_at)} — complete check-out below.
++              </div>
++              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
++                <PhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
++                <PhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
++                <PhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
++              </div>
++              <div style={{ marginBottom: 12 }}>
++                <label style={{
++                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
++                  border: videoFile ? "2px solid #2fa84f" : "1.5px dashed #ccc", borderRadius: 8,
++                  padding: "10px", fontSize: 12.5, fontWeight: 700, color: videoFile ? "#2fa84f" : "#888", cursor: "pointer",
++                }}>
++                  {videoFile ? `✓ Video selected (${videoFile.name})` : "🎥 Record ~5s video of shop interior"}
++                  <input
++                    type="file"
++                    accept="video/*"
++                    capture="environment"
++                    disabled={checkingOut}
++                    onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
++                    style={{ display: "none" }}
++                  />
++                </label>
++              </div>
++              <textarea
++                value={checkoutNotes}
++                onChange={(e) => setCheckoutNotes(e.target.value)}
++                placeholder="Notes for this visit (optional)"
++                rows={2}
++                style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10, boxSizing: "border-box" }}
++              />
++              <button
++                onClick={handleCheckOut}
++                disabled={checkingOut}
++                style={{
++                  width: "100%", padding: "11px", border: "none", borderRadius: 8,
++                  background: checkingOut ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
++                  cursor: checkingOut ? "default" : "pointer",
++                }}
++              >
++                {checkingOut ? "Checking out…" : "Check Out"}
++              </button>
++              {checkOutStatus && (
++                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkOutStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
++                  {checkOutStatus.message}
++                </div>
++              )}
++            </>
++          ) : (
++            <>
++              <div style={{ maxWidth: 140, marginBottom: 12 }}>
++                <PhotoSlot label="Duty-on photo" file={dutyOnFile} onChange={setDutyOnFile} disabled={checkingIn} />
++              </div>
++              <button
++                onClick={handleCheckIn}
++                disabled={checkingIn}
++                style={{
++                  width: "100%", padding: "11px", border: "none", borderRadius: 8,
++                  background: checkingIn ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
++                  cursor: checkingIn ? "default" : "pointer",
++                }}
++              >
++                {checkingIn ? "Checking in…" : "📍 Check In"}
++              </button>
++              {checkInStatus && (
++                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkInStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
++                  {checkInStatus.message}
++                </div>
++              )}
++            </>
+           )}
+         </div>
+ 
+@@ -276,19 +489,30 @@ export default function DealerDetail() {
+               <div key={v.id} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
+                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                   <div style={{ fontSize: 12.5, fontWeight: 700 }}>{v.staff_name}</div>
+-                  <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(v.visited_at)}</div>
++                  <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(v.check_in_at || v.visited_at)}</div>
++                </div>
++                <div style={{ marginTop: 3 }}>
++                  {v.status === "open" ? (
++                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 8px" }}>Still checked in</span>
++                  ) : (
++                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#2fa84f", background: "#e6f7ec", borderRadius: 999, padding: "2px 8px" }}>
++                      Checked out{v.check_out_at ? ` ${formatTime(v.check_out_at)}` : ""}
++                    </span>
++                  )}
++                </div>
++                {v.notes && <div style={{ fontSize: 12.5, color: "#666", marginTop: 6, lineHeight: 1.5 }}>{v.notes}</div>}
++                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
++                  {v.duty_on_photo_url && <a href={v.duty_on_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Duty-on photo</a>}
++                  {v.board_photo_url && <a href={v.board_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Board photo</a>}
++                  {v.shop_photo_url && <a href={v.shop_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Shop photo</a>}
++                  {v.card_photo_url && <a href={v.card_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Card photo</a>}
++                  {v.video_url && <a href={v.video_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Video</a>}
++                  {v.latitude != null && v.longitude != null && (
++                    <a href={`https://www.google.com/maps?q=${v.latitude},${v.longitude}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>
++                      📍 Location
++                    </a>
++                  )}
+                 </div>
+-                {v.notes && <div style={{ fontSize: 12.5, color: "#666", marginTop: 4, lineHeight: 1.5 }}>{v.notes}</div>}
+-                {v.latitude != null && v.longitude != null && (
+-                  <a
+-                    href={`https://www.google.com/maps?q=${v.latitude},${v.longitude}`}
+-                    target="_blank"
+-                    rel="noreferrer"
+-                    style={{ display: "inline-block", marginTop: 4, fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}
+-                  >
+-                    📍 View location
+-                  </a>
+-                )}
+               </div>
+             ))
+           )}
+diff --git a/src/utils/visitMedia.js b/src/utils/visitMedia.js
+new file mode 100644
+index 0000000..6b910df
+--- /dev/null
++++ b/src/utils/visitMedia.js
+@@ -0,0 +1,132 @@
++// Helpers for the Sales check-in/check-out visit flow: GPS capture,
++// burning a geo-tag onto a captured photo (canvas overlay — more reliable
++// than relying on EXIF, which mobile browsers frequently strip), and
++// uploading the result to the "visit-media" Storage bucket.
++//
++// Photos/video are captured via <input type="file" accept="image/*"
++// capture="environment"> (and accept="video/*" for the clip) rather than a
++// custom getUserMedia/MediaRecorder pipeline — simpler and far more
++// reliable across mobile browsers, especially iOS Safari. This also means
++// there's no way to hard-cap the video at exactly 5 seconds; the UI guides
++// the rep to keep it short and does a soft (non-blocking) duration check
++// instead of rejecting longer clips outright.
++
++import { supabase } from "../lib/supabase";
++
++const BUCKET = "visit-media";
++
++// Promisified geolocation with a sane timeout. Resolves { latitude,
++// longitude } or rejects with an Error carrying a human-readable message.
++export function getCurrentPosition({ timeout = 10000 } = {}) {
++  return new Promise((resolve, reject) => {
++    if (!navigator.geolocation) {
++      reject(new Error("Location isn't available on this device/browser."));
++      return;
++    }
++    navigator.geolocation.getCurrentPosition(
++      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
++      (err) => {
++        const msg = err && err.code === 1
++          ? "Location permission denied. Enable location access to check in."
++          : "Couldn't get your location. Move to an open area and try again.";
++        reject(new Error(msg));
++      },
++      { enableHighAccuracy: true, timeout, maximumAge: 0 }
++    );
++  });
++}
++
++function loadImage(file) {
++  return new Promise((resolve, reject) => {
++    const img = new Image();
++    const url = URL.createObjectURL(file);
++    img.onload = () => { resolve(img); };
++    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that photo.")); };
++    img.src = url;
++  });
++}
++
++// Draws the captured photo onto a canvas (downscaled if very large, to
++// keep uploads reasonable) with a geo-tag bar burned onto the bottom:
++// lat/long, timestamp, and an optional label (e.g. "Duty On", "Shop
++// Board"). Returns a Promise<Blob> (image/jpeg).
++export async function tagPhoto(file, { latitude, longitude, label } = {}) {
++  const img = await loadImage(file);
++  const MAX_DIM = 1600;
++  let { width, height } = img;
++  if (width > MAX_DIM || height > MAX_DIM) {
++    const scale = MAX_DIM / Math.max(width, height);
++    width = Math.round(width * scale);
++    height = Math.round(height * scale);
++  }
++
++  const canvas = document.createElement("canvas");
++  canvas.width = width;
++  canvas.height = height;
++  const ctx = canvas.getContext("2d");
++  ctx.drawImage(img, 0, 0, width, height);
++  URL.revokeObjectURL(img.src);
++
++  const barHeight = Math.max(46, Math.round(height * 0.09));
++  ctx.fillStyle = "rgba(0,0,0,0.55)";
++  ctx.fillRect(0, height - barHeight, width, barHeight);
++
++  const pad = Math.round(barHeight * 0.18);
++  const line1FontSize = Math.max(11, Math.round(barHeight * 0.32));
++  const line2FontSize = Math.max(9, Math.round(barHeight * 0.24));
++  ctx.fillStyle = "#fff";
++  ctx.textBaseline = "top";
++
++  const timestamp = new Date().toLocaleString("en-IN", {
++    day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
++  });
++  const coordsText = latitude != null && longitude != null
++    ? `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`
++    : "Location unavailable";
++
++  ctx.font = `700 ${line1FontSize}px Arial, sans-serif`;
++  ctx.fillText(label ? `${label} · ${coordsText}` : coordsText, pad, height - barHeight + pad);
++  ctx.font = `400 ${line2FontSize}px Arial, sans-serif`;
++  ctx.fillText(timestamp, pad, height - barHeight + pad + line1FontSize + 4);
++
++  return new Promise((resolve, reject) => {
++    canvas.toBlob(
++      (blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that photo."))),
++      "image/jpeg",
++      0.86
++    );
++  });
++}
++
++// Uploads a Blob/File to the visit-media bucket under a per-visit path and
++// returns its public URL. `kind` is a short filename hint, e.g.
++// "duty-on", "board", "shop", "card", "video".
++export async function uploadVisitMedia(blobOrFile, { dealerId, kind, ext }) {
++  const resolvedExt = ext || (blobOrFile.type && blobOrFile.type.includes("video") ? "webm" : "jpg");
++  const path = `${dealerId}/${Date.now()}-${kind}.${resolvedExt}`;
++  const { error } = await supabase.storage.from(BUCKET).upload(path, blobOrFile, {
++    upsert: true,
++    contentType: blobOrFile.type || undefined,
++  });
++  if (error) throw error;
++  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
++  return data.publicUrl;
++}
++
++// Soft (non-blocking) duration check for the shop-interior video — mobile
++// browsers can't reliably be forced to cap recording length, so this just
++// warns rather than rejects. Resolves the duration in seconds, or null if
++// it couldn't be determined.
++export function getVideoDuration(file) {
++  return new Promise((resolve) => {
++    const video = document.createElement("video");
++    video.preload = "metadata";
++    const url = URL.createObjectURL(file);
++    video.onloadedmetadata = () => {
++      URL.revokeObjectURL(url);
++      resolve(isFinite(video.duration) ? video.duration : null);
++    };
++    video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
++    video.src = url;
++  });
++}
+diff --git a/supabase/migrations/sales_visits_checkinout.sql b/supabase/migrations/sales_visits_checkinout.sql
+new file mode 100644
+index 0000000..67a2259
+--- /dev/null
++++ b/supabase/migrations/sales_visits_checkinout.sql
+@@ -0,0 +1,476 @@
++-- sales_visits_checkinout.sql
++--
++-- Upgrades visit logging from a single "log a visit" button into a real
++-- field-verification check-in / check-out workflow, per Sales team
++-- feedback: a visit must happen within 100m of the dealer, check-in
++-- requires a "duty on" photo, and check-out requires a board photo, a
++-- shop-interior photo, a dealer visiting-card photo, and a short video —
++-- all geo-tagged. This replaces the single-tap version shipped in
++-- sales_visits.sql (kept, not dropped — see notes below).
++--
++-- Safe to re-run. Existing rows (the 3 simple test visits already logged)
++-- are backfilled as legacy "checked_out" visits so nothing already in the
++-- table is lost or orphaned.
++--
++-- Run in Supabase SQL Editor.
++
++-- ── 1. Extend the table ─────────────────────────────────────────────────
++
++alter table public.sales_visits
++  add column if not exists status text not null default 'checked_out',
++  add column if not exists check_in_at timestamptz,
++  add column if not exists check_in_lat numeric,
++  add column if not exists check_in_lng numeric,
++  add column if not exists duty_on_photo_url text,
++  add column if not exists check_out_at timestamptz,
++  add column if not exists check_out_lat numeric,
++  add column if not exists check_out_lng numeric,
++  add column if not exists board_photo_url text,
++  add column if not exists shop_photo_url text,
++  add column if not exists card_photo_url text,
++  add column if not exists video_url text;
++
++do $$
++begin
++  if not exists (
++    select 1 from pg_constraint where conname = 'sales_visits_status_check'
++  ) then
++    alter table public.sales_visits
++      add constraint sales_visits_status_check check (status in ('open', 'checked_out'));
++  end if;
++end $$;
++
++-- A rep can only have one open (checked-in, not yet checked-out) visit at
++-- a time — enforced here, not just in the RPC, as a hard backstop.
++create unique index if not exists idx_sales_visits_one_open_per_staff
++  on public.sales_visits (staff_email)
++  where status = 'open';
++
++-- Backfill: the 3 existing simple-log rows become closed legacy visits so
++-- old data still shows up correctly in the new check-in/check-out shaped UI.
++update public.sales_visits
++set check_in_at  = coalesce(check_in_at, visited_at),
++    check_in_lat  = coalesce(check_in_lat, latitude),
++    check_in_lng  = coalesce(check_in_lng, longitude),
++    check_out_at  = coalesce(check_out_at, visited_at),
++    check_out_lat = coalesce(check_out_lat, latitude),
++    check_out_lng = coalesce(check_out_lng, longitude)
++where status = 'checked_out' and check_in_at is null;
++
++-- Dealer's saved location already exists (profiles.location_lat/lng, added
++-- in dealer_profile_expanded.sql) — reused as-is for the 100m geofence and
++-- the "first check-in sets the location" fallback. No new dealer columns.
++
++-- ── 2. Haversine distance helper (metres) ───────────────────────────────
++
++create or replace function public._haversine_meters(
++  lat1 double precision, lng1 double precision,
++  lat2 double precision, lng2 double precision
++)
++returns double precision
++language sql
++immutable
++as $$
++  select 6371000 * 2 * asin(sqrt(
++    power(sin(radians((lat2 - lat1) / 2)), 2) +
++    cos(radians(lat1)) * cos(radians(lat2)) * power(sin(radians((lng2 - lng1) / 2)), 2)
++  ));
++$$;
++
++-- ── 3. Storage bucket for visit media ───────────────────────────────────
++
++insert into storage.buckets (id, name, public)
++  values ('visit-media', 'visit-media', true)
++  on conflict (id) do nothing;
++
++-- CREATE POLICY has no IF NOT EXISTS clause in Postgres — drop-then-create
++-- is the safe re-runnable equivalent.
++drop policy if exists "Public can view visit media" on storage.objects;
++create policy "Public can view visit media"
++  on storage.objects for select
++  using (bucket_id = 'visit-media');
++
++drop policy if exists "Staff can upload visit media" on storage.objects;
++create policy "Staff can upload visit media"
++  on storage.objects for insert
++  to authenticated
++  with check (
++    bucket_id = 'visit-media'
++    and exists (select 1 from public.staff_profiles sp where sp.id = auth.uid())
++  );
++
++-- ── 4. get_my_open_visit() ──────────────────────────────────────────────
++-- The caller's current open (checked-in) visit, if any, anywhere. Powers a
++-- "you're currently checked in at X" banner and the resume/blocked logic
++-- on the dealer detail screen.
++
++create or replace function public.get_my_open_visit()
++returns table (
++  visit_id     uuid,
++  dealer_id    uuid,
++  dealer_name  text,
++  check_in_at  timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select sv.id, sv.dealer_id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as dealer_name,
++      sv.check_in_at
++    from public.sales_visits sv
++    join public.profiles p on p.id = sv.dealer_id
++    where sv.staff_email = v_email and sv.status = 'open'
++    limit 1;
++end;
++$$;
++
++grant execute on function public.get_my_open_visit() to authenticated;
++
++-- ── 5. start_dealer_visit() — check-in ──────────────────────────────────
++
++create or replace function public.start_dealer_visit(
++  p_dealer_id uuid,
++  p_latitude numeric,
++  p_longitude numeric,
++  p_duty_on_photo_url text
++)
++returns table (success boolean, message text, visit_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++  v_dealer_lat double precision;
++  v_dealer_lng double precision;
++  v_distance double precision;
++  v_open_id uuid;
++  v_open_dealer_id uuid;
++  v_new_id uuid;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to check in'::text, null::uuid;
++    return;
++  end if;
++
++  if p_duty_on_photo_url is null or length(trim(p_duty_on_photo_url)) = 0 then
++    return query select false, 'duty-on photo is required to check in'::text, null::uuid;
++    return;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return query select false, 'dealer not in your assigned list'::text, null::uuid;
++    return;
++  end if;
++
++  -- Only one open visit per rep at a time.
++  select sv.id, sv.dealer_id into v_open_id, v_open_dealer_id
++  from public.sales_visits sv
++  where sv.staff_email = v_email and sv.status = 'open'
++  limit 1;
++
++  if v_open_id is not null then
++    if v_open_dealer_id = p_dealer_id then
++      -- Already checked in here — resume rather than error.
++      return query select true, 'already checked in'::text, v_open_id;
++      return;
++    else
++      return query select false, 'you are already checked in at another dealer — check out there first'::text, null::uuid;
++      return;
++    end if;
++  end if;
++
++  select p.location_lat, p.location_lng into v_dealer_lat, v_dealer_lng
++  from public.profiles p where p.id = p_dealer_id;
++
++  if v_dealer_lat is null or v_dealer_lng is null then
++    -- First-ever check-in for this dealer sets its location.
++    update public.profiles
++    set location_lat = p_latitude, location_lng = p_longitude
++    where id = p_dealer_id;
++  else
++    v_distance := public._haversine_meters(v_dealer_lat, v_dealer_lng, p_latitude::double precision, p_longitude::double precision);
++    if v_distance > 100 then
++      return query select false,
++        format('you are about %s m from this dealer — you must be within 100m to check in', round(v_distance)::int)::text,
++        null::uuid;
++      return;
++    end if;
++  end if;
++
++  insert into public.sales_visits (
++    dealer_id, staff_email, status,
++    check_in_at, check_in_lat, check_in_lng, duty_on_photo_url,
++    visited_at, latitude, longitude
++  )
++  values (
++    p_dealer_id, v_email, 'open',
++    now(), p_latitude, p_longitude, p_duty_on_photo_url,
++    now(), p_latitude, p_longitude
++  )
++  returning id into v_new_id;
++
++  return query select true, 'checked in'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.start_dealer_visit(uuid, numeric, numeric, text) to authenticated;
++
++-- ── 6. complete_dealer_visit() — check-out ──────────────────────────────
++
++create or replace function public.complete_dealer_visit(
++  p_visit_id uuid,
++  p_latitude numeric,
++  p_longitude numeric,
++  p_board_photo_url text,
++  p_shop_photo_url text,
++  p_card_photo_url text,
++  p_video_url text,
++  p_notes text default null
++)
++returns table (success boolean, message text)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_visit record;
++  v_dealer_lat double precision;
++  v_dealer_lng double precision;
++  v_distance double precision;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text;
++    return;
++  end if;
++
++  select sv.* into v_visit
++  from public.sales_visits sv
++  where sv.id = p_visit_id and sv.staff_email = v_email and sv.status = 'open';
++
++  if not found then
++    return query select false, 'no matching open visit found'::text;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to check out'::text;
++    return;
++  end if;
++  if p_board_photo_url is null or length(trim(p_board_photo_url)) = 0 then
++    return query select false, 'shop board photo is required to check out'::text;
++    return;
++  end if;
++  if p_shop_photo_url is null or length(trim(p_shop_photo_url)) = 0 then
++    return query select false, 'shop interior photo is required to check out'::text;
++    return;
++  end if;
++  if p_card_photo_url is null or length(trim(p_card_photo_url)) = 0 then
++    return query select false, 'dealer visiting card photo is required to check out'::text;
++    return;
++  end if;
++  if p_video_url is null or length(trim(p_video_url)) = 0 then
++    return query select false, 'a short shop-interior video is required to check out'::text;
++    return;
++  end if;
++
++  select p.location_lat, p.location_lng into v_dealer_lat, v_dealer_lng
++  from public.profiles p where p.id = v_visit.dealer_id;
++
++  if v_dealer_lat is not null and v_dealer_lng is not null then
++    v_distance := public._haversine_meters(v_dealer_lat, v_dealer_lng, p_latitude::double precision, p_longitude::double precision);
++    if v_distance > 100 then
++      return query select false,
++        format('you are about %s m from this dealer — you must be within 100m to check out', round(v_distance)::int)::text;
++      return;
++    end if;
++  end if;
++
++  update public.sales_visits
++  set status = 'checked_out',
++      check_out_at = now(),
++      check_out_lat = p_latitude,
++      check_out_lng = p_longitude,
++      board_photo_url = p_board_photo_url,
++      shop_photo_url = p_shop_photo_url,
++      card_photo_url = p_card_photo_url,
++      video_url = p_video_url,
++      notes = coalesce(nullif(trim(p_notes), ''), notes)
++  where id = p_visit_id;
++
++  return query select true, 'checked out'::text;
++end;
++$$;
++
++grant execute on function public.complete_dealer_visit(uuid, numeric, numeric, text, text, text, text, text) to authenticated;
++
++-- ── 7. Widen get_my_visits() / get_dealer_visits() with the new fields ──
++
++create or replace function public.get_my_visits(p_limit int default 20)
++returns table (
++  id              uuid,
++  dealer_id       uuid,
++  dealer_name     text,
++  notes           text,
++  latitude        numeric,
++  longitude       numeric,
++  visited_at      timestamptz,
++  status          text,
++  check_in_at     timestamptz,
++  check_out_at    timestamptz,
++  duty_on_photo_url text,
++  board_photo_url text,
++  shop_photo_url  text,
++  card_photo_url  text,
++  video_url       text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select
++      sv.id, sv.dealer_id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as dealer_name,
++      sv.notes, sv.latitude, sv.longitude, sv.visited_at,
++      sv.status, sv.check_in_at, sv.check_out_at,
++      sv.duty_on_photo_url, sv.board_photo_url, sv.shop_photo_url, sv.card_photo_url, sv.video_url
++    from public.sales_visits sv
++    join public.profiles p on p.id = sv.dealer_id
++    where sv.staff_email = v_email
++    order by sv.visited_at desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_my_visits(int) to authenticated;
++
++create or replace function public.get_dealer_visits(p_dealer_id uuid, p_limit int default 10)
++returns table (
++  id              uuid,
++  staff_email     text,
++  staff_name      text,
++  notes           text,
++  latitude        numeric,
++  longitude       numeric,
++  visited_at      timestamptz,
++  status          text,
++  check_in_at     timestamptz,
++  check_out_at    timestamptz,
++  duty_on_photo_url text,
++  board_photo_url text,
++  shop_photo_url  text,
++  card_photo_url  text,
++  video_url       text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  if not v_allowed then
++    return;
++  end if;
++
++  return query
++    select
++      sv.id, sv.staff_email,
++      coalesce(sp.name, sv.staff_email) as staff_name,
++      sv.notes, sv.latitude, sv.longitude, sv.visited_at,
++      sv.status, sv.check_in_at, sv.check_out_at,
++      sv.duty_on_photo_url, sv.board_photo_url, sv.shop_photo_url, sv.card_photo_url, sv.video_url
++    from public.sales_visits sv
++    left join public.staff_profiles sp on sp.email = sv.staff_email
++    where sv.dealer_id = p_dealer_id
++    order by sv.visited_at desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_dealer_visits(uuid, int) to authenticated;
++
++-- log_dealer_visit() from sales_visits.sql is intentionally left in place,
++-- unused by the new UI — no harm keeping it, and it's a smaller fallback
++-- RPC if ever needed again.
+-- 
+2.43.0
+
+
+From a0eb11e4613cb98b28fdcdbf52410a7ee8ef6a97 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 11:02:58 +0000
+Subject: [PATCH 2/3] Add clickable coming-soon feature grid to Sales dashboard
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Per user request: every not-yet-built Sales feature (My Team,
+Attendance, Tasks, Leads, Reports, Leaves, Expenses, Forms, Targets,
+Commission, Team Performance/Strategy) is now a real clickable tile
+that opens a proper "coming soon" page, instead of an inert description
+card. Makes the dashboard read like a complete app to the Sales team
+today, even though most sections are still stubs — each gets built out
+for real, one at a time, per the existing scope decision.
+
+Feature catalog lives in src/utils/staffFeatures.js as the single
+source of truth shared between the dashboard grid and the new generic
+ComingSoon.jsx screen (/staff/sales/coming-soon/:key).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                          |   2 +
+ src/screens/staff/ComingSoon.jsx     |  52 ++++++++++++++
+ src/screens/staff/SalesDashboard.jsx | 101 +++++++++++++++++----------
+ src/utils/staffFeatures.js           |  52 ++++++++++++++
+ 4 files changed, 171 insertions(+), 36 deletions(-)
+ create mode 100644 src/screens/staff/ComingSoon.jsx
+ create mode 100644 src/utils/staffFeatures.js
+
+diff --git a/src/App.jsx b/src/App.jsx
+index ba92c7d..12c20c3 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -24,6 +24,7 @@ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
++import ComingSoon from "./screens/staff/ComingSoon";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+ import AdminOrders from "./admin/AdminOrders";
+@@ -104,6 +105,7 @@ export default function App() {
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
++        <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+         <Route path="/staff/dispatch" element={<StaffHome />} />
+         <Route path="/staff/logistics" element={<StaffHome />} />
+diff --git a/src/screens/staff/ComingSoon.jsx b/src/screens/staff/ComingSoon.jsx
+new file mode 100644
+index 0000000..835374e
+--- /dev/null
++++ b/src/screens/staff/ComingSoon.jsx
+@@ -0,0 +1,52 @@
++import { useNavigate, useParams } from "react-router-dom";
++import { FEATURE_CATALOG } from "../../utils/staffFeatures";
++
++// Generic placeholder screen every "coming soon" tile on the Sales
++// dashboard opens into. Static for now — per the 2 Sep 2026 scope
++// decision, these get built out for real one at a time, later. Having a
++// real clickable page (rather than just an inert card) is what makes the
++// dashboard read like a complete app today.
++
++export default function ComingSoon() {
++  const { key } = useParams();
++  const navigate = useNavigate();
++  const feature = FEATURE_CATALOG[key];
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 60px", color: "#fff" }}>
++        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
++          ← Back
++        </button>
++      </div>
++
++      <div style={{ maxWidth: 480, margin: "-36px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        <div style={{
++          background: "#fff", borderRadius: 18, padding: "36px 24px", textAlign: "center",
++          boxShadow: "0 4px 18px rgba(0,0,0,0.08)",
++        }}>
++          <div style={{
++            width: 64, height: 64, borderRadius: "50%", background: "#f3e6f6",
++            display: "flex", alignItems: "center", justifyContent: "center",
++            fontSize: 30, margin: "0 auto 16px",
++          }}>
++            {feature?.icon || "🚧"}
++          </div>
++          <div style={{ fontSize: 18, fontWeight: 800 }}>{feature?.title || "Feature"}</div>
++          <span style={{
++            display: "inline-block", marginTop: 10, fontSize: 11, fontWeight: 700, color: "#7B2D8B",
++            background: "#f3e6f6", borderRadius: 999, padding: "4px 12px", textTransform: "uppercase", letterSpacing: 0.4,
++          }}>
++            Coming soon
++          </span>
++          <div style={{ fontSize: 13, color: "#888", lineHeight: 1.6, marginTop: 16 }}>
++            {feature?.description || "This section isn't built yet."}
++          </div>
++          <div style={{ fontSize: 12, color: "#bbb", lineHeight: 1.6, marginTop: 18, borderTop: "1px solid #f2f2f2", paddingTop: 16 }}>
++            We're building the Sales dashboard step by step — this one's on the list. Check back soon!
++          </div>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index e80bb23..1abb728 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
+ import { useApp } from "../../context/AppContext";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { staffRoleLabel } from "../../utils/staffRoles";
++import { featuresForRole } from "../../utils/staffFeatures";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+ // senior_sales_associate, senior_sales_executive). Design approved against
+@@ -81,48 +82,51 @@ function VisitRow({ visit, onClick }) {
+     <div onClick={onClick} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}>
+       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+         <div style={{ fontSize: 13, fontWeight: 700 }}>{visit.dealer_name || "Unnamed"}</div>
+-        <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(visit.visited_at)}</div>
++        <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(visit.check_in_at || visit.visited_at)}</div>
+       </div>
+-      {visit.notes && <div style={{ fontSize: 12, color: "#666", marginTop: 3, lineHeight: 1.5 }}>{visit.notes}</div>}
++      <div style={{ marginTop: 3 }}>
++        {visit.status === "open" ? (
++          <span style={{ fontSize: 10, fontWeight: 700, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 8px" }}>Still checked in</span>
++        ) : (
++          <span style={{ fontSize: 10, fontWeight: 700, color: "#2fa84f", background: "#e6f7ec", borderRadius: 999, padding: "2px 8px" }}>Checked out</span>
++        )}
++      </div>
++      {visit.notes && <div style={{ fontSize: 12, color: "#666", marginTop: 4, lineHeight: 1.5 }}>{visit.notes}</div>}
+     </div>
+   );
+ }
+ 
+-function ComingSoonCard({ title, description }) {
++// Clickable feature tile — opens the shared ComingSoon placeholder screen
++// for that feature. Icon-grid "superapp" look rather than a plain list, so
++// the dashboard reads like a complete app even for the sections that
++// aren't built out yet.
++function FeatureTile({ icon, title, onClick }) {
+   return (
+-    <div style={{ background: "#fff", border: "1.5px dashed #ddd", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
+-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+-        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#666" }}>{title}</div>
+-        <span style={{
+-          fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6",
+-          borderRadius: 999, padding: "3px 9px", textTransform: "uppercase", letterSpacing: 0.3,
+-        }}>
+-          Coming soon
+-        </span>
++    <div
++      onClick={onClick}
++      style={{
++        background: "#fff", borderRadius: 14, padding: "16px 8px", textAlign: "center",
++        boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative",
++      }}
++    >
++      <span style={{
++        position: "absolute", top: 6, right: 6, fontSize: 8.5, fontWeight: 700, color: "#7B2D8B",
++        background: "#f3e6f6", borderRadius: 999, padding: "2px 6px", textTransform: "uppercase", letterSpacing: 0.2,
++      }}>
++        Soon
++      </span>
++      <div style={{
++        width: 40, height: 40, borderRadius: 12, background: "#f3e6f6",
++        display: "flex", alignItems: "center", justifyContent: "center",
++        fontSize: 19, margin: "0 auto 8px",
++      }}>
++        {icon}
+       </div>
+-      <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5 }}>{description}</div>
++      <div style={{ fontSize: 11, fontWeight: 700, color: "#444", lineHeight: 1.3 }}>{title}</div>
+     </div>
+   );
+ }
+ 
+-const OWN_WORK_COMING_SOON = [
+-  { title: "My Territory Map", description: "Visual map of your assigned counters and coverage area." },
+-  { title: "My Targets & Achievement", description: "Your current targets and progress against them." },
+-  { title: "My Commission / Salary Statement", description: "Your commission and salary statements by period." },
+-];
+-
+-const COMING_SOON_BY_ROLE = {
+-  sales_associate: OWN_WORK_COMING_SOON,
+-  senior_sales_associate: [
+-    { title: "My Team", description: "Review your team's onboarding submissions, approve or reject them, and adjust territory assignments." },
+-    ...OWN_WORK_COMING_SOON,
+-  ],
+-  senior_sales_executive: [
+-    { title: "Team Performance", description: "Performance rollup across every Sales Associate and Senior Sales Associate." },
+-    { title: "Targets & Strategy", description: "Set targets for the Sales team and push strategy/mission messaging down the ladder." },
+-  ],
+-};
+-
+ export default function SalesDashboard() {
+   const navigate = useNavigate();
+   const { staffProfile, signOut } = useApp();
+@@ -134,6 +138,8 @@ export default function SalesDashboard() {
+   const [visits, setVisits] = useState([]);
+   const [loadingVisits, setLoadingVisits] = useState(true);
+ 
++  const [openVisit, setOpenVisit] = useState(null);
++
+   useEffect(() => {
+     if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); return; }
+     let cancelled = false;
+@@ -152,11 +158,18 @@ export default function SalesDashboard() {
+       if (!error) setVisits(data || []);
+       setLoadingVisits(false);
+     });
++    supabase.rpc("get_my_open_visit").then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) {
++        const row = Array.isArray(data) ? data[0] : data;
++        setOpenVisit(row || null);
++      }
++    });
+     return () => { cancelled = true; };
+   }, []);
+ 
+   const roleLabel = staffRoleLabel(staffProfile?.role);
+-  const comingSoon = COMING_SOON_BY_ROLE[staffProfile?.role] || OWN_WORK_COMING_SOON;
++  const comingSoon = featuresForRole(staffProfile?.role);
+   const totalOutstanding = dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0);
+   const dealersLabel = staffProfile?.role === "senior_sales_executive" ? "Dealers, Sales dept." : "My dealers / parties";
+ 
+@@ -197,6 +210,20 @@ export default function SalesDashboard() {
+       </div>
+ 
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        {openVisit && (
++          <div
++            onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++            style={{
++              background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
++              marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
++              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
++            }}
++          >
++            <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
++            <span style={{ fontSize: 14 }}>›</span>
++          </div>
++        )}
++
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+           <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
+@@ -232,10 +259,12 @@ export default function SalesDashboard() {
+           )}
+         </div>
+ 
+-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>Also coming</div>
+-        {comingSoon.map((c) => (
+-          <ComingSoonCard key={c.title} title={c.title} description={c.description} />
+-        ))}
++        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>More</div>
++        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
++          {comingSoon.map((f) => (
++            <FeatureTile key={f.slug} icon={f.icon} title={f.title} onClick={() => navigate(`/staff/sales/coming-soon/${f.slug}`)} />
++          ))}
++        </div>
+       </div>
+     </div>
+   );
+diff --git a/src/utils/staffFeatures.js b/src/utils/staffFeatures.js
+new file mode 100644
+index 0000000..a210598
+--- /dev/null
++++ b/src/utils/staffFeatures.js
+@@ -0,0 +1,52 @@
++// Single source of truth for the Sales dashboard's "coming soon" tiles —
++// used by both SalesDashboard.jsx (the clickable grid) and ComingSoon.jsx
++// (the placeholder screen each tile opens). Static/placeholder for now —
++// per the 2 Sep 2026 scope decision (see project docs), these are just
++// clickable stubs so the dashboard reads like a real, complete app to the
++// Sales team; each gets built out for real, one at a time, later.
++
++// Personal/HR-ish items every staff member gets, regardless of tier —
++// modeled on UpTeams' module list (Attendance, Tasks, Leads, Reports,
++// Leaves, Expenses, Forms).
++const PERSONAL = [
++  { slug: "attendance", icon: "🕒", title: "Attendance", description: "Your daily punch-in / punch-out record." },
++  { slug: "tasks", icon: "✅", title: "Tasks", description: "Calls, follow-ups, and other tasks assigned to you." },
++  { slug: "leads", icon: "🎣", title: "Leads", description: "New prospects, before they become a dealer/customer." },
++  { slug: "reports", icon: "📊", title: "Reports", description: "Your performance, visits, and travel reports." },
++  { slug: "leaves", icon: "🌴", title: "Leaves", description: "Apply for and track your leave requests." },
++  { slug: "expenses", icon: "💵", title: "Expenses", description: "Submit and track your travel/field expenses." },
++  { slug: "forms", icon: "📝", title: "Forms", description: "Field forms, like customer onboarding." },
++];
++
++// Individual rep's own performance — sales_associate and senior_sales_associate.
++const OWN_WORK = [
++  { slug: "territory-map", icon: "🗺️", title: "My Territory Map", description: "Visual map of your assigned counters and coverage area." },
++  { slug: "targets", icon: "🎯", title: "My Targets & Achievement", description: "Your current targets and progress against them." },
++  { slug: "commission", icon: "💰", title: "My Commission / Salary Statement", description: "Your commission and salary statements by period." },
++];
++
++// Senior Sales Associate — team oversight on top of their own work.
++const TEAM_EXTRA = [
++  { slug: "my-team", icon: "👥", title: "My Team", description: "Review your team's onboarding submissions, approve or reject them, and adjust territory assignments." },
++];
++
++// Senior Sales Executive — department-wide, not individual-quota driven.
++const EXEC_EXTRA = [
++  { slug: "team-performance", icon: "📈", title: "Team Performance", description: "Performance rollup across every Sales Associate and Senior Sales Associate." },
++  { slug: "targets-strategy", icon: "🧭", title: "Targets & Strategy", description: "Set targets for the Sales team and push strategy/mission messaging down the ladder." },
++];
++
++export const FEATURES_BY_ROLE = {
++  sales_associate: [...OWN_WORK, ...PERSONAL],
++  senior_sales_associate: [...TEAM_EXTRA, ...OWN_WORK, ...PERSONAL],
++  senior_sales_executive: [...EXEC_EXTRA, ...PERSONAL],
++};
++
++// Flat lookup by slug, for the ComingSoon placeholder screen.
++export const FEATURE_CATALOG = Object.fromEntries(
++  [...OWN_WORK, ...TEAM_EXTRA, ...EXEC_EXTRA, ...PERSONAL].map((f) => [f.slug, f])
++);
++
++export function featuresForRole(role) {
++  return FEATURES_BY_ROLE[role] || OWN_WORK.concat(PERSONAL);
++}
+-- 
+2.43.0
+
+
+From 3f274250c9a636cf5384d6c2c3c0ba72651460f6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 13:23:08 +0000
+Subject: [PATCH 3/3] Fix CREATE OR REPLACE FUNCTION error on widened
+ get_my_visits/get_dealer_visits
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Postgres refuses to change a function's output columns via CREATE OR
+REPLACE (42P13: cannot change return type of existing function) — these
+two are growing from 7 to 15 columns versus the versions already live
+from sales_visits.sql, so the old versions need an explicit DROP
+FUNCTION first. As with the earlier CREATE POLICY syntax error, this
+failed inside Supabase's single-transaction multi-statement run, so the
+whole script's earlier statements (table changes, storage bucket, new
+RPCs) rolled back too — nothing from that run was applied.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ supabase/migrations/sales_visits_checkinout.sql | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/supabase/migrations/sales_visits_checkinout.sql b/supabase/migrations/sales_visits_checkinout.sql
+index 67a2259..40667a6 100644
+--- a/supabase/migrations/sales_visits_checkinout.sql
++++ b/supabase/migrations/sales_visits_checkinout.sql
+@@ -348,6 +348,12 @@ $$;
+ grant execute on function public.complete_dealer_visit(uuid, numeric, numeric, text, text, text, text, text) to authenticated;
+ 
+ -- ── 7. Widen get_my_visits() / get_dealer_visits() with the new fields ──
++-- Postgres won't let CREATE OR REPLACE change a function's output columns
++-- (the "OUT parameters" are part of its signature) — these two are
++-- growing from 7 columns to 15, so the old versions must be dropped first.
++
++drop function if exists public.get_my_visits(int);
++drop function if exists public.get_dealer_visits(uuid, int);
+ 
+ create or replace function public.get_my_visits(p_limit int default 20)
+ returns table (
+-- 
+2.43.0
+
