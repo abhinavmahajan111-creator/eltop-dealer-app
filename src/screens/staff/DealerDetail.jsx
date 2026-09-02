@@ -83,9 +83,13 @@ export default function DealerDetail() {
   const [openVisit, setOpenVisit] = useState(null);
   const [openVisitLoading, setOpenVisitLoading] = useState(true);
 
-  const [dutyOnFile, setDutyOnFile] = useState(null);
   const [checkingIn, setCheckingIn] = useState(false);
   const [checkInStatus, setCheckInStatus] = useState(null);
+
+  // Whether the rep has started their day (bike/vehicle meter-reading
+  // photo) yet today — required before checking in at any shop.
+  const [dayStart, setDayStart] = useState(null);
+  const [loadingDayStart, setLoadingDayStart] = useState(true);
 
   const [boardFile, setBoardFile] = useState(null);
   const [shopFile, setShopFile] = useState(null);
@@ -120,7 +124,8 @@ export default function DealerDetail() {
       supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
       supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }),
       supabase.rpc("get_my_open_visit"),
-    ]).then(([detailRes, ordersRes, visitsRes, openRes]) => {
+      supabase.rpc("get_my_day_start"),
+    ]).then(([detailRes, ordersRes, visitsRes, openRes, dayStartRes]) => {
       if (cancelled) return;
       if (detailRes.error) {
         setError(detailRes.error.message);
@@ -138,8 +143,13 @@ export default function DealerDetail() {
         const row = Array.isArray(openRes.data) ? openRes.data[0] : openRes.data;
         setOpenVisit(row || null);
       }
+      if (!dayStartRes.error) {
+        const row = Array.isArray(dayStartRes.data) ? dayStartRes.data[0] : dayStartRes.data;
+        setDayStart(row || null);
+      }
       setLoading(false);
       setOpenVisitLoading(false);
+      setLoadingDayStart(false);
     });
     return () => { cancelled = true; };
   }, [id]);
@@ -149,27 +159,19 @@ export default function DealerDetail() {
 
   const handleCheckIn = async () => {
     setCheckInStatus(null);
-    if (!dutyOnFile) {
-      setCheckInStatus({ type: "error", message: "Take your duty-on photo first." });
-      return;
-    }
     setCheckingIn(true);
     try {
       const pos = await getCurrentPosition();
-      const tagged = await tagPhoto(dutyOnFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Duty On" });
-      const url = await uploadVisitMedia(tagged, { dealerId: id, kind: "duty-on" });
       const { data, error } = await supabase.rpc("start_dealer_visit", {
         p_dealer_id: id,
         p_latitude: pos.latitude,
         p_longitude: pos.longitude,
-        p_duty_on_photo_url: url,
       });
       const result = Array.isArray(data) ? data[0] : data;
       if (error || !result?.success) {
         setCheckInStatus({ type: "error", message: error?.message || result?.message || "Couldn't check in." });
       } else {
         setCheckInStatus(null);
-        setDutyOnFile(null);
         loadOpenVisit();
         loadVisits();
       }
@@ -206,10 +208,10 @@ export default function DealerDetail() {
       ]);
 
       const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
-        uploadVisitMedia(boardTagged, { dealerId: id, kind: "board" }),
-        uploadVisitMedia(shopTagged, { dealerId: id, kind: "shop" }),
-        uploadVisitMedia(cardTagged, { dealerId: id, kind: "card" }),
-        uploadVisitMedia(videoFile, { dealerId: id, kind: "video" }),
+        uploadVisitMedia(boardTagged, { folder: id, kind: "board" }),
+        uploadVisitMedia(shopTagged, { folder: id, kind: "shop" }),
+        uploadVisitMedia(cardTagged, { folder: id, kind: "card" }),
+        uploadVisitMedia(videoFile, { folder: id, kind: "video" }),
       ]);
 
       const { data, error } = await supabase.rpc("complete_dealer_visit", {
@@ -415,10 +417,24 @@ export default function DealerDetail() {
                 </div>
               )}
             </>
+          ) : loadingDayStart ? (
+            <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
+          ) : !dayStart ? (
+            <div>
+              <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+                You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
+              </div>
+              <button
+                onClick={() => navigate("/staff/sales/start-day")}
+                style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+              >
+                🛵 Start Day
+              </button>
+            </div>
           ) : (
             <>
-              <div style={{ maxWidth: 140, marginBottom: 12 }}>
-                <PhotoSlot label="Duty-on photo" file={dutyOnFile} onChange={setDutyOnFile} disabled={checkingIn} />
+              <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12 }}>
+                Tap below to confirm — you must be within 100m of this dealer.
               </div>
               <button
                 onClick={handleCheckIn}

@@ -141,8 +141,17 @@ export default function SalesDashboard() {
   const [openVisit, setOpenVisit] = useState(null);
   const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
 
+  // Whether the rep has started their day (bike/vehicle meter-reading
+  // photo) yet today — separate from, and required before, checking in
+  // at any shop. See supabase/migrations/sales_start_day.sql.
+  const [dayStart, setDayStart] = useState(null);
+  const [loadingDayStart, setLoadingDayStart] = useState(true);
+
   useEffect(() => {
-    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); return; }
+    if (!isSupabaseConfigured) {
+      setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
+      return;
+    }
     let cancelled = false;
     supabase.rpc("get_my_dealers").then(({ data, error }) => {
       if (cancelled) return;
@@ -166,6 +175,14 @@ export default function SalesDashboard() {
         setOpenVisit(row || null);
       }
       setLoadingOpenVisit(false);
+    });
+    supabase.rpc("get_my_day_start").then(({ data, error }) => {
+      if (cancelled) return;
+      if (!error) {
+        const row = Array.isArray(data) ? data[0] : data;
+        setDayStart(row || null);
+      }
+      setLoadingDayStart(false);
     });
     return () => { cancelled = true; };
   }, []);
@@ -209,37 +226,58 @@ export default function SalesDashboard() {
             </div>
           </div>
         </div>
+
+        {/* Day-start / check-in CTA lives inside the purple header itself —
+            keeping it out of the white content area below (which uses a
+            negative top-margin to float its stat cards over the header's
+            bottom edge) avoids the purple-on-purple seam a gradient button
+            created there before. */}
+        <div style={{ marginTop: 20 }}>
+          {!loadingOpenVisit && openVisit && (
+            <div
+              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+              style={{
+                background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
+                fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+              }}
+            >
+              <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
+              <span style={{ fontSize: 14 }}>›</span>
+            </div>
+          )}
+
+          {!loadingOpenVisit && !openVisit && !loadingDayStart && !dayStart && (
+            <button
+              onClick={() => navigate("/staff/sales/start-day")}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                background: "#fff", border: "none", borderRadius: 14,
+                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+              }}
+            >
+              <span style={{ fontSize: 20 }}>🛵</span> Start Day
+            </button>
+          )}
+
+          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && (
+            <button
+              onClick={() => navigate("/staff/sales/check-in")}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                background: "#fff", border: "none", borderRadius: 14,
+                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+              }}
+            >
+              <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
-        {!loadingOpenVisit && openVisit && (
-          <div
-            onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
-            style={{
-              background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
-              marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-            }}
-          >
-            <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
-            <span style={{ fontSize: 14 }}>›</span>
-          </div>
-        )}
-
-        {!loadingOpenVisit && !openVisit && (
-          <button
-            onClick={() => navigate("/staff/sales/check-in")}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", border: "none", borderRadius: 14,
-              padding: "16px", marginBottom: 16, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
-              boxShadow: "0 4px 14px rgba(123,45,139,0.3)",
-            }}
-          >
-            <span style={{ fontSize: 20 }}>📍</span> Check In / Start Day
-          </button>
-        )}
-
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
           <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />

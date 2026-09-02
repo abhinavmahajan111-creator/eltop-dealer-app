@@ -98,12 +98,15 @@ export async function tagPhoto(file, { latitude, longitude, label } = {}) {
   });
 }
 
-// Uploads a Blob/File to the visit-media bucket under a per-visit path and
-// returns its public URL. `kind` is a short filename hint, e.g.
-// "duty-on", "board", "shop", "card", "video".
-export async function uploadVisitMedia(blobOrFile, { dealerId, kind, ext }) {
+// Uploads a Blob/File to the visit-media bucket under a per-folder path and
+// returns its public URL. `folder` scopes the path — a dealer id for
+// shop check-in/out media, or a fixed folder like "day-start" for the
+// bike/vehicle meter-reading photo, which isn't tied to any dealer.
+// `kind` is a short filename hint, e.g. "duty-on", "board", "shop",
+// "card", "video", "meter".
+export async function uploadVisitMedia(blobOrFile, { folder, kind, ext }) {
   const resolvedExt = ext || (blobOrFile.type && blobOrFile.type.includes("video") ? "webm" : "jpg");
-  const path = `${dealerId}/${Date.now()}-${kind}.${resolvedExt}`;
+  const path = `${folder}/${Date.now()}-${kind}.${resolvedExt}`;
   const { error } = await supabase.storage.from(BUCKET).upload(path, blobOrFile, {
     upsert: true,
     contentType: blobOrFile.type || undefined,
