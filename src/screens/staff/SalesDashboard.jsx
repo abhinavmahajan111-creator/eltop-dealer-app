@@ -139,9 +139,10 @@ export default function SalesDashboard() {
   const [loadingVisits, setLoadingVisits] = useState(true);
 
   const [openVisit, setOpenVisit] = useState(null);
+  const [loadingOpenVisit, setLoadingOpenVisit] = useState(true);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); return; }
+    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); return; }
     let cancelled = false;
     supabase.rpc("get_my_dealers").then(({ data, error }) => {
       if (cancelled) return;
@@ -164,6 +165,7 @@ export default function SalesDashboard() {
         const row = Array.isArray(data) ? data[0] : data;
         setOpenVisit(row || null);
       }
+      setLoadingOpenVisit(false);
     });
     return () => { cancelled = true; };
   }, []);
@@ -210,7 +212,7 @@ export default function SalesDashboard() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
-        {openVisit && (
+        {!loadingOpenVisit && openVisit && (
           <div
             onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
             style={{
@@ -222,6 +224,20 @@ export default function SalesDashboard() {
             <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
             <span style={{ fontSize: 14 }}>›</span>
           </div>
+        )}
+
+        {!loadingOpenVisit && !openVisit && (
+          <button
+            onClick={() => navigate("/staff/sales/check-in")}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", border: "none", borderRadius: 14,
+              padding: "16px", marginBottom: 16, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer",
+              boxShadow: "0 4px 14px rgba(123,45,139,0.3)",
+            }}
+          >
+            <span style={{ fontSize: 20 }}>📍</span> Check In / Start Day
+          </button>
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
