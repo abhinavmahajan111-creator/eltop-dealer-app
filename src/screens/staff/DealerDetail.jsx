@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
-import { getCurrentPosition, getVideoDuration, tagPhoto, uploadVisitMedia } from "../../utils/visitMedia";
-import PhotoSlot from "../../components/staff/PhotoSlot";
+import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
+import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
 
 // Dealer detail screen for Sales staff — reached by tapping a dealer in
 // "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
 // before/during a call: contact info, credit terms, recent order history,
-// and a full check-in/check-out visit workflow (not a simple log button):
-// check-in requires GPS within 100m of the dealer plus a "duty on" photo;
-// check-out requires a board photo, a shop-interior photo, a dealer
-// visiting-card photo, and a short shop video, all re-checked against the
-// same 100m geofence. A dealer's first-ever check-in sets its saved
-// location if it doesn't have one yet (profiles.location_lat/lng).
+// and an inline check-in/check-out visit workflow: check-in requires GPS
+// within 100m of the dealer and that the rep has already started their
+// day (see DayCheckIn.jsx) — no photo needed here, that's Start Day's
+// job. Check-out requires a board photo, a shop-interior photo, a dealer
+// visiting-card photo, and a short shop video (all captured live via
+// CameraCapture — no gallery picker, geo-tag burned in), re-checked
+// against the same 100m geofence. A dealer's first-ever check-in sets its
+// saved location if it doesn't have one yet (profiles.location_lat/lng).
 //
 // Every RPC here (get_dealer_detail, get_dealer_orders, get_dealer_visits,
 // get_my_open_visit, start_dealer_visit, complete_dealer_visit) re-checks
@@ -22,6 +24,7 @@ import PhotoSlot from "../../components/staff/PhotoSlot";
 
 const CARD_STYLE = {
   background: "#fff",
+  border: "1.5px solid #7B2D8B",
   borderRadius: 14,
   padding: "16px 18px",
   marginBottom: 14,
@@ -201,16 +204,12 @@ export default function DealerDetail() {
         return;
       }
 
-      const [boardTagged, shopTagged, cardTagged] = await Promise.all([
-        tagPhoto(boardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Board" }),
-        tagPhoto(shopFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Shop Interior" }),
-        tagPhoto(cardFile, { latitude: pos.latitude, longitude: pos.longitude, label: "Dealer Card" }),
-      ]);
-
+      // Each file is already geo-tagged — CameraPhotoSlot burns the tag in
+      // at capture time — so this just uploads them straight through.
       const [boardUrl, shopUrl, cardUrl, videoUrl] = await Promise.all([
-        uploadVisitMedia(boardTagged, { folder: id, kind: "board" }),
-        uploadVisitMedia(shopTagged, { folder: id, kind: "shop" }),
-        uploadVisitMedia(cardTagged, { folder: id, kind: "card" }),
+        uploadVisitMedia(boardFile, { folder: id, kind: "board" }),
+        uploadVisitMedia(shopFile, { folder: id, kind: "shop" }),
+        uploadVisitMedia(cardFile, { folder: id, kind: "card" }),
         uploadVisitMedia(videoFile, { folder: id, kind: "video" }),
       ]);
 
@@ -372,26 +371,12 @@ export default function DealerDetail() {
                 🟢 Checked in since {formatTime(openVisit.check_in_at)} — complete check-out below.
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
-                <PhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
-                <PhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
-                <PhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
+                <CameraPhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
+                <CameraPhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
+                <CameraPhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
               </div>
               <div style={{ marginBottom: 12 }}>
-                <label style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  border: videoFile ? "2px solid #2fa84f" : "1.5px dashed #ccc", borderRadius: 8,
-                  padding: "10px", fontSize: 12.5, fontWeight: 700, color: videoFile ? "#2fa84f" : "#888", cursor: "pointer",
-                }}>
-                  {videoFile ? `✓ Video selected (${videoFile.name})` : "🎥 Record ~5s video of shop interior"}
-                  <input
-                    type="file"
-                    accept="video/*"
-                    capture="environment"
-                    disabled={checkingOut}
-                    onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
-                    style={{ display: "none" }}
-                  />
-                </label>
+                <CameraVideoSlot file={videoFile} onChange={setVideoFile} disabled={checkingOut} />
               </div>
               <textarea
                 value={checkoutNotes}
@@ -419,13 +404,17 @@ export default function DealerDetail() {
             </>
           ) : loadingDayStart ? (
             <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
+          ) : dayStart?.ended_at ? (
+            <div style={{ fontSize: 12.5, color: "#888", fontWeight: 600, background: "#f2f2f2", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>
+              Your day has ended — you can't check in anywhere else until you start a new day tomorrow.
+            </div>
           ) : !dayStart ? (
             <div>
               <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
                 You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
               </div>
               <button
-                onClick={() => navigate("/staff/sales/start-day")}
+                onClick={() => navigate("/staff/sales/day-checkin")}
                 style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
               >
                 🛵 Start Day
@@ -457,7 +446,7 @@ export default function DealerDetail() {
         </div>
 
         <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Recent Visits</div>
-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
           {visits.length === 0 ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No visits logged yet.</div>
           ) : (
@@ -495,7 +484,7 @@ export default function DealerDetail() {
         </div>
 
         <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Order History</div>
-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
           {orders.length === 0 ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No orders yet.</div>
           ) : (

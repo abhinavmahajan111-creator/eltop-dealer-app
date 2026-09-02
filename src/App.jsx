@@ -24,8 +24,7 @@ import Support from "./screens/Support";
 import StaffHome from "./screens/StaffHome";
 import SalesDashboard from "./screens/staff/SalesDashboard";
 import DealerDetail from "./screens/staff/DealerDetail";
-import CheckIn from "./screens/staff/CheckIn";
-import StartDay from "./screens/staff/StartDay";
+import DayCheckIn from "./screens/staff/DayCheckIn";
 import ComingSoon from "./screens/staff/ComingSoon";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
@@ -106,8 +105,11 @@ export default function App() {
       <Route element={<StaffRoute />}>
         <Route path="/staff" element={<StaffHome />} />
         <Route path="/staff/sales" element={<SalesDashboard />} />
-        <Route path="/staff/sales/check-in" element={<CheckIn />} />
-        <Route path="/staff/sales/start-day" element={<StartDay />} />
+        <Route path="/staff/sales/day-checkin" element={<DayCheckIn />} />
+        {/* Old separate Start Day / Check In routes — redirect to the
+            combined tabbed screen that replaced them. */}
+        <Route path="/staff/sales/check-in" element={<Navigate to="/staff/sales/day-checkin" replace />} />
+        <Route path="/staff/sales/start-day" element={<Navigate to="/staff/sales/day-checkin" replace />} />
         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
         <Route path="/staff/after-sales" element={<StaffHome />} />

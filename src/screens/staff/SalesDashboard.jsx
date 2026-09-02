@@ -29,6 +29,7 @@ function initials(name) {
 
 const CARD_STYLE = {
   background: "#fff",
+  border: "1.5px solid #7B2D8B",
   borderRadius: 14,
   padding: "16px 18px",
   marginBottom: 14,
@@ -105,7 +106,7 @@ function FeatureTile({ icon, title, onClick }) {
     <div
       onClick={onClick}
       style={{
-        background: "#fff", borderRadius: 14, padding: "16px 8px", textAlign: "center",
+        background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "16px 8px", textAlign: "center",
         boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative",
       }}
     >
@@ -231,11 +232,12 @@ export default function SalesDashboard() {
             keeping it out of the white content area below (which uses a
             negative top-margin to float its stat cards over the header's
             bottom edge) avoids the purple-on-purple seam a gradient button
-            created there before. */}
+            created there before. Everything here routes into the combined
+            Day / Check In screen — its own tabs handle the rest. */}
         <div style={{ marginTop: 20 }}>
           {!loadingOpenVisit && openVisit && (
             <div
-              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+              onClick={() => navigate("/staff/sales/day-checkin")}
               style={{
                 background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
                 fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
@@ -249,7 +251,7 @@ export default function SalesDashboard() {
 
           {!loadingOpenVisit && !openVisit && !loadingDayStart && !dayStart && (
             <button
-              onClick={() => navigate("/staff/sales/start-day")}
+              onClick={() => navigate("/staff/sales/day-checkin")}
               style={{
                 width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                 background: "#fff", border: "none", borderRadius: 14,
@@ -261,9 +263,9 @@ export default function SalesDashboard() {
             </button>
           )}
 
-          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && (
+          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && !dayStart.ended_at && (
             <button
-              onClick={() => navigate("/staff/sales/check-in")}
+              onClick={() => navigate("/staff/sales/day-checkin")}
               style={{
                 width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
                 background: "#fff", border: "none", borderRadius: 14,
@@ -272,6 +274,20 @@ export default function SalesDashboard() {
               }}
             >
               <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
+            </button>
+          )}
+
+          {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart?.ended_at && (
+            <button
+              onClick={() => navigate("/staff/sales/day-checkin")}
+              style={{
+                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+                background: "#fff", border: "none", borderRadius: 14,
+                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
+                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+              }}
+            >
+              <span style={{ fontSize: 20 }}>✅</span> Day ended — view summary
             </button>
           )}
         </div>
@@ -284,7 +300,7 @@ export default function SalesDashboard() {
         </div>
 
         <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
           {loadingDealers ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
           ) : dealerError ? (
@@ -301,7 +317,7 @@ export default function SalesDashboard() {
         </div>
 
         <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
           {loadingVisits ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
           ) : visits.length === 0 ? (
