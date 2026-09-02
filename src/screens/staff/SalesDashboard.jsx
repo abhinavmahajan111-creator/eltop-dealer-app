@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { staffRoleLabel } from "../../utils/staffRoles";
+import { featuresForRole } from "../../utils/staffFeatures";
 
 // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
 // senior_sales_associate, senior_sales_executive). Design approved against
@@ -81,47 +82,50 @@ function VisitRow({ visit, onClick }) {
     <div onClick={onClick} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>{visit.dealer_name || "Unnamed"}</div>
-        <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(visit.visited_at)}</div>
+        <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(visit.check_in_at || visit.visited_at)}</div>
       </div>
-      {visit.notes && <div style={{ fontSize: 12, color: "#666", marginTop: 3, lineHeight: 1.5 }}>{visit.notes}</div>}
+      <div style={{ marginTop: 3 }}>
+        {visit.status === "open" ? (
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 8px" }}>Still checked in</span>
+        ) : (
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#2fa84f", background: "#e6f7ec", borderRadius: 999, padding: "2px 8px" }}>Checked out</span>
+        )}
+      </div>
+      {visit.notes && <div style={{ fontSize: 12, color: "#666", marginTop: 4, lineHeight: 1.5 }}>{visit.notes}</div>}
     </div>
   );
 }
 
-function ComingSoonCard({ title, description }) {
+// Clickable feature tile — opens the shared ComingSoon placeholder screen
+// for that feature. Icon-grid "superapp" look rather than a plain list, so
+// the dashboard reads like a complete app even for the sections that
+// aren't built out yet.
+function FeatureTile({ icon, title, onClick }) {
   return (
-    <div style={{ background: "#fff", border: "1.5px dashed #ddd", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: "#666" }}>{title}</div>
-        <span style={{
-          fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6",
-          borderRadius: 999, padding: "3px 9px", textTransform: "uppercase", letterSpacing: 0.3,
-        }}>
-          Coming soon
-        </span>
+    <div
+      onClick={onClick}
+      style={{
+        background: "#fff", borderRadius: 14, padding: "16px 8px", textAlign: "center",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer", position: "relative",
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 6, right: 6, fontSize: 8.5, fontWeight: 700, color: "#7B2D8B",
+        background: "#f3e6f6", borderRadius: 999, padding: "2px 6px", textTransform: "uppercase", letterSpacing: 0.2,
+      }}>
+        Soon
+      </span>
+      <div style={{
+        width: 40, height: 40, borderRadius: 12, background: "#f3e6f6",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 19, margin: "0 auto 8px",
+      }}>
+        {icon}
       </div>
-      <div style={{ fontSize: 12, color: "#aaa", lineHeight: 1.5 }}>{description}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#444", lineHeight: 1.3 }}>{title}</div>
     </div>
   );
 }
-
-const OWN_WORK_COMING_SOON = [
-  { title: "My Territory Map", description: "Visual map of your assigned counters and coverage area." },
-  { title: "My Targets & Achievement", description: "Your current targets and progress against them." },
-  { title: "My Commission / Salary Statement", description: "Your commission and salary statements by period." },
-];
-
-const COMING_SOON_BY_ROLE = {
-  sales_associate: OWN_WORK_COMING_SOON,
-  senior_sales_associate: [
-    { title: "My Team", description: "Review your team's onboarding submissions, approve or reject them, and adjust territory assignments." },
-    ...OWN_WORK_COMING_SOON,
-  ],
-  senior_sales_executive: [
-    { title: "Team Performance", description: "Performance rollup across every Sales Associate and Senior Sales Associate." },
-    { title: "Targets & Strategy", description: "Set targets for the Sales team and push strategy/mission messaging down the ladder." },
-  ],
-};
 
 export default function SalesDashboard() {
   const navigate = useNavigate();
@@ -133,6 +137,8 @@ export default function SalesDashboard() {
 
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(true);
+
+  const [openVisit, setOpenVisit] = useState(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); return; }
@@ -152,11 +158,18 @@ export default function SalesDashboard() {
       if (!error) setVisits(data || []);
       setLoadingVisits(false);
     });
+    supabase.rpc("get_my_open_visit").then(({ data, error }) => {
+      if (cancelled) return;
+      if (!error) {
+        const row = Array.isArray(data) ? data[0] : data;
+        setOpenVisit(row || null);
+      }
+    });
     return () => { cancelled = true; };
   }, []);
 
   const roleLabel = staffRoleLabel(staffProfile?.role);
-  const comingSoon = COMING_SOON_BY_ROLE[staffProfile?.role] || OWN_WORK_COMING_SOON;
+  const comingSoon = featuresForRole(staffProfile?.role);
   const totalOutstanding = dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0);
   const dealersLabel = staffProfile?.role === "senior_sales_executive" ? "Dealers, Sales dept." : "My dealers / parties";
 
@@ -197,6 +210,20 @@ export default function SalesDashboard() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+        {openVisit && (
+          <div
+            onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+            style={{
+              background: "#fff8ea", border: "1.5px solid #f3d98a", borderRadius: 12, padding: "12px 16px",
+              marginBottom: 16, fontSize: 12.5, fontWeight: 600, color: "#8a6100", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            }}
+          >
+            <span>🟢 Checked in at <b>{openVisit.dealer_name}</b> since {formatDateTime(openVisit.check_in_at)} — tap to check out</span>
+            <span style={{ fontSize: 14 }}>›</span>
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
           <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
@@ -232,10 +259,12 @@ export default function SalesDashboard() {
           )}
         </div>
 
-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>Also coming</div>
-        {comingSoon.map((c) => (
-          <ComingSoonCard key={c.title} title={c.title} description={c.description} />
-        ))}
+        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>More</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {comingSoon.map((f) => (
+            <FeatureTile key={f.slug} icon={f.icon} title={f.title} onClick={() => navigate(`/staff/sales/coming-soon/${f.slug}`)} />
+          ))}
+        </div>
       </div>
     </div>
   );
