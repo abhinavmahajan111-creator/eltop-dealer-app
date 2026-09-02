@@ -4,10 +4,11 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 
 // Dealer detail screen for Sales staff — reached by tapping a dealer in
 // "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
-// before/during a call: contact info, credit terms, and recent order
-// history, all in one place. Both RPCs (get_dealer_detail,
-// get_dealer_orders) re-check that this dealer is within the caller's own
-// scope server-side — a rep can't view another rep's dealer just by
+// before/during a call: contact info, credit terms, recent order history,
+// and now visit logging with GPS check-in. Every RPC here (get_dealer_
+// detail, get_dealer_orders, get_dealer_visits, log_dealer_visit)
+// re-checks that this dealer is within the caller's own scope server-side
+// — a rep can't view or log against another rep's dealer just by
 // knowing/guessing its id.
 
 const CARD_STYLE = {
@@ -26,6 +27,11 @@ function initials(name) {
 function formatDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function StatusBadge({ status }) {
@@ -55,8 +61,19 @@ export default function DealerDetail() {
 
   const [dealer, setDealer] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [visitNotes, setVisitNotes] = useState("");
+  const [logging, setLogging] = useState(false);
+  const [logStatus, setLogStatus] = useState(null); // { type: 'success'|'error', message }
+
+  const loadVisits = () => {
+    supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }).then(({ data, error }) => {
+      if (!error) setVisits(data || []);
+    });
+  };
 
   useEffect(() => {
     if (!isSupabaseConfigured || !id) { setLoading(false); return; }
@@ -64,7 +81,8 @@ export default function DealerDetail() {
     Promise.all([
       supabase.rpc("get_dealer_detail", { p_dealer_id: id }),
       supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
-    ]).then(([detailRes, ordersRes]) => {
+      supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }),
+    ]).then(([detailRes, ordersRes, visitsRes]) => {
       if (cancelled) return;
       if (detailRes.error) {
         setError(detailRes.error.message);
@@ -77,10 +95,45 @@ export default function DealerDetail() {
         }
       }
       if (!ordersRes.error) setOrders(ordersRes.data || []);
+      if (!visitsRes.error) setVisits(visitsRes.data || []);
       setLoading(false);
     });
     return () => { cancelled = true; };
   }, [id]);
+
+  const handleLogVisit = () => {
+    setLogging(true);
+    setLogStatus(null);
+
+    const submit = (lat, lng) => {
+      supabase.rpc("log_dealer_visit", {
+        p_dealer_id: id,
+        p_notes: visitNotes,
+        p_latitude: lat,
+        p_longitude: lng,
+      }).then(({ data, error }) => {
+        const result = Array.isArray(data) ? data[0] : data;
+        if (error || !result?.success) {
+          setLogStatus({ type: "error", message: error?.message || result?.message || "Couldn't log visit." });
+        } else {
+          setLogStatus({ type: "success", message: lat != null ? "Visit logged with location." : "Visit logged (no location captured)." });
+          setVisitNotes("");
+          loadVisits();
+        }
+        setLogging(false);
+      });
+    };
+
+    if (!navigator.geolocation) {
+      submit(null, null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => submit(pos.coords.latitude, pos.coords.longitude),
+      () => submit(null, null), // location denied/unavailable — still log the visit, just without GPS
+      { timeout: 8000 }
+    );
+  };
 
   if (loading) {
     return (
@@ -184,6 +237,60 @@ export default function DealerDetail() {
           )}
           {!dealer.phone && !dealer.email && !dealer.address && (
             <div style={{ fontSize: 12.5, color: "#aaa" }}>No contact details on file yet.</div>
+          )}
+        </div>
+
+        <div style={CARD_STYLE}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Log a Visit</div>
+          <textarea
+            value={visitNotes}
+            onChange={(e) => setVisitNotes(e.target.value)}
+            placeholder="What happened on this visit? (optional)"
+            rows={3}
+            style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10, boxSizing: "border-box" }}
+          />
+          <button
+            onClick={handleLogVisit}
+            disabled={logging}
+            style={{
+              width: "100%", padding: "11px", border: "none", borderRadius: 8,
+              background: logging ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
+              cursor: logging ? "default" : "pointer",
+            }}
+          >
+            {logging ? "Logging…" : "📍 Log Visit"}
+          </button>
+          {logStatus && (
+            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: logStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
+              {logStatus.message}
+            </div>
+          )}
+        </div>
+
+        <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Recent Visits</div>
+        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+          {visits.length === 0 ? (
+            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No visits logged yet.</div>
+          ) : (
+            visits.map((v) => (
+              <div key={v.id} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{v.staff_name}</div>
+                  <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(v.visited_at)}</div>
+                </div>
+                {v.notes && <div style={{ fontSize: 12.5, color: "#666", marginTop: 4, lineHeight: 1.5 }}>{v.notes}</div>}
+                {v.latitude != null && v.longitude != null && (
+                  <a
+                    href={`https://www.google.com/maps?q=${v.latitude},${v.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ display: "inline-block", marginTop: 4, fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}
+                  >
+                    📍 View location
+                  </a>
+                )}
+              </div>
+            ))
           )}
         </div>
 

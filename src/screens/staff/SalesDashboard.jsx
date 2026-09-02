@@ -13,11 +13,13 @@ import { staffRoleLabel } from "../../utils/staffRoles";
 // DEFINER RPC scoped per role (see supabase/migrations/
 // sales_dealer_assignment.sql). Dealers only show up once Admin assigns
 // them to a rep via AdminDealers' new "Assigned Sales Rep" field.
+// "My Visits" is also real now — recent visits logged from a dealer's
+// detail screen (get_my_visits(), see supabase/migrations/sales_visits.sql).
 //
-// What's still "coming soon": visit logging, GPS check-in, targets,
-// commission, and (for Senior tiers) a real team-performance view — none
-// of those have a data model yet, so rather than show made-up numbers in a
-// live app, those sections stay clearly marked as not built yet.
+// What's still "coming soon": territory map, targets, commission, and
+// (for Senior tiers) a real team-performance view — none of those have a
+// data model yet, so rather than show made-up numbers in a live app,
+// those sections stay clearly marked as not built yet.
 
 function initials(name) {
   if (!name) return "?";
@@ -69,6 +71,23 @@ function DealerRow({ dealer, onClick }) {
   );
 }
 
+function formatDateTime(iso) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
+function VisitRow({ visit, onClick }) {
+  return (
+    <div onClick={onClick} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>{visit.dealer_name || "Unnamed"}</div>
+        <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(visit.visited_at)}</div>
+      </div>
+      {visit.notes && <div style={{ fontSize: 12, color: "#666", marginTop: 3, lineHeight: 1.5 }}>{visit.notes}</div>}
+    </div>
+  );
+}
+
 function ComingSoonCard({ title, description }) {
   return (
     <div style={{ background: "#fff", border: "1.5px dashed #ddd", borderRadius: 14, padding: "16px 18px", marginBottom: 12 }}>
@@ -87,7 +106,6 @@ function ComingSoonCard({ title, description }) {
 }
 
 const OWN_WORK_COMING_SOON = [
-  { title: "My Visits", description: "Log dealer-onboarding visits and see your visit history." },
   { title: "My Territory Map", description: "Visual map of your assigned counters and coverage area." },
   { title: "My Targets & Achievement", description: "Your current targets and progress against them." },
   { title: "My Commission / Salary Statement", description: "Your commission and salary statements by period." },
@@ -113,8 +131,11 @@ export default function SalesDashboard() {
   const [loadingDealers, setLoadingDealers] = useState(true);
   const [dealerError, setDealerError] = useState(null);
 
+  const [visits, setVisits] = useState([]);
+  const [loadingVisits, setLoadingVisits] = useState(true);
+
   useEffect(() => {
-    if (!isSupabaseConfigured) { setLoadingDealers(false); return; }
+    if (!isSupabaseConfigured) { setLoadingDealers(false); setLoadingVisits(false); return; }
     let cancelled = false;
     supabase.rpc("get_my_dealers").then(({ data, error }) => {
       if (cancelled) return;
@@ -125,6 +146,11 @@ export default function SalesDashboard() {
         setDealers(data || []);
       }
       setLoadingDealers(false);
+    });
+    supabase.rpc("get_my_visits", { p_limit: 10 }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (!error) setVisits(data || []);
+      setLoadingVisits(false);
     });
     return () => { cancelled = true; };
   }, []);
@@ -190,6 +216,19 @@ export default function SalesDashboard() {
             </div>
           ) : (
             dealers.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => navigate(`/staff/sales/dealer/${d.id}`)} />)
+          )}
+        </div>
+
+        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
+        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+          {loadingVisits ? (
+            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+          ) : visits.length === 0 ? (
+            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999", lineHeight: 1.6 }}>
+              No visits logged yet.<br />Open a dealer to log your first visit.
+            </div>
+          ) : (
+            visits.map((v) => <VisitRow key={v.id} visit={v} onClick={() => navigate(`/staff/sales/dealer/${v.dealer_id}`)} />)
           )}
         </div>
 
