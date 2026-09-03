@@ -256,9 +256,12 @@ export default function DayCheckIn() {
     setCheckingOut(true);
     try {
       const pos = await getCurrentPosition();
+      // Recording itself now auto-stops at 5s (see CameraVideoSlot), so
+      // this is just a safety-net check in case a device's encoder pads
+      // the clip slightly beyond that.
       const duration = await getVideoDuration(videoFile);
-      if (duration != null && duration > 20) {
-        setCheckOutError(`That video is ${Math.round(duration)}s — please re-record a short ~5 second clip.`);
+      if (duration != null && duration > 8) {
+        setCheckOutError(`That video is ${Math.round(duration)}s — please re-record it.`);
         setCheckingOut(false);
         return;
       }

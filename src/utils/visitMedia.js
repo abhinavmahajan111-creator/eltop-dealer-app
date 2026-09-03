@@ -5,9 +5,9 @@
 // components/staff/CameraCapture.jsx) rather than a file/gallery picker —
 // there's no way to substitute an old or fake photo, since capture and
 // the geo-tag/timestamp burn-in both happen at the moment of shooting.
-// There's also no way to hard-cap the video at exactly 5 seconds; the UI
-// guides the rep to keep it short and does a soft (non-blocking) duration
-// check instead of rejecting longer clips outright.
+// The shop-interior video recording auto-stops at 5 seconds (see
+// MAX_VIDEO_SECONDS in CameraCapture.jsx); getVideoDuration() below is
+// only used as an extra safety-net check after the fact.
 
 import { supabase } from "../lib/supabase";
 

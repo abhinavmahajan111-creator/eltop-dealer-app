@@ -164,14 +164,40 @@ export function CameraPhotoSlot({ label, file, onChange, disabled }) {
   );
 }
 
-export function CameraVideoSlot({ label = "Record ~5s video of shop interior", file, onChange, disabled }) {
+// Hard cap on the shop-interior video — recording auto-stops at this many
+// seconds, so there's no way to submit a long clip (previously this was
+// only a soft, after-the-fact warning; now it's enforced live).
+const MAX_VIDEO_SECONDS = 5;
+
+export function CameraVideoSlot({ label = "Record 5s video of shop interior", file, onChange, disabled }) {
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(MAX_VIDEO_SECONDS);
   const { videoRef, streamRef, error } = useCameraStream(open, true);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const stopTimeoutRef = useRef(null);
+  const tickIntervalRef = useRef(null);
 
-  const handleOpen = () => { if (!disabled) setOpen(true); };
+  const clearTimers = () => {
+    if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
+    if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
+  };
+
+  // Timers are tied to the camera modal's lifetime, not the component's —
+  // clear them whenever the modal closes for any reason (stop button,
+  // auto-stop, or the ✕ close button), so a reopened modal always starts
+  // its own fresh 5s window.
+  useEffect(() => {
+    if (!open) clearTimers();
+    return () => { if (!open) clearTimers(); };
+  }, [open]);
+
+  const handleOpen = () => {
+    if (disabled) return;
+    setSecondsLeft(MAX_VIDEO_SECONDS);
+    setOpen(true);
+  };
 
   const startRecording = () => {
     if (!streamRef.current) return;
@@ -179,6 +205,7 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
     const recorder = new MediaRecorder(streamRef.current);
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     recorder.onstop = () => {
+      clearTimers();
       const blob = new Blob(chunksRef.current, { type: "video/webm" });
       onChange(blob);
       setOpen(false);
@@ -187,9 +214,18 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
     recorder.start();
     recorderRef.current = recorder;
     setRecording(true);
+    setSecondsLeft(MAX_VIDEO_SECONDS);
+
+    tickIntervalRef.current = setInterval(() => {
+      setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    stopTimeoutRef.current = setTimeout(() => {
+      stopRecording();
+    }, MAX_VIDEO_SECONDS * 1000);
   };
 
   const stopRecording = () => {
+    clearTimers();
     if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
   };
 
@@ -208,7 +244,13 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
       </div>
 
       {open && (
-        <CameraModal title="Record video" videoRef={videoRef} error={error} onClose={() => { stopRecording(); setOpen(false); }}>
+        <CameraModal
+          title="Record video"
+          videoRef={videoRef}
+          error={error}
+          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${MAX_VIDEO_SECONDS}s — recording stops automatically`}
+          onClose={() => { stopRecording(); setOpen(false); }}
+        >
           {!recording ? (
             <button
               onClick={startRecording}
