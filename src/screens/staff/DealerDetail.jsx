@@ -5,7 +5,7 @@ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../ut
 import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
 import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
 import { isDebitEntry, computeAgeingBuckets } from "../../lib/ledgerUtils";
-import { fmtCurrency, exportRowsToExcel, exportTableToPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
+import { fmtCurrency, exportRowsToExcel, exportLedgerStatementPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
 import DealerLedgerTab from "../../components/staff/DealerLedgerTab";
 import DealerInsightsTab from "../../components/staff/DealerInsightsTab";
 
@@ -267,29 +267,39 @@ export default function DealerDetail() {
 
   const handleExportStatement = async (format) => {
     const { data } = await supabase.rpc("get_dealer_ledger", { p_dealer_id: id, p_from: null, p_to: null });
-    const rows = (data || []).map((r) => ({
-      Date: formatDate(r.voucher_date || r.created_at),
-      Particulars: r.type === "order" ? "Sales" : r.type === "payment" ? "Payment" : r.type === "credit_note" ? "Credit Note" : "Journal",
-      "Voucher No": r.voucher_no || "",
-      Debit: isDebitEntry(r) ? Number(r.amount) : "",
-      Credit: !isDebitEntry(r) ? Number(r.amount) : "",
-    }));
+    const ledgerRows = data || [];
+
     if (format === "excel") {
+      const rows = ledgerRows.map((r) => ({
+        Date: formatDate(r.voucher_date || r.created_at),
+        Particulars: r.type === "order" ? "Sales" : r.type === "payment" ? "Payment" : r.type === "credit_note" ? "Credit Note" : "Journal",
+        "Voucher No": r.voucher_no || "",
+        Debit: isDebitEntry(r) ? Number(r.amount) : "",
+        Credit: !isDebitEntry(r) ? Number(r.amount) : "",
+      }));
       exportRowsToExcel({ filename: exportFilename(dealer?.dealer_code, "Statement", "xlsx"), sheetName: "Statement", rows });
-    } else {
-      exportTableToPdf({
-        filename: exportFilename(dealer?.dealer_code, "Statement", "pdf"),
-        title: `Statement — ${dealer?.name || ""}`,
-        subtitle: "All-time ledger",
-        columns: [
-          { header: "Date", key: "Date" }, { header: "Particulars", key: "Particulars" },
-          { header: "Voucher No", key: "Voucher No" },
-          { header: "Debit", key: "Debit", format: (v) => (v ? fmtCurrency(v) : "") },
-          { header: "Credit", key: "Credit", format: (v) => (v ? fmtCurrency(v) : "") },
-        ],
-        rows,
-      });
+      return;
     }
+
+    // All-time statement, so opening balance is always 0 — the running
+    // balance is built forward the same way DealerLedgerTab does.
+    let running = 0;
+    const withBalance = ledgerRows.map((r) => {
+      const debit = isDebitEntry(r);
+      running = debit ? running + Number(r.amount || 0) : running - Number(r.amount || 0);
+      return { ...r, _debit: debit, _after: running };
+    });
+
+    exportLedgerStatementPdf({
+      dealer,
+      dealerCode: dealer?.dealer_code,
+      fromLabel: "the beginning",
+      toLabel: "today",
+      openingBalance: 0,
+      closingBalance: running,
+      rows: withBalance,
+      filename: exportFilename(dealer?.dealer_code, "Statement", "pdf"),
+    });
   };
 
   if (loading) {
@@ -376,7 +386,7 @@ export default function DealerDetail() {
           />
         )}
 
-        {tab === "ledger" && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} />}
+        {tab === "ledger" && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} />}
 
         {tab === "orders" && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
 

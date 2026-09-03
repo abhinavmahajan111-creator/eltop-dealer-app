@@ -130,6 +130,137 @@ export function exportTableToPdf({ filename, title, subtitle, columns, rows }) {
   doc.save(filename);
 }
 
+// Same company letterhead data generatePriceListPDF.js uses (there it's
+// sourced from Store.jsx's footer — the app's single source of truth for
+// this static business info). Duplicated as a small constant here rather
+// than importing across modules with independently-configured jsPDF docs.
+const COMPANY_INFO = {
+  name: "Embassy Electricals (India) Pvt. Ltd.",
+  addressLines: ["Kh. No. 154/632, Phirni Road, Pooth Khurd,", "Bawana Ind. Area, Delhi - 110039"],
+  gstin: "07AAGCE1173M1ZH",
+  udyam: "UDYAM-DL-06-0006878",
+  email: "embassyelectricindia@gmail.com",
+  website: "www.EltopByEmbassy.com",
+};
+
+// Tally-style ledger statement PDF — a proper letterhead (company name/
+// address/GSTIN), a party block (dealer name/address/GSTIN — the dealer's
+// GSTIN comes straight from profiles.gstin via get_dealer_detail, never
+// invented; the line is simply omitted when a dealer has none on file),
+// the period, then a fully-bordered ledger table: Opening Balance, every
+// voucher with its Vch Type/No. and running Balance, a Total row, and a
+// Closing Balance row — replacing the old bare flat table. Shared by the
+// Overview tab's "Statement" export and the Ledger tab's own export, so
+// every PDF a rep generates from this screen looks like one document.
+export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabel, openingBalance, closingBalance, rows, filename }) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const PW = doc.internal.pageSize.getWidth();
+  let y = 42;
+
+  const center = (text, size, color, bold) => {
+    doc.setFont(undefined, bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+    doc.text(text, PW / 2, y, { align: "center" });
+    y += size * 1.05 + 3;
+  };
+
+  // ── Letterhead ──
+  center(COMPANY_INFO.name, 13, [123, 45, 139], true);
+  COMPANY_INFO.addressLines.forEach((line) => center(line, 8.5, [110, 110, 110], false));
+  center(`GSTIN: ${COMPANY_INFO.gstin}  |  UDYAM: ${COMPANY_INFO.udyam}`, 8.5, [110, 110, 110], false);
+  center(`${COMPANY_INFO.email}  |  ${COMPANY_INFO.website}`, 8.5, [110, 110, 110], false);
+
+  y += 6;
+  doc.setDrawColor(220, 200, 228);
+  doc.line(40, y, PW - 40, y);
+  y += 18;
+
+  // ── Party block ──
+  center("Ledger Statement", 11, [30, 30, 30], true);
+  y += 2;
+  center(dealer?.name || "Dealer", 12, [30, 30, 30], true);
+  const code = dealer?.dealer_code || dealerCode;
+  if (code) center(code, 8.5, [140, 140, 140], false);
+  const addr = dealer?.shop_address || dealer?.address;
+  if (addr) center(addr, 8.5, [140, 140, 140], false);
+  if (dealer?.gstin) center(`GSTIN: ${dealer.gstin}`, 8.5, [140, 140, 140], false);
+  y += 4;
+  center(`Period: ${fromLabel} to ${toLabel}`, 9, [123, 45, 139], true);
+  y += 6;
+
+  // ── Ledger table ──
+  const dr = (v) => (v > 0.004 ? fmtCurrency2(v) : "");
+  const cr = (v) => (v < -0.004 ? fmtCurrency2(-v) : "");
+  const bal = (v) => `${fmtCurrency2(Math.abs(v))} ${v >= 0 ? "Dr" : "Cr"}`;
+
+  const totalDebit = rows.reduce((s, r) => s + (r._debit ? Number(r.amount) : 0), 0);
+  const totalCredit = rows.reduce((s, r) => s + (!r._debit ? Number(r.amount) : 0), 0);
+
+  const openRow = [
+    { content: "Opening Balance", colSpan: 4, styles: { fontStyle: "bold" } },
+    { content: dr(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
+    { content: cr(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
+    { content: bal(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
+  ];
+  const voucherRows = rows.map((r) => [
+    fmtDateShort(r.voucher_date || r.created_at),
+    voucherParticularsForExport(r),
+    voucherLabelForExport(r),
+    r.voucher_no || "",
+    { content: r._debit ? fmtCurrency2(r.amount) : "", styles: { halign: "right" } },
+    { content: !r._debit ? fmtCurrency2(r.amount) : "", styles: { halign: "right" } },
+    { content: bal(r._after), styles: { halign: "right" } },
+  ]);
+  const totalRow = [
+    { content: "Total", colSpan: 4, styles: { fontStyle: "bold", fillColor: [248, 240, 249] } },
+    { content: fmtCurrency2(totalDebit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
+    { content: fmtCurrency2(totalCredit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
+    { content: "", styles: { fillColor: [248, 240, 249] } },
+  ];
+  const closeRow = [
+    { content: "Closing Balance", colSpan: 4, styles: { fontStyle: "bold", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
+    { content: dr(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
+    { content: cr(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
+    { content: bal(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Date", "Particulars", "Vch Type", "Vch No.", "Debit", "Credit", "Balance"]],
+    body: [openRow, ...voucherRows, totalRow, closeRow],
+    theme: "grid",
+    styles: { fontSize: 8, cellPadding: 5, lineColor: [225, 210, 228], lineWidth: 0.6 },
+    headStyles: { fillColor: [123, 45, 139], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" },
+    },
+    margin: { left: 40, right: 40 },
+    didDrawPage: () => {
+      const ph = doc.internal.pageSize.getHeight();
+      doc.setFontSize(7.5);
+      doc.setTextColor(160, 160, 160);
+      doc.text(`Generated ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`, 40, ph - 20);
+      doc.text(`Page ${doc.internal.getNumberOfPages()}`, PW - 40, ph - 20, { align: "right" });
+    },
+  });
+
+  doc.save(filename);
+}
+
+function voucherLabelForExport(row) {
+  const map = { sales_invoice: "Sales", order: "Sales", receipt: "Receipt", payment: "Receipt", payment_out: "Payment Out", credit_note: "Credit Note", journal: "Journal" };
+  return map[row.voucher_type] || map[row.type] || row.type;
+}
+
+function voucherParticularsForExport(row) {
+  if (row.type === "order") return "Sales";
+  if (row.type === "payment") return row.method ? `Payment — ${row.method}` : "Payment";
+  if (row.type === "credit_note") return "Credit Note";
+  if (row.type === "journal") return row.dr_account || row.cr_account || "Journal";
+  return voucherLabelForExport(row);
+}
+
 function dateSuffix() {
   const d = new Date();
   return `${String(d.getDate()).padStart(2, "0")}${String(d.getMonth() + 1).padStart(2, "0")}${d.getFullYear()}`;

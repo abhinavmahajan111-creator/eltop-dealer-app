@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { isDebitEntry } from "../../lib/ledgerUtils";
-import { fmtCurrency2, fmtDateShort, exportRowsToExcel, exportTableToPdf, exportFilename } from "../../lib/dealerCrmUtils";
+import { fmtCurrency2, fmtDate, fmtDateShort, exportRowsToExcel, exportLedgerStatementPdf, exportFilename } from "../../lib/dealerCrmUtils";
 import PeriodPicker from "./PeriodPicker";
 
 // Ledger tab — real dealer_ledger rows for a period, with a running balance
@@ -30,7 +30,7 @@ function voucherParticulars(row) {
   return voucherLabel(row);
 }
 
-export default function DealerLedgerTab({ dealerId, dealerCode }) {
+export default function DealerLedgerTab({ dealerId, dealerCode, dealer }) {
   const [range, setRange] = useState(null);
   const [rows, setRows] = useState([]);
   const [openingBalance, setOpeningBalance] = useState(0);
@@ -67,19 +67,15 @@ export default function DealerLedgerTab({ dealerId, dealerCode }) {
   const closingBalance = running;
 
   const handleExportPdf = () => {
-    exportTableToPdf({
+    exportLedgerStatementPdf({
+      dealer,
+      dealerCode,
+      fromLabel: range?.from ? fmtDate(range.from) : "the beginning",
+      toLabel: range?.to ? fmtDate(range.to) : "today",
+      openingBalance,
+      closingBalance,
+      rows: withBalance,
       filename: exportFilename(dealerCode, "Ledger", "pdf"),
-      title: "Ledger Statement",
-      subtitle: `${range?.from || "—"} to ${range?.to || "—"}  ·  Opening ${fmtCurrency2(Math.abs(openingBalance))} ${openingBalance >= 0 ? "Dr" : "Cr"}  ·  Closing ${fmtCurrency2(Math.abs(closingBalance))} ${closingBalance >= 0 ? "Dr" : "Cr"}`,
-      columns: [
-        { header: "Date", key: "voucher_date", format: fmtDateShort },
-        { header: "Particulars", key: "_particulars" },
-        { header: "Voucher No", key: "voucher_no" },
-        { header: "Debit", key: "_dr", format: (v) => (v ? fmtCurrency2(v) : "") },
-        { header: "Credit", key: "_cr", format: (v) => (v ? fmtCurrency2(v) : "") },
-        { header: "Balance", key: "_after", format: (v) => `${fmtCurrency2(Math.abs(v))} ${v >= 0 ? "Dr" : "Cr"}` },
-      ],
-      rows: withBalance.map((r) => ({ ...r, _particulars: voucherParticulars(r), _dr: r._debit ? r.amount : null, _cr: !r._debit ? r.amount : null })),
     });
   };
 
