@@ -25,6 +25,7 @@ import StaffHome from "./screens/StaffHome";
 import SalesDashboard from "./screens/staff/SalesDashboard";
 import DealerDetail from "./screens/staff/DealerDetail";
 import DayCheckIn from "./screens/staff/DayCheckIn";
+import Attendance from "./screens/staff/Attendance";
 import ComingSoon from "./screens/staff/ComingSoon";
 import AdminLayout from "./admin/AdminLayout";
 import AdminDashboard from "./admin/AdminDashboard";
@@ -110,6 +111,7 @@ export default function App() {
             combined tabbed screen that replaced them. */}
         <Route path="/staff/sales/check-in" element={<Navigate to="/staff/sales/day-checkin" replace />} />
         <Route path="/staff/sales/start-day" element={<Navigate to="/staff/sales/day-checkin" replace />} />
+        <Route path="/staff/sales/attendance" element={<Attendance />} />
         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
         <Route path="/staff/after-sales" element={<StaffHome />} />

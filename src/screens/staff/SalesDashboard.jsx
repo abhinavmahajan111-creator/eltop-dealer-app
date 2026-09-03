@@ -7,7 +7,10 @@ import { featuresForRole } from "../../utils/staffFeatures";
 
 // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
 // senior_sales_associate, senior_sales_executive). Design approved against
-// the "richer" mockup (avatar header, stat cards, dealer list).
+// the "richer" mockup (avatar header, stat cards, dealer list), then
+// reworked again (3 Sep 2026) against a second mockup adding ring-style
+// stat cards and an Attendance calendar, inspired by a reference field-app
+// screenshot the user shared.
 //
 // What's real here: the "My Dealers / Parties" list and its two stat cards
 // (count, total outstanding) — all come from get_my_dealers(), a SECURITY
@@ -16,11 +19,16 @@ import { featuresForRole } from "../../utils/staffFeatures";
 // them to a rep via AdminDealers' new "Assigned Sales Rep" field.
 // "My Visits" is also real now — recent visits logged from a dealer's
 // detail screen (get_my_visits(), see supabase/migrations/sales_visits.sql).
+// The header's two ring stats are real too: "Today's Visits" is derived
+// from that same visits list (filtered to today), and "This Month" comes
+// from get_my_attendance_month() (see supabase/migrations/
+// sales_attendance.sql) — tapping it opens the new Attendance screen,
+// which shares the same RPC for its full calendar.
 //
-// What's still "coming soon": territory map, targets, commission, and
-// (for Senior tiers) a real team-performance view — none of those have a
-// data model yet, so rather than show made-up numbers in a live app,
-// those sections stay clearly marked as not built yet.
+// What's still "coming soon": territory map, targets, commission, leaves,
+// expenses, and (for Senior tiers) a real team-performance view — none of
+// those have a data model yet, so rather than show made-up numbers in a
+// live app, those sections stay clearly marked as not built yet.
 
 function initials(name) {
   if (!name) return "?";
@@ -133,10 +141,71 @@ function FeatureTile({ icon, title, onClick }) {
   );
 }
 
+// Same tile look as FeatureTile, minus the "Soon" badge — for real,
+// already-built shortcuts (My Dealers, My Visits, Attendance).
+function NavTile({ icon, title, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "16px 8px", textAlign: "center",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer",
+      }}
+    >
+      <div style={{
+        width: 40, height: 40, borderRadius: 12, background: "#f3e6f6",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 19, margin: "0 auto 8px",
+      }}>
+        {icon}
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#444", lineHeight: 1.3 }}>{title}</div>
+    </div>
+  );
+}
+
+// Circular progress "ring" stat — used for Today's Visits / This Month
+// attendance in the header. `value`/`total` drive both the fraction drawn
+// and the "n/N" label; total===0 just draws an empty ring rather than
+// dividing by zero.
+const RING_RADIUS = 34;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function RingStat({ title, value, total, sub, onClick }) {
+  const fraction = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
+  const offset = RING_CIRCUMFERENCE * (1 - fraction);
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        flex: 1, background: "#fff", borderRadius: 16, padding: "14px 10px 16px", textAlign: "center",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.12)", border: "1.5px solid #7B2D8B", cursor: onClick ? "pointer" : "default",
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 800, color: "#333", marginBottom: 10, textAlign: "left", paddingLeft: 2 }}>{title}</div>
+      <div style={{ position: "relative", width: 84, height: 84, margin: "0 auto" }}>
+        <svg width={84} height={84} style={{ transform: "rotate(-90deg)" }}>
+          <circle cx={42} cy={42} r={RING_RADIUS} fill="none" stroke="#f0e2f2" strokeWidth={8} />
+          <circle
+            cx={42} cy={42} r={RING_RADIUS} fill="none" stroke="#7B2D8B" strokeWidth={8} strokeLinecap="round"
+            strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={offset}
+            style={{ transition: "stroke-dashoffset 0.6s ease" }}
+          />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#222" }}>{value}/{total}</div>
+          <div style={{ fontSize: 9.5, color: "#999", fontWeight: 700 }}>{sub}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SalesDashboard() {
   const navigate = useNavigate();
   const { staffProfile, signOut } = useApp();
   const dealersSectionRef = useRef(null);
+  const visitsSectionRef = useRef(null);
 
   const [dealers, setDealers] = useState([]);
   const [loadingDealers, setLoadingDealers] = useState(true);
@@ -154,9 +223,16 @@ export default function SalesDashboard() {
   const [dayStart, setDayStart] = useState(null);
   const [loadingDayStart, setLoadingDayStart] = useState(true);
 
+  // "This Month" attendance ring — just the current month's present-day
+  // count from the same RPC the Attendance screen's calendar uses. See
+  // supabase/migrations/sales_attendance.sql.
+  const [presentThisMonth, setPresentThisMonth] = useState(0);
+  const [loadingAttendance, setLoadingAttendance] = useState(true);
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
+      setLoadingAttendance(false);
       return;
     }
     let cancelled = false;
@@ -191,6 +267,12 @@ export default function SalesDashboard() {
       }
       setLoadingDayStart(false);
     });
+    const now = new Date();
+    supabase.rpc("get_my_attendance_month", { p_year: now.getFullYear(), p_month: now.getMonth() + 1 }).then(({ data, error }) => {
+      if (cancelled) return;
+      if (!error) setPresentThisMonth((data || []).length);
+      setLoadingAttendance(false);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -198,6 +280,13 @@ export default function SalesDashboard() {
   const comingSoon = featuresForRole(staffProfile?.role);
   const totalOutstanding = dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0);
   const dealersLabel = staffProfile?.role === "senior_sales_executive" ? "Dealers, Sales dept." : "My dealers / parties";
+
+  const todayStr = new Date().toDateString();
+  const visitsToday = visits.filter((v) => {
+    const ts = v.check_in_at || v.visited_at;
+    return ts && new Date(ts).toDateString() === todayStr;
+  }).length;
+  const daysElapsedThisMonth = new Date().getDate();
 
   const handleLogout = async () => {
     await signOut();
@@ -208,7 +297,15 @@ export default function SalesDashboard() {
     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "22px 24px 44px", color: "#fff" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <img
+              src="/assets/ELTOP%20LOGO.png"
+              alt="Eltop"
+              style={{ height: 22, width: "auto", filter: "brightness(0) invert(1)" }}
+              onError={(e) => { e.target.style.display = "none"; }}
+            />
+            <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
+          </div>
           <button
             onClick={handleLogout}
             style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
@@ -310,6 +407,23 @@ export default function SalesDashboard() {
             </button>
           )}
         </div>
+
+        <div style={{ display: "flex", gap: 12, marginTop: 18, paddingBottom: 4 }}>
+          <RingStat
+            title="Today's Visits"
+            value={loadingVisits ? 0 : visitsToday}
+            total={loadingDealers ? 0 : dealers.length}
+            sub="dealers"
+            onClick={() => visitsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          />
+          <RingStat
+            title="This Month"
+            value={loadingAttendance ? 0 : presentThisMonth}
+            total={daysElapsedThisMonth}
+            sub="present"
+            onClick={() => navigate("/staff/sales/attendance")}
+          />
+        </div>
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
@@ -321,6 +435,13 @@ export default function SalesDashboard() {
             label="Total outstanding"
             onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
           />
+        </div>
+
+        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>Sales</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
+          <NavTile icon="🏬" title="My Dealers" onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+          <NavTile icon="📍" title="My Visits" onClick={() => visitsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+          <NavTile icon="🗓️" title="Attendance" onClick={() => navigate("/staff/sales/attendance")} />
         </div>
 
         <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
@@ -340,7 +461,7 @@ export default function SalesDashboard() {
           )}
         </div>
 
-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
+        <div ref={visitsSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
           {loadingVisits ? (
             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>

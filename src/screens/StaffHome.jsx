@@ -23,7 +23,15 @@ export default function StaffHome() {
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #eee" }}>
-        <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <img
+            src="/assets/ELTOP%20LOGO.png"
+            alt="Eltop"
+            style={{ height: 22, width: "auto" }}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
+        </div>
         <button
           onClick={handleLogout}
           style={{ background: "none", border: "1.5px solid #ddd", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, color: "#555", cursor: "pointer" }}
