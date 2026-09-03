@@ -1,0 +1,81 @@
+From 76172823a856460a4be5201d99501b11757fa088 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 10:57:59 +0000
+Subject: [PATCH] Add a salesperson filter dropdown to Field Activity
+
+Lets an admin narrow the check-in/check-out log to one rep at a time,
+alongside the existing status filter and free-text search. Options are
+derived from whatever's already loaded, sorted alphabetically by name.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminVisits.jsx | 28 +++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/admin/AdminVisits.jsx b/src/admin/AdminVisits.jsx
+index 08b0cf8..2918ccd 100644
+--- a/src/admin/AdminVisits.jsx
++++ b/src/admin/AdminVisits.jsx
+@@ -52,6 +52,7 @@ export default function AdminVisits() {
+ 
+   const [search, setSearch] = useState("");
+   const [statusFilter, setStatusFilter] = useState("__all__"); // __all__ | open | checked_out
++  const [staffFilter, setStaffFilter] = useState("__all__");   // __all__ | a staff_email
+ 
+   const [forceTarget, setForceTarget] = useState(null); // the visit row being force-closed, or null
+   const [forceReason, setForceReason] = useState("");
+@@ -76,9 +77,24 @@ export default function AdminVisits() {
+ 
+   useEffect(() => { load(); }, []);
+ 
++  // Unique salespeople derived from whatever's loaded — sorted by display
++  // name so the dropdown reads alphabetically, not by insertion order.
++  const staffOptions = useMemo(() => {
++    const seen = new Map();
++    rows.forEach((r) => {
++      if (r.staff_email && !seen.has(r.staff_email)) {
++        seen.set(r.staff_email, r.staff_name || r.staff_email);
++      }
++    });
++    return Array.from(seen.entries())
++      .map(([email, label]) => ({ email, label }))
++      .sort((a, b) => a.label.localeCompare(b.label));
++  }, [rows]);
++
+   const filtered = useMemo(() => {
+     let out = [...rows];
+     if (statusFilter !== "__all__") out = out.filter((r) => r.status === statusFilter);
++    if (staffFilter !== "__all__") out = out.filter((r) => r.staff_email === staffFilter);
+     const q = search.trim().toLowerCase();
+     if (q) {
+       out = out.filter((r) =>
+@@ -89,7 +105,7 @@ export default function AdminVisits() {
+       );
+     }
+     return out;
+-  }, [rows, statusFilter, search]);
++  }, [rows, statusFilter, staffFilter, search]);
+ 
+   const openCount = useMemo(() => rows.filter((r) => r.status === "open").length, [rows]);
+ 
+@@ -168,6 +184,16 @@ export default function AdminVisits() {
+           <option value="open">Still checked in</option>
+           <option value="checked_out">Checked out</option>
+         </select>
++        <select
++          className="admin-select"
++          value={staffFilter}
++          onChange={(e) => setStaffFilter(e.target.value)}
++        >
++          <option value="__all__">All salespeople</option>
++          {staffOptions.map(({ email, label }) => (
++            <option key={email} value={email}>{label}</option>
++          ))}
++        </select>
+         <button className="admin-link" onClick={load}>↻ Refresh</button>
+       </div>
+ 
+-- 
+2.43.0
+

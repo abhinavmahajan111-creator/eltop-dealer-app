@@ -52,6 +52,7 @@ export default function AdminVisits() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("__all__"); // __all__ | open | checked_out
+  const [staffFilter, setStaffFilter] = useState("__all__");   // __all__ | a staff_email
 
   const [forceTarget, setForceTarget] = useState(null); // the visit row being force-closed, or null
   const [forceReason, setForceReason] = useState("");
@@ -76,9 +77,24 @@ export default function AdminVisits() {
 
   useEffect(() => { load(); }, []);
 
+  // Unique salespeople derived from whatever's loaded — sorted by display
+  // name so the dropdown reads alphabetically, not by insertion order.
+  const staffOptions = useMemo(() => {
+    const seen = new Map();
+    rows.forEach((r) => {
+      if (r.staff_email && !seen.has(r.staff_email)) {
+        seen.set(r.staff_email, r.staff_name || r.staff_email);
+      }
+    });
+    return Array.from(seen.entries())
+      .map(([email, label]) => ({ email, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
   const filtered = useMemo(() => {
     let out = [...rows];
     if (statusFilter !== "__all__") out = out.filter((r) => r.status === statusFilter);
+    if (staffFilter !== "__all__") out = out.filter((r) => r.staff_email === staffFilter);
     const q = search.trim().toLowerCase();
     if (q) {
       out = out.filter((r) =>
@@ -89,7 +105,7 @@ export default function AdminVisits() {
       );
     }
     return out;
-  }, [rows, statusFilter, search]);
+  }, [rows, statusFilter, staffFilter, search]);
 
   const openCount = useMemo(() => rows.filter((r) => r.status === "open").length, [rows]);
 
@@ -167,6 +183,16 @@ export default function AdminVisits() {
           <option value="__all__">All statuses</option>
           <option value="open">Still checked in</option>
           <option value="checked_out">Checked out</option>
+        </select>
+        <select
+          className="admin-select"
+          value={staffFilter}
+          onChange={(e) => setStaffFilter(e.target.value)}
+        >
+          <option value="__all__">All salespeople</option>
+          {staffOptions.map(({ email, label }) => (
+            <option key={email} value={email}>{label}</option>
+          ))}
         </select>
         <button className="admin-link" onClick={load}>↻ Refresh</button>
       </div>
