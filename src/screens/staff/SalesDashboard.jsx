@@ -4,6 +4,7 @@ import { useApp } from "../../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { staffRoleLabel } from "../../utils/staffRoles";
 import { featuresForRole } from "../../utils/staffFeatures";
+import DashboardAiCard from "../../components/staff/DashboardAiCard";
 
 // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
 // senior_sales_associate, senior_sales_executive). Design approved against
@@ -432,6 +433,15 @@ export default function SalesDashboard() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+        <DashboardAiCard
+          repName={staffProfile?.name}
+          dealers={dealers}
+          visitsToday={visits.filter((v) => {
+            const ts = v.check_in_at || v.visited_at;
+            return ts && new Date(ts).toDateString() === todayStr;
+          })}
+        />
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
           <StatCard

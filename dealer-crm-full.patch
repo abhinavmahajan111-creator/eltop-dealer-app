@@ -1,0 +1,2474 @@
+From 167b2655fd60a4b6f3624a80334ce4222e26b786 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 05:05:46 +0000
+Subject: [PATCH] Add full Dealer CRM for staff:
+ Overview/Ledger/Orders/Visits/Insights tabs + AI assistant
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Rebuilds the staff-facing dealer detail screen into a 5-tab CRM (approved
+from mockup/dealer-crm-mockup.html): real running-balance ledger with
+Tally-style voucher expand, order line-item expand, and an Insights tab
+with 9 real reports (sales trend, top products, payment collection,
+ageing, GST summary, order status, returns, order frequency, visit
+conversion) — each with its own independent period picker (including
+custom date ranges) and PDF/Excel export. Every report reads live data
+via new scope-checked RPCs, never fabricated numbers.
+
+Adds an AI assistant in two places — per-dealer inside Insights, and
+dealer-book-wide on the Sales dashboard itself — both answering in
+whatever language the rep asks in. Reuses the existing /api/chat backend
+already live for admin's AI Assistant tab; no new infrastructure needed.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/components/staff/DashboardAiCard.jsx   | 104 +++
+ src/components/staff/DealerInsightsTab.jsx | 424 +++++++++++++
+ src/components/staff/DealerLedgerTab.jsx   | 258 ++++++++
+ src/components/staff/PeriodPicker.jsx      |  67 ++
+ src/lib/dealerCrmUtils.js                  | 240 +++++++
+ src/lib/ledgerUtils.js                     |  56 ++
+ src/screens/staff/DealerDetail.jsx         | 696 ++++++++++++++-------
+ src/screens/staff/SalesDashboard.jsx       |  10 +
+ supabase/migrations/dealer_crm_staff.sql   | 404 ++++++++++++
+ 9 files changed, 2046 insertions(+), 213 deletions(-)
+ create mode 100644 src/components/staff/DashboardAiCard.jsx
+ create mode 100644 src/components/staff/DealerInsightsTab.jsx
+ create mode 100644 src/components/staff/DealerLedgerTab.jsx
+ create mode 100644 src/components/staff/PeriodPicker.jsx
+ create mode 100644 src/lib/dealerCrmUtils.js
+ create mode 100644 supabase/migrations/dealer_crm_staff.sql
+
+diff --git a/src/components/staff/DashboardAiCard.jsx b/src/components/staff/DashboardAiCard.jsx
+new file mode 100644
+index 0000000..b5a5474
+--- /dev/null
++++ b/src/components/staff/DashboardAiCard.jsx
+@@ -0,0 +1,104 @@
++import { useState } from "react";
++import { supabase } from "../../lib/supabase";
++import { computeAgingFromLedger } from "../../lib/ledgerUtils";
++import { buildDashboardAiSystemPrompt, askAi } from "../../lib/dealerCrmUtils";
++
++// Dashboard-wide "Ask AI about your dealers" card — sits right under the
++// header on /staff/sales, live the moment a rep logs in (approved from
++// mockup/dealer-crm-mockup.html). Scoped across ALL of the rep's dealers,
++// unlike the per-dealer AI card on DealerInsightsTab. Aging/overdue context
++// is computed client-side per dealer (via the same FIFO heuristic used
++// everywhere else, computeAgingFromLedger) from a single bulk RPC —
++// get_my_dealers_ledger_rows() — fetched lazily the first time the rep
++// actually asks something, not on every dashboard load.
++
++const SUGGESTED_PROMPTS = ["Meri sales summary batao", "Overdue dealers", "Today's visits pending"];
++
++export default function DashboardAiCard({ repName, dealers, visitsToday }) {
++  const [messages, setMessages] = useState([]);
++  const [input, setInput] = useState("");
++  const [sending, setSending] = useState(false);
++  const [context, setContext] = useState(null);
++
++  const ensureContext = async () => {
++    if (context) return context;
++    const { data } = await supabase.rpc("get_my_dealers_ledger_rows", { p_dealer_ids: null });
++    const rowsByDealer = {};
++    (data || []).forEach((r) => {
++      if (!rowsByDealer[r.dealer_id]) rowsByDealer[r.dealer_id] = [];
++      rowsByDealer[r.dealer_id].push(r);
++    });
++    const agingByDealer = dealers.map((d) => ({
++      id: d.id, name: d.name, dealer_code: d.dealer_code,
++      aging: computeAgingFromLedger(rowsByDealer[d.id] || []),
++    }));
++    const built = buildDashboardAiSystemPrompt({ repName, dealers, agingByDealer, visitsToday });
++    setContext(built);
++    return built;
++  };
++
++  const send = async (text) => {
++    const msg = (text ?? input).trim();
++    if (!msg || sending) return;
++    const newMessages = [...messages, { role: "user", content: msg }];
++    setMessages(newMessages);
++    setInput("");
++    setSending(true);
++    const systemPrompt = await ensureContext();
++    const reply = await askAi(systemPrompt, newMessages);
++    setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
++    setSending(false);
++  };
++
++  return (
++    <div style={{ background: "linear-gradient(135deg, #f7ecf9 0%, #fdf8fe 100%)", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "14px 16px", marginBottom: 20 }}>
++      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#7B2D8B", marginBottom: 10 }}>
++        ✨ Ask AI about your dealers
++      </div>
++
++      {messages.length > 0 && (
++        <div style={{ display: "flex", flexDirection: "column", marginBottom: 8 }}>
++          {messages.map((m, i) => (
++            <div
++              key={i}
++              style={{
++                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
++                background: m.role === "user" ? "#7B2D8B" : "#fff",
++                color: m.role === "user" ? "#fff" : "#333",
++                border: m.role === "user" ? "none" : "1.3px solid #e6d3ea",
++                borderRadius: m.role === "user" ? "12px 12px 3px 12px" : "12px 12px 12px 3px",
++                padding: "8px 12px", fontSize: 11.5, lineHeight: 1.55, maxWidth: "90%", marginBottom: 6, whiteSpace: "pre-wrap",
++              }}
++            >
++              {m.content}
++            </div>
++          ))}
++          {sending && <div style={{ alignSelf: "flex-start", fontSize: 11, color: "#999", padding: "4px 0" }}>Thinking…</div>}
++        </div>
++      )}
++
++      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
++        {SUGGESTED_PROMPTS.map((p) => (
++          <div key={p} onClick={() => send(p)} style={{ fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1.3px solid #d9b8e0", borderRadius: 999, padding: "6px 10px", cursor: "pointer" }}>
++            {p}
++          </div>
++        ))}
++      </div>
++
++      <div style={{ display: "flex", gap: 6, alignItems: "center", background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 999, padding: "5px 5px 5px 14px" }}>
++        <input
++          value={input}
++          onChange={(e) => setInput(e.target.value)}
++          onKeyDown={(e) => e.key === "Enter" && send()}
++          placeholder="Ask anything about your dealers — any language..."
++          disabled={sending}
++          style={{ flex: 1, border: "none", outline: "none", fontSize: 11.5, background: "transparent", minWidth: 0 }}
++        />
++        <div onClick={() => send()} style={{ width: 28, height: 28, borderRadius: "50%", background: "#7B2D8B", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>➤</div>
++      </div>
++      <div style={{ fontSize: 9.5, color: "#999", textAlign: "center", marginTop: 8 }}>
++        Hindi, English, Hinglish — jis bhi language mein poochho, usi mein jawaab milega.
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/staff/DealerInsightsTab.jsx b/src/components/staff/DealerInsightsTab.jsx
+new file mode 100644
+index 0000000..79f9206
+--- /dev/null
++++ b/src/components/staff/DealerInsightsTab.jsx
+@@ -0,0 +1,424 @@
++import { useEffect, useState } from "react";
++import { supabase } from "../../lib/supabase";
++import { computeAgeingBuckets } from "../../lib/ledgerUtils";
++import {
++  fmtCurrency, fmtCurrency2, exportRowsToExcel, exportTableToPdf, exportFilename,
++  buildDealerAiSystemPrompt, askAi,
++} from "../../lib/dealerCrmUtils";
++import PeriodPicker from "./PeriodPicker";
++
++// Insights tab — approved from mockup/dealer-crm-mockup.html: an "Ask AI
++// about this dealer" card at the top, then a tap-to-expand list of report
++// names grouped under Sales / Payments & Credit / Operations. Each report
++// fetches lazily (only once opened) via the single get_dealer_report RPC,
++// keeping its own independent period picker + PDF/Excel export.
++
++const ITEM_CARD = { background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 12, marginBottom: 8, overflow: "hidden" };
++const GROUP_LABEL = { fontSize: 10.5, fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: 0.5, margin: "14px 2px 6px" };
++
++function fmtExportValue(key, v) {
++  if (typeof v !== "number") return v;
++  const k = key.toLowerCase();
++  if (k.includes("amount") || k.includes("value") || k.includes("collected") || k.includes("due") || ["cgst", "sgst", "igst"].includes(k)) {
++    return fmtCurrency2(v);
++  }
++  return String(v);
++}
++
++function toExportRows(reportKey, data, range) {
++  switch (reportKey) {
++    case "sales_trend":
++      return (data || []).map((d) => ({ Month: d.month_label, Amount: Number(d.amount) }));
++    case "top_products":
++      return (data || []).map((d) => ({ Product: d.name, Qty: d.qty, Orders: d.orders_count, Amount: Number(d.amount) }));
++    case "ageing": {
++      const b = computeAgeingBuckets(data || [], range?.to);
++      return [
++        { Bucket: "0-30 days", Amount: b.buckets["0-30"] },
++        { Bucket: "31-60 days", Amount: b.buckets["31-60"] },
++        { Bucket: "61-90 days", Amount: b.buckets["61-90"] },
++        { Bucket: "90+ days", Amount: b.buckets["90+"] },
++      ];
++    }
++    case "payment_collection":
++      return [{ Metric: "Collected", Value: data.collected }, { Metric: "Still Due", Value: data.still_due }];
++    case "gst_summary":
++      return [
++        { Metric: "Taxable Value", Value: data.taxable_value },
++        { Metric: "CGST", Value: data.cgst },
++        { Metric: "SGST", Value: data.sgst },
++        { Metric: "IGST", Value: data.igst },
++        { Metric: "Total Invoice Value", Value: data.total_invoice_value },
++      ];
++    case "order_status":
++      return [
++        { Metric: "Pending", Value: data.pending },
++        { Metric: "Confirmed", Value: data.confirmed },
++        { Metric: "Dispatched", Value: data.dispatched },
++        { Metric: "Delivered", Value: data.delivered },
++      ];
++    case "returns":
++      return [
++        { Metric: "Credit Notes Issued", Value: data.count },
++        { Metric: "Total Value Returned", Value: data.total_value },
++        { Metric: "Most Common Reason", Value: data.top_reason || "—" },
++      ];
++    case "order_frequency":
++      return [
++        { Metric: "Avg Days Between Orders", Value: data.avg_days_between_orders ?? "—" },
++        { Metric: "Days Since Last Order", Value: data.days_since_last_order ?? "—" },
++        { Metric: "Active Months", Value: `${data.active_months} of ${data.total_months}` },
++      ];
++    case "visit_conversion":
++      return [
++        { Metric: "Visits Made", Value: data.visits_count },
++        { Metric: "Led to an Order", Value: data.converted_count },
++        { Metric: "Conversion Rate", Value: `${data.conversion_rate}%` },
++      ];
++    default:
++      return [];
++  }
++}
++
++export default function DealerInsightsTab({ dealerId, dealerCode, dealer, orders, visits }) {
++  return (
++    <div>
++      <AiCard dealerId={dealerId} dealer={dealer} orders={orders} visits={visits} />
++
++      <div style={{ fontSize: 11, color: "#888", textAlign: "center", padding: "0 0 12px" }}>
++        Or browse ready-made reports — tap to open, period filter and export live inside.
++      </div>
++
++      <div style={GROUP_LABEL}>Sales</div>
++      <ReportItem icon="📈" name="Sales Trend" reportKey="sales_trend" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={SalesTrendView} />
++      <ReportItem icon="🏆" name="Product-wise Sales" reportKey="top_products" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={TopProductsView} />
++
++      <div style={GROUP_LABEL}>Payments &amp; Credit</div>
++      <ReportItem icon="💰" name="Payment Collection" reportKey="payment_collection" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={PaymentCollectionView} />
++      <ReportItem icon="⏳" name="Outstanding Ageing" reportKey="ageing" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="today" singleDate render={AgeingView} />
++      <ReportItem icon="🧮" name="GST Summary" reportKey="gst_summary" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="this_quarter" render={GstSummaryView} />
++      <ReportItem icon="↩️" name="Returns / Credit Notes" reportKey="returns" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={ReturnsView} />
++
++      <div style={GROUP_LABEL}>Operations</div>
++      <ReportItem icon="📦" name="Order Status Breakdown" reportKey="order_status" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_3m" render={OrderStatusView} />
++      <ReportItem icon="⏱️" name="Order Frequency" reportKey="order_frequency" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={OrderFrequencyView} />
++      <ReportItem icon="🤝" name="Visit → Order Conversion" reportKey="visit_conversion" dealerId={dealerId} dealerCode={dealerCode} defaultPeriodKey="last_6m" render={VisitConversionView} />
++    </div>
++  );
++}
++
++// ── Generic accordion + fetch/export shell ─────────────────────────────
++
++function ReportItem({ icon, name, reportKey, dealerId, dealerCode, defaultPeriodKey, singleDate, render }) {
++  const [open, setOpen] = useState(false);
++  const [range, setRange] = useState(null);
++  const [data, setData] = useState(null);
++  const [loading, setLoading] = useState(false);
++
++  useEffect(() => {
++    if (!open || !range) return;
++    let cancelled = false;
++    setLoading(true);
++    supabase.rpc("get_dealer_report", { p_dealer_id: dealerId, p_report: reportKey, p_from: range.from, p_to: range.to })
++      .then(({ data: d, error }) => {
++        if (cancelled) return;
++        setData(error ? null : d);
++        setLoading(false);
++      });
++    return () => { cancelled = true; };
++  }, [open, range, dealerId, reportKey]);
++
++  const handleExportPdf = () => {
++    const rows = toExportRows(reportKey, data, range);
++    if (!rows.length) return;
++    const cols = Object.keys(rows[0]).map((k) => ({ header: k, key: k, format: (v) => fmtExportValue(k, v) }));
++    exportTableToPdf({
++      filename: exportFilename(dealerCode, name.replace(/\s+/g, "_"), "pdf"),
++      title: name,
++      subtitle: singleDate ? `As of ${range?.to || "—"}` : `${range?.from || "—"} to ${range?.to || "—"}`,
++      columns: cols,
++      rows,
++    });
++  };
++
++  const handleExportExcel = () => {
++    const rows = toExportRows(reportKey, data, range);
++    if (!rows.length) return;
++    exportRowsToExcel({ filename: exportFilename(dealerCode, name.replace(/\s+/g, "_"), "xlsx"), sheetName: name.slice(0, 28), rows });
++  };
++
++  return (
++    <div style={ITEM_CARD}>
++      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 14px", cursor: "pointer" }}>
++        <span style={{ fontSize: 15, width: 20, textAlign: "center", flexShrink: 0 }}>{icon}</span>
++        <span style={{ flex: 1, fontSize: 12.5, fontWeight: 800, color: "#333" }}>{name}</span>
++        <span style={{ fontSize: 12, color: "#ccc", flexShrink: 0 }}>{open ? "▴" : "▾"}</span>
++      </div>
++      {open && (
++        <div style={{ padding: "0 14px 14px", borderTop: "1px dashed #eadcec", paddingTop: 12 }}>
++          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
++            <span style={{ fontSize: 11, color: "#888" }}>{singleDate ? "As of" : "Period"}</span>
++            <PeriodPicker onChange={setRange} defaultKey={defaultPeriodKey} singleDate={singleDate} small />
++          </div>
++          {loading ? (
++            <div style={{ textAlign: "center", padding: 20, color: "#999", fontSize: 12.5 }}>Loading…</div>
++          ) : data == null ? (
++            <div style={{ textAlign: "center", padding: 20, color: "#999", fontSize: 12.5 }}>No data for this period.</div>
++          ) : (
++            render(data, range)
++          )}
++          {data != null && (
++            <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
++              <button onClick={handleExportPdf} style={EXPORT_BTN}>📄</button>
++              <button onClick={handleExportExcel} style={EXPORT_BTN}>📊</button>
++              <span style={{ fontSize: 11, color: "#888", alignSelf: "center", marginLeft: 4 }}>Export this report</span>
++            </div>
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
++
++const EXPORT_BTN = { width: 26, height: 26, borderRadius: 7, border: "1.5px solid #7B2D8B", background: "#fff", color: "#7B2D8B", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 };
++
++// ── Per-report views ────────────────────────────────────────────────────
++
++function StatBox({ label, value, color }) {
++  return (
++    <div style={{ background: "#faf5fb", borderRadius: 10, padding: "10px 12px" }}>
++      <div style={{ fontSize: 17, fontWeight: 800, color: color || "#222" }}>{value}</div>
++      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
++    </div>
++  );
++}
++
++function KvRow({ label, value }) {
++  return (
++    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f2e6f4", fontSize: 12 }}>
++      <span style={{ color: "#888" }}>{label}</span>
++      <span style={{ fontWeight: 800, color: "#333" }}>{value}</span>
++    </div>
++  );
++}
++
++function SalesTrendView(data) {
++  if (!data.length) return <Empty />;
++  const max = Math.max(1, ...data.map((d) => Number(d.amount) || 0));
++  return (
++    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 100, paddingTop: 16 }}>
++      {data.map((d, i) => (
++        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end" }}>
++          <div style={{ fontSize: 8.5, color: "#7B2D8B", fontWeight: 800, marginBottom: 3, whiteSpace: "nowrap" }}>{fmtCurrency(d.amount)}</div>
++          <div style={{ width: "100%", maxWidth: 26, background: "linear-gradient(180deg, #a13ea9 0%, #7B2D8B 100%)", borderRadius: "5px 5px 0 0", height: `${Math.max(4, (Number(d.amount) / max) * 100)}%` }} />
++          <div style={{ fontSize: 9.5, color: "#999", fontWeight: 700, marginTop: 6 }}>{d.month_label}</div>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++function TopProductsView(data) {
++  if (!data.length) return <Empty />;
++  return (
++    <div>
++      {data.slice(0, 10).map((p, i) => (
++        <div key={p.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: i < data.length - 1 ? "1px solid #f2e6f4" : "none" }}>
++          <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
++            <span style={{ width: 20, height: 20, borderRadius: 6, background: "#f3e6f6", color: "#7B2D8B", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 8, flexShrink: 0 }}>{i + 1}</span>
++            <div style={{ minWidth: 0 }}>
++              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
++              <div style={{ fontSize: 10.5, color: "#999", marginTop: 1 }}>{p.qty} pcs across {p.orders_count} orders</div>
++            </div>
++          </div>
++          <div style={{ fontSize: 12, fontWeight: 800, color: "#7B2D8B", flexShrink: 0, marginLeft: 8 }}>{fmtCurrency(p.amount)}</div>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++function PaymentCollectionView(data) {
++  return (
++    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
++      <StatBox label="Collected" value={fmtCurrency(data.collected)} color="#2fa84f" />
++      <StatBox label="Still due" value={fmtCurrency(data.still_due)} color="#d64545" />
++    </div>
++  );
++}
++
++function AgeingView(rows, range) {
++  const b = computeAgeingBuckets(rows, range?.to);
++  const bucketColor = { "0-30": "#2fa84f", "31-60": "#c98400", "61-90": "#e07a2f", "90+": "#d64545" };
++  return (
++    <div>
++      {Object.entries(b.buckets).map(([key, val]) => (
++        <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0" }}>
++          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#666", width: 62, flexShrink: 0 }}>{key} days</span>
++          <div style={{ flex: 1, height: 9, background: "#f3ecf5", borderRadius: 999, overflow: "hidden" }}>
++            <div style={{ height: "100%", borderRadius: 999, background: bucketColor[key], width: b.total > 0 ? `${(val / b.total) * 100}%` : "0%" }} />
++          </div>
++          <span style={{ fontSize: 11, fontWeight: 800, color: "#333", width: 72, textAlign: "right", flexShrink: 0 }}>{fmtCurrency(val)}</span>
++        </div>
++      ))}
++      {b.oldest && (
++        <div style={{ fontSize: 10.5, color: "#999", marginTop: 8 }}>
++          Oldest unpaid: {b.oldest.voucherNo || "—"}, {b.oldest.daysOverdue} days overdue
++        </div>
++      )}
++    </div>
++  );
++}
++
++function GstSummaryView(data) {
++  return (
++    <div>
++      <KvRow label="Taxable value" value={fmtCurrency(data.taxable_value)} />
++      <KvRow label="CGST" value={fmtCurrency(data.cgst)} />
++      <KvRow label="SGST" value={fmtCurrency(data.sgst)} />
++      {Number(data.igst) > 0 && <KvRow label="IGST" value={fmtCurrency(data.igst)} />}
++      <KvRow label="Total invoice value" value={fmtCurrency(data.total_invoice_value)} />
++    </div>
++  );
++}
++
++function ReturnsView(data) {
++  return (
++    <div>
++      <KvRow label="Credit notes issued" value={data.count} />
++      <KvRow label="Total value returned" value={fmtCurrency(data.total_value)} />
++      <KvRow label="Most common reason" value={data.top_reason || "—"} />
++    </div>
++  );
++}
++
++function OrderStatusView(data) {
++  return (
++    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
++      <StatBox label="Pending" value={data.pending} color="#c98400" />
++      <StatBox label="Confirmed" value={data.confirmed} color="#3a5fc9" />
++      <StatBox label="Dispatched" value={data.dispatched} color="#7B2D8B" />
++      <StatBox label="Delivered" value={data.delivered} color="#2fa84f" />
++    </div>
++  );
++}
++
++function OrderFrequencyView(data) {
++  return (
++    <div>
++      <KvRow label="Avg. days between orders" value={data.avg_days_between_orders != null ? `${data.avg_days_between_orders} days` : "—"} />
++      <KvRow label="Days since last order" value={data.days_since_last_order != null ? `${data.days_since_last_order} days` : "—"} />
++      <KvRow label="Active months (ordered ≥1)" value={`${data.active_months} of ${data.total_months}`} />
++    </div>
++  );
++}
++
++function VisitConversionView(data) {
++  return (
++    <div>
++      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 6 }}>
++        <StatBox label="Visits made" value={data.visits_count} />
++        <StatBox label="Led to an order" value={data.converted_count} />
++      </div>
++      <KvRow label="Conversion rate" value={`${data.conversion_rate}%`} />
++      <div style={{ fontSize: 10, color: "#aaa", marginTop: 6, lineHeight: 1.5 }}>
++        Estimated: an order placed within 2 days of a visit counts as converted — visits aren't directly linked to the order they led to.
++      </div>
++    </div>
++  );
++}
++
++function Empty() {
++  return <div style={{ textAlign: "center", padding: 16, color: "#999", fontSize: 12.5 }}>No data for this period.</div>;
++}
++
++// ── Per-dealer AI card ──────────────────────────────────────────────────
++
++const SUGGESTED_PROMPTS = ["Top products", "Kab tak due clear hoga?", "Compare to last quarter"];
++
++function AiCard({ dealerId, dealer, orders, visits }) {
++  const [messages, setMessages] = useState([]);
++  const [input, setInput] = useState("");
++  const [sending, setSending] = useState(false);
++  const [context, setContext] = useState(null);
++
++  const ensureContext = async () => {
++    if (context) return context;
++    const [ledgerRes, productsRes] = await Promise.all([
++      supabase.rpc("get_dealer_ledger", { p_dealer_id: dealerId, p_from: null, p_to: null }),
++      supabase.rpc("get_dealer_report", { p_dealer_id: dealerId, p_report: "top_products", p_from: null, p_to: null }),
++    ]);
++    const built = buildDealerAiSystemPrompt({
++      dealer, orders, visits,
++      ledgerRows: ledgerRes.data || [],
++      topProducts: productsRes.data || [],
++    });
++    setContext(built);
++    return built;
++  };
++
++  const send = async (text) => {
++    const msg = (text ?? input).trim();
++    if (!msg || sending) return;
++    const newMessages = [...messages, { role: "user", content: msg }];
++    setMessages(newMessages);
++    setInput("");
++    setSending(true);
++    const systemPrompt = await ensureContext();
++    const reply = await askAi(systemPrompt, newMessages);
++    setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
++    setSending(false);
++  };
++
++  return (
++    <div style={{ background: "linear-gradient(135deg, #f7ecf9 0%, #fdf8fe 100%)", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
++      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#7B2D8B", marginBottom: 10 }}>
++        ✨ Ask AI about {dealer?.name || "this dealer"}
++      </div>
++
++      {messages.length > 0 && (
++        <div style={{ display: "flex", flexDirection: "column", marginBottom: 8 }}>
++          {messages.map((m, i) => (
++            <div
++              key={i}
++              style={{
++                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
++                background: m.role === "user" ? "#7B2D8B" : "#fff",
++                color: m.role === "user" ? "#fff" : "#333",
++                border: m.role === "user" ? "none" : "1.3px solid #e6d3ea",
++                borderRadius: m.role === "user" ? "12px 12px 3px 12px" : "12px 12px 12px 3px",
++                padding: "8px 12px", fontSize: 11.5, lineHeight: 1.55, maxWidth: "90%", marginBottom: 6, whiteSpace: "pre-wrap",
++              }}
++            >
++              {m.content}
++            </div>
++          ))}
++          {sending && <div style={{ alignSelf: "flex-start", fontSize: 11, color: "#999", padding: "4px 0" }}>Thinking…</div>}
++        </div>
++      )}
++
++      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
++        {SUGGESTED_PROMPTS.map((p) => (
++          <div key={p} onClick={() => send(p)} style={{ fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1.3px solid #d9b8e0", borderRadius: 999, padding: "6px 10px", cursor: "pointer" }}>
++            {p}
++          </div>
++        ))}
++      </div>
++
++      <div style={{ display: "flex", gap: 6, alignItems: "center", background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 999, padding: "5px 5px 5px 14px" }}>
++        <input
++          value={input}
++          onChange={(e) => setInput(e.target.value)}
++          onKeyDown={(e) => e.key === "Enter" && send()}
++          placeholder="Ask about this dealer — any language..."
++          disabled={sending}
++          style={{ flex: 1, border: "none", outline: "none", fontSize: 11.5, background: "transparent", minWidth: 0 }}
++        />
++        <div onClick={() => send()} style={{ width: 28, height: 28, borderRadius: "50%", background: "#7B2D8B", color: "#fff", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>➤</div>
++      </div>
++      <div style={{ fontSize: 9.5, color: "#999", textAlign: "center", marginTop: 8 }}>
++        Hindi, English, Hinglish — jis bhi language mein poochho, usi mein jawaab milega.
++      </div>
++    </div>
++  );
++}
+diff --git a/src/components/staff/DealerLedgerTab.jsx b/src/components/staff/DealerLedgerTab.jsx
+new file mode 100644
+index 0000000..f3bde7e
+--- /dev/null
++++ b/src/components/staff/DealerLedgerTab.jsx
+@@ -0,0 +1,258 @@
++import { useEffect, useState } from "react";
++import { supabase } from "../../lib/supabase";
++import { isDebitEntry } from "../../lib/ledgerUtils";
++import { fmtCurrency2, fmtDateShort, exportRowsToExcel, exportTableToPdf, exportFilename } from "../../lib/dealerCrmUtils";
++import PeriodPicker from "./PeriodPicker";
++
++// Ledger tab — real dealer_ledger rows for a period, with a running balance
++// computed forward from an opening balance, a Tally-style expand on every
++// voucher (Balance before -> this voucher's impact -> Balance after, then
++// voucher-type-specific detail), and PDF/Excel export. Vertical card list
++// by design (approved from mockup) — never side-scrolls on a phone.
++//
++// Note: dealer_ledger has no order_id column linking a sales-invoice row
++// back to its orders/order_items — see get_dealer_report's comments — so a
++// Sales voucher here shows its amount/narration only; full line items are
++// one tap away on the Orders tab.
++
++const CARD = { background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, marginBottom: 10, overflow: "hidden" };
++
++function voucherLabel(row) {
++  const map = { sales_invoice: "Sales", order: "Sales", receipt: "Receipt", payment: "Receipt", payment_out: "Payment Out", credit_note: "Credit Note", journal: "Journal" };
++  return map[row.voucher_type] || map[row.type] || row.type;
++}
++
++function voucherParticulars(row) {
++  if (row.type === "order") return "Sales";
++  if (row.type === "payment") return row.method ? `Payment — ${row.method}` : "Payment";
++  if (row.type === "credit_note") return "Credit Note";
++  if (row.type === "journal") return row.dr_account || row.cr_account || "Journal";
++  return voucherLabel(row);
++}
++
++export default function DealerLedgerTab({ dealerId, dealerCode }) {
++  const [range, setRange] = useState(null);
++  const [rows, setRows] = useState([]);
++  const [openingBalance, setOpeningBalance] = useState(0);
++  const [loading, setLoading] = useState(false);
++  const [openId, setOpenId] = useState(null);
++
++  useEffect(() => {
++    if (!range) return;
++    let cancelled = false;
++    setLoading(true);
++    const dayBefore = range.from
++      ? new Date(new Date(range.from).getTime() - 86400000).toISOString().slice(0, 10)
++      : null;
++    Promise.all([
++      supabase.rpc("get_dealer_balance_asof", { p_dealer_id: dealerId, p_asof: dayBefore }),
++      supabase.rpc("get_dealer_ledger", { p_dealer_id: dealerId, p_from: range.from, p_to: range.to }),
++    ]).then(([balRes, ledgerRes]) => {
++      if (cancelled) return;
++      setOpeningBalance(Number(balRes.data || 0));
++      setRows(ledgerRes.data || []);
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, [dealerId, range]);
++
++  let running = openingBalance;
++  const withBalance = rows.map((r) => {
++    const before = running;
++    const debit = isDebitEntry(r);
++    const amt = Number(r.amount) || 0;
++    running = debit ? running + amt : running - amt;
++    return { ...r, _before: before, _after: running, _debit: debit };
++  });
++  const closingBalance = running;
++
++  const handleExportPdf = () => {
++    exportTableToPdf({
++      filename: exportFilename(dealerCode, "Ledger", "pdf"),
++      title: "Ledger Statement",
++      subtitle: `${range?.from || "—"} to ${range?.to || "—"}  ·  Opening ${fmtCurrency2(Math.abs(openingBalance))} ${openingBalance >= 0 ? "Dr" : "Cr"}  ·  Closing ${fmtCurrency2(Math.abs(closingBalance))} ${closingBalance >= 0 ? "Dr" : "Cr"}`,
++      columns: [
++        { header: "Date", key: "voucher_date", format: fmtDateShort },
++        { header: "Particulars", key: "_particulars" },
++        { header: "Voucher No", key: "voucher_no" },
++        { header: "Debit", key: "_dr", format: (v) => (v ? fmtCurrency2(v) : "") },
++        { header: "Credit", key: "_cr", format: (v) => (v ? fmtCurrency2(v) : "") },
++        { header: "Balance", key: "_after", format: (v) => `${fmtCurrency2(Math.abs(v))} ${v >= 0 ? "Dr" : "Cr"}` },
++      ],
++      rows: withBalance.map((r) => ({ ...r, _particulars: voucherParticulars(r), _dr: r._debit ? r.amount : null, _cr: !r._debit ? r.amount : null })),
++    });
++  };
++
++  const handleExportExcel = () => {
++    exportRowsToExcel({
++      filename: exportFilename(dealerCode, "Ledger", "xlsx"),
++      sheetName: "Ledger",
++      rows: withBalance.map((r) => ({
++        Date: fmtDateShort(r.voucher_date || r.created_at),
++        Particulars: voucherParticulars(r),
++        "Voucher Type": voucherLabel(r),
++        "Voucher No": r.voucher_no || "",
++        Narration: r.narration || r.reason || "",
++        Debit: r._debit ? Number(r.amount) : "",
++        Credit: !r._debit ? Number(r.amount) : "",
++        "Balance After": Math.abs(r._after),
++        "Dr/Cr": r._after >= 0 ? "Dr" : "Cr",
++      })),
++    });
++  };
++
++  return (
++    <div>
++      <div style={{ marginBottom: 12 }}>
++        <PeriodPicker onChange={setRange} defaultKey="last_3m" />
++      </div>
++      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
++        <ExportBtn label="📄 Export PDF" onClick={handleExportPdf} />
++        <ExportBtn label="📊 Export Excel" onClick={handleExportExcel} />
++      </div>
++
++      <BalanceStrip label="Opening Balance" value={openingBalance} />
++
++      {loading ? (
++        <div style={{ textAlign: "center", padding: 30, color: "#999", fontSize: 13 }}>Loading…</div>
++      ) : withBalance.length === 0 ? (
++        <div style={{ textAlign: "center", padding: 30, color: "#999", fontSize: 13 }}>No vouchers in this period.</div>
++      ) : (
++        withBalance.map((r) => (
++          <VoucherCard key={r.id} row={r} open={openId === r.id} onToggle={() => setOpenId(openId === r.id ? null : r.id)} />
++        ))
++      )}
++
++      <BalanceStrip label="Closing Balance" value={closingBalance} highlight />
++    </div>
++  );
++}
++
++function ExportBtn({ label, onClick }) {
++  return (
++    <button
++      onClick={onClick}
++      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", borderRadius: 9, border: "1.5px solid #7B2D8B", background: "#fff", color: "#7B2D8B", fontSize: 11.5, fontWeight: 800, cursor: "pointer" }}
++    >
++      {label}
++    </button>
++  );
++}
++
++function BalanceStrip({ label, value, highlight }) {
++  const dr = value >= 0;
++  return (
++    <div style={{ background: highlight ? "#f3e6f6" : "#faf5fb", border: `1.5px solid ${highlight ? "#7B2D8B" : "#e6d3ea"}`, borderRadius: 12, padding: "10px 14px", marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
++      <span style={{ fontSize: 11, fontWeight: 800, color: "#7B2D8B" }}>{label}</span>
++      <span style={{ fontSize: 15, fontWeight: 800, color: "#333" }}>{fmtCurrency2(Math.abs(value))} {dr ? "Dr" : "Cr"}</span>
++    </div>
++  );
++}
++
++function VoucherCard({ row, open, onToggle }) {
++  const amt = Number(row.amount) || 0;
++  const dr = row._debit;
++  return (
++    <div style={CARD}>
++      <div onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 12px", cursor: "pointer" }}>
++        <div style={{ fontSize: 10.5, color: "#999", fontWeight: 700, width: 42, flexShrink: 0, lineHeight: 1.3 }}>
++          {fmtDateShort(row.voucher_date || row.created_at)}
++        </div>
++        <div style={{ flex: 1, minWidth: 0 }}>
++          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333" }}>{voucherParticulars(row)}</div>
++          <div style={{ fontSize: 10, color: "#999", fontWeight: 600, marginTop: 1 }}>
++            {voucherLabel(row)}{row.voucher_no ? ` · ${row.voucher_no}` : ""}
++          </div>
++        </div>
++        <div style={{ textAlign: "right", flexShrink: 0 }}>
++          <div style={{ fontSize: 12.5, fontWeight: 800, color: dr ? "#d64545" : "#2fa84f" }}>
++            {dr ? "−" : "+"} {fmtCurrency2(amt)}
++          </div>
++          <div style={{ fontSize: 10, color: "#7B2D8B", fontWeight: 800, marginTop: 3, background: "#f3e6f6", borderRadius: 6, padding: "1.5px 7px", display: "inline-block" }}>
++            Bal {fmtCurrency2(Math.abs(row._after))} {row._after >= 0 ? "Dr" : "Cr"}
++          </div>
++        </div>
++        <div style={{ fontSize: 12, color: "#ccc", marginLeft: 2, flexShrink: 0 }}>{open ? "▴" : "▾"}</div>
++      </div>
++      {open && (
++        <div style={{ padding: "10px 14px 12px", borderTop: "1px dashed #eadcec", background: "#fcfafd" }}>
++          <BalanceImpact before={row._before} amount={amt} debit={dr} after={row._after} />
++          <VoucherDetail row={row} />
++        </div>
++      )}
++    </div>
++  );
++}
++
++function BalanceImpact({ before, amount, debit, after }) {
++  return (
++    <div style={{ background: "#faf5fb", border: "1.3px solid #e6d3ea", borderRadius: 9, padding: "8px 10px", marginBottom: 10 }}>
++      <ImpactRow label="Balance before" value={`${fmtCurrency2(Math.abs(before))} ${before >= 0 ? "Dr" : "Cr"}`} />
++      <ImpactRow label="This voucher" value={`${debit ? "−" : "+"} ${fmtCurrency2(amount)} ${debit ? "Dr" : "Cr"}`} color={debit ? "#d64545" : "#2fa84f"} />
++      <ImpactRow label="Balance after" value={`${fmtCurrency2(Math.abs(after))} ${after >= 0 ? "Dr" : "Cr"}`} strong />
++    </div>
++  );
++}
++
++function ImpactRow({ label, value, color, strong }) {
++  return (
++    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10.5, padding: "2.5px 0", ...(strong ? { borderTop: "1.3px solid #d9b8e0", marginTop: 4, paddingTop: 6 } : {}) }}>
++      <span style={{ fontWeight: strong ? 800 : 600, color: strong ? "#7B2D8B" : "#999", fontSize: strong ? 11 : 10.5 }}>{label}</span>
++      <span style={{ fontWeight: 800, color: color || (strong ? "#7B2D8B" : "#555"), fontSize: strong ? 13 : 10.5 }}>{value}</span>
++    </div>
++  );
++}
++
++function VoucherDetail({ row }) {
++  if (row.type === "order") {
++    return (
++      <>
++        <DetailLabel />
++        <DetailRow label="Voucher type" value="Sales Invoice" />
++        {row.narration && <DetailRow label="Narration" value={row.narration} />}
++        <div style={{ fontSize: 10, color: "#aaa", marginTop: 8, lineHeight: 1.5 }}>
++          Full item breakdown isn't linked from the ledger — open this invoice from the Orders tab for line items.
++        </div>
++      </>
++    );
++  }
++  if (row.type === "payment") {
++    return (
++      <>
++        <DetailLabel />
++        <DetailRow label="Method" value={row.method || "—"} />
++        <DetailRow label="Reference" value={row.reference_no || "—"} />
++        {row.narration && <DetailRow label="Narration" value={row.narration} />}
++      </>
++    );
++  }
++  if (row.type === "credit_note") {
++    return (
++      <>
++        <DetailLabel />
++        <DetailRow label="Reason" value={row.reason || "—"} />
++      </>
++    );
++  }
++  return (
++    <>
++      <DetailLabel />
++      <DetailRow label="Dr account" value={row.dr_account || "—"} />
++      <DetailRow label="Cr account" value={row.cr_account || "—"} />
++      {row.narration && <DetailRow label="Narration" value={row.narration} />}
++    </>
++  );
++}
++
++function DetailLabel() {
++  return <div style={{ fontSize: 9.5, fontWeight: 800, color: "#b9a3bf", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Voucher Details</div>;
++}
++
++function DetailRow({ label, value }) {
++  return (
++    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, fontSize: 11, color: "#888", padding: "3px 0" }}>
++      <span style={{ flexShrink: 0 }}>{label}</span>
++      <span style={{ fontWeight: 800, color: "#444", textAlign: "right" }}>{value}</span>
++    </div>
++  );
++}
+diff --git a/src/components/staff/PeriodPicker.jsx b/src/components/staff/PeriodPicker.jsx
+new file mode 100644
+index 0000000..bc71dd5
+--- /dev/null
++++ b/src/components/staff/PeriodPicker.jsx
+@@ -0,0 +1,67 @@
++import { useEffect, useState } from "react";
++import { PERIOD_OPTIONS, periodToRange } from "../../lib/dealerCrmUtils";
++
++const SINGLE_DATE_OPTIONS = [
++  { key: "today", label: "Today" },
++  { key: "custom", label: "Custom date" },
++];
++
++// Reusable period dropdown used by the Ledger and Insights tabs. Fires
++// onChange({ from, to }) on mount (so the parent always has a starting
++// range) and again whenever the resolved range changes — either from
++// picking a preset, or from filling in both custom date fields.
++export default function PeriodPicker({ onChange, singleDate = false, defaultKey = "last_3m", small = false }) {
++  const [key, setKey] = useState(defaultKey);
++  const [customFrom, setCustomFrom] = useState("");
++  const [customTo, setCustomTo] = useState("");
++
++  useEffect(() => {
++    if (defaultKey !== "custom") onChange(periodToRange(defaultKey));
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  const handlePreset = (newKey) => {
++    setKey(newKey);
++    if (newKey !== "custom") onChange(periodToRange(newKey));
++    else if (customFrom && (singleDate || customTo)) onChange({ from: customFrom, to: singleDate ? customFrom : customTo });
++  };
++
++  const handleCustom = (which, val) => {
++    if (which === "from") setCustomFrom(val); else setCustomTo(val);
++    const from = which === "from" ? val : customFrom;
++    const to = singleDate ? from : which === "to" ? val : customTo;
++    if (from && (singleDate || to)) onChange({ from, to });
++  };
++
++  const selectStyle = {
++    fontSize: small ? 10.5 : 11.5, fontWeight: 700, color: "#7B2D8B",
++    border: "1.5px solid #e6d3ea", borderRadius: 7, padding: small ? "5px 7px" : "8px 10px",
++    background: "#faf5fb",
++  };
++  const dateStyle = {
++    flex: 1, padding: "7px 8px", border: "1.5px solid #e6d3ea", borderRadius: 7,
++    fontSize: 11, fontWeight: 700, color: "#333", background: "#faf5fb", minWidth: 0,
++  };
++
++  return (
++    <div>
++      <select value={key} onChange={(e) => handlePreset(e.target.value)} style={selectStyle}>
++        {(singleDate ? SINGLE_DATE_OPTIONS : PERIOD_OPTIONS).map((o) => (
++          <option key={o.key} value={o.key}>{o.label}</option>
++        ))}
++      </select>
++      {key === "custom" && (
++        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
++          {singleDate && <span style={{ fontSize: 11, color: "#888", flexShrink: 0 }}>As of</span>}
++          <input type="date" value={customFrom} onChange={(e) => handleCustom("from", e.target.value)} style={dateStyle} />
++          {!singleDate && (
++            <>
++              <span style={{ fontSize: 11, color: "#888" }}>to</span>
++              <input type="date" value={customTo} onChange={(e) => handleCustom("to", e.target.value)} style={dateStyle} />
++            </>
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/lib/dealerCrmUtils.js b/src/lib/dealerCrmUtils.js
+new file mode 100644
+index 0000000..974acfb
+--- /dev/null
++++ b/src/lib/dealerCrmUtils.js
+@@ -0,0 +1,240 @@
++// Shared helpers for the staff-facing Dealer CRM screen (DealerDetail.jsx
++// and its Ledger/Insights tab components): period-picker date math,
++// formatters, PDF/Excel export, and the AI-assistant context builders.
++//
++// Export uses the same libraries already installed for this purpose
++// elsewhere in the app — jsPDF + jspdf-autotable (src/utils/generatePriceListPDF.js)
++// for a real downloadable PDF, and xlsx (src/admin/AdminDealers.jsx) for
++// Excel — rather than introducing a new dependency.
++
++import * as XLSX from "xlsx";
++import { jsPDF } from "jspdf";
++import autoTable from "jspdf-autotable";
++
++// ── Period picker ───────────────────────────────────────────────────────
++
++export const PERIOD_OPTIONS = [
++  { key: "last_30d", label: "Last 30 days" },
++  { key: "this_month", label: "This month" },
++  { key: "last_3m", label: "Last 3 months" },
++  { key: "this_quarter", label: "This quarter" },
++  { key: "last_6m", label: "Last 6 months" },
++  { key: "this_year", label: "This year" },
++  { key: "last_12m", label: "Last 12 months" },
++  { key: "all_time", label: "All time" },
++  { key: "custom", label: "Custom range" },
++];
++
++function isoDate(d) {
++  return d.toISOString().slice(0, 10);
++}
++
++// Returns { from, to } as YYYY-MM-DD strings (or nulls for "all_time").
++export function periodToRange(key) {
++  const now = new Date();
++  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
++  switch (key) {
++    case "today":
++      return { from: isoDate(today), to: isoDate(today) };
++    case "last_30d": {
++      const f = new Date(today); f.setDate(f.getDate() - 29);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "this_month": {
++      const f = new Date(today.getFullYear(), today.getMonth(), 1);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "last_3m": {
++      const f = new Date(today); f.setMonth(f.getMonth() - 3);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "this_quarter": {
++      const qStartMonth = Math.floor(today.getMonth() / 3) * 3;
++      const f = new Date(today.getFullYear(), qStartMonth, 1);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "last_6m": {
++      const f = new Date(today); f.setMonth(f.getMonth() - 6);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "this_year": {
++      const f = new Date(today.getFullYear(), 0, 1);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "last_12m": {
++      const f = new Date(today); f.setMonth(f.getMonth() - 12);
++      return { from: isoDate(f), to: isoDate(today) };
++    }
++    case "all_time":
++      return { from: null, to: null };
++    default:
++      return { from: null, to: null };
++  }
++}
++
++// ── Formatters ──────────────────────────────────────────────────────────
++
++export function fmtCurrency(n) {
++  const v = Number(n || 0);
++  return `₹${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
++}
++
++export function fmtCurrency2(n) {
++  const v = Number(n || 0);
++  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
++}
++
++export function fmtDate(iso) {
++  if (!iso) return "—";
++  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
++}
++
++export function fmtDateShort(iso) {
++  if (!iso) return "—";
++  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
++}
++
++// ── Export ──────────────────────────────────────────────────────────────
++
++export function exportRowsToExcel({ filename, sheetName = "Report", rows }) {
++  const wb = XLSX.utils.book_new();
++  const ws = XLSX.utils.json_to_sheet(rows);
++  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
++  XLSX.writeFile(wb, filename);
++}
++
++export function exportTableToPdf({ filename, title, subtitle, columns, rows }) {
++  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
++  doc.setFontSize(13);
++  doc.setTextColor(123, 45, 139);
++  doc.text("Eltop by Embassy Electricals", 40, 40);
++  doc.setFontSize(11);
++  doc.setTextColor(30, 30, 30);
++  doc.text(title, 40, 58);
++  let startY = 72;
++  if (subtitle) {
++    doc.setFontSize(9);
++    doc.setTextColor(130, 130, 130);
++    doc.text(subtitle, 40, 72);
++    startY = 84;
++  }
++  autoTable(doc, {
++    startY,
++    head: [columns.map((c) => c.header)],
++    body: rows.map((r) => columns.map((c) => (c.format ? c.format(r[c.key]) : r[c.key] ?? ""))),
++    styles: { fontSize: 8.5, cellPadding: 5 },
++    headStyles: { fillColor: [123, 45, 139], textColor: 255 },
++    alternateRowStyles: { fillColor: [250, 245, 251] },
++    margin: { left: 40, right: 40 },
++  });
++  doc.save(filename);
++}
++
++function dateSuffix() {
++  const d = new Date();
++  return `${String(d.getDate()).padStart(2, "0")}${String(d.getMonth() + 1).padStart(2, "0")}${d.getFullYear()}`;
++}
++
++export function exportFilename(dealerCode, label, ext) {
++  const safe = (dealerCode || "dealer").replace(/[^a-zA-Z0-9-]/g, "_");
++  return `Eltop_${safe}_${label}_${dateSuffix()}.${ext}`;
++}
++
++// ── AI assistant ────────────────────────────────────────────────────────
++// The chat backend already exists (api/chat.js — proxies to an LLM and
++// shapes the reply like Anthropic's response format) and is already live
++// in production, used today by admin/DealerCRM.jsx's "AI Assistant" tab.
++// This reuses that exact same endpoint — no new backend/infra needed.
++
++const LANGUAGE_INSTRUCTION =
++  "IMPORTANT: Always reply in the same language and script the sales rep used to ask their question — Hindi (Devanagari), Hinglish (Roman-script Hindi), English, or any other language — matching it exactly. Never default to English if they asked in another language. Keep answers short, specific, and numbers-first — this is read on a phone between dealer visits.";
++
++export function buildDealerAiSystemPrompt({ dealer, orders = [], ledgerRows = [], visits = [], topProducts = [] }) {
++  const outstanding = Number(dealer?.outstanding || 0);
++  const totalOrders = orders.length;
++  const totalValue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
++  const lastOrder = orders[0];
++
++  const ledgerLines = ledgerRows.slice(-15).map((r) => {
++    const dr = r.type === "order" || (r.type === "journal" && r.dr_dealer);
++    const sign = dr ? "Dr" : "Cr";
++    return `  ${fmtDateShort(r.voucher_date || r.created_at)} — ${r.voucher_type || r.type} ${r.voucher_no || ""}: ₹${Number(r.amount).toLocaleString("en-IN")} ${sign}`;
++  }).join("\n") || "  No ledger entries yet.";
++
++  const productLines = topProducts.slice(0, 8)
++    .map((p) => `  ${p.name} — ${p.qty} units across ${p.orders_count} orders, ₹${Number(p.amount).toLocaleString("en-IN")}`)
++    .join("\n") || "  No orders yet.";
++
++  const visitLines = visits.slice(0, 5)
++    .map((v) => `  ${fmtDateShort(v.check_in_at || v.visited_at)} by ${v.staff_name}${v.notes ? ` — ${v.notes}` : ""}`)
++    .join("\n") || "  No visits logged yet.";
++
++  const context = `
++DEALER: ${dealer?.name || "—"} (${dealer?.dealer_code || "—"})
++Outstanding: ₹${outstanding.toLocaleString("en-IN")} of ₹${Number(dealer?.credit_limit || 0).toLocaleString("en-IN")} credit limit
++Total orders: ${totalOrders} | Total order value: ₹${totalValue.toLocaleString("en-IN")}
++Last order: ${lastOrder ? `₹${Number(lastOrder.total).toLocaleString("en-IN")} on ${fmtDateShort(lastOrder.created_at)} (${lastOrder.status})` : "None yet"}
++
++TOP PRODUCTS ORDERED:
++${productLines}
++
++RECENT LEDGER ENTRIES (most recent last):
++${ledgerLines}
++
++RECENT VISITS:
++${visitLines}
++`.trim();
++
++  return `You are a CRM assistant for a sales rep at Eltop by Embassy Electricals, helping them understand ONE specific dealer they're about to visit or just spoke with. Only answer using the data given below — never invent figures. ${LANGUAGE_INSTRUCTION}\n\n${context}`;
++}
++
++export function buildDashboardAiSystemPrompt({ repName, dealers = [], agingByDealer = [], visitsToday = [] }) {
++  const overdue = agingByDealer
++    .filter((d) => d.aging && d.aging.daysOld >= 30)
++    .sort((a, b) => b.aging.totalOutstanding - a.aging.totalOutstanding)
++    .slice(0, 15)
++    .map((d) => `  ${d.name} (${d.dealer_code || "—"}) — ₹${d.aging.totalOutstanding.toLocaleString("en-IN")}, ${d.aging.daysOld} days`)
++    .join("\n") || "  None currently 30+ days overdue.";
++
++  const dealerLines = dealers.slice(0, 40)
++    .map((d) => `  ${d.name} (${d.dealer_code || "—"}) — outstanding ₹${Number(d.outstanding || 0).toLocaleString("en-IN")}`)
++    .join("\n") || "  No dealers assigned.";
++
++  const visitLines = visitsToday
++    .map((v) => `  ${v.dealer_name || v.dealer_id} — ${v.status === "open" ? "checked in, not yet out" : "completed"}`)
++    .join("\n") || "  No visits logged today yet.";
++
++  const context = `
++SALES REP: ${repName || "—"}
++
++ASSIGNED DEALERS (${dealers.length}):
++${dealerLines}
++
++DEALERS 30+ DAYS OVERDUE:
++${overdue}
++
++TODAY'S VISITS:
++${visitLines}
++`.trim();
++
++  return `You are a CRM assistant for a field sales rep at Eltop by Embassy Electricals, helping them understand their whole dealer book — not just one dealer. Only answer using the data given below — never invent figures, and say so plainly if something asked isn't in the data provided. ${LANGUAGE_INSTRUCTION}\n\n${context}`;
++}
++
++export async function askAi(systemPrompt, history) {
++  try {
++    const res = await fetch("/api/chat", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({
++        model: "claude-sonnet-4-6",
++        max_tokens: 900,
++        system: systemPrompt,
++        messages: history.map((m) => ({ role: m.role, content: m.content })),
++      }),
++    });
++    const json = await res.json();
++    return json.content?.[0]?.text || "Sorry, I couldn't get a response.";
++  } catch {
++    return "Error connecting to AI assistant — check your connection and try again.";
++  }
++}
+diff --git a/src/lib/ledgerUtils.js b/src/lib/ledgerUtils.js
+index f20726e..84d614c 100644
+--- a/src/lib/ledgerUtils.js
++++ b/src/lib/ledgerUtils.js
+@@ -59,3 +59,59 @@ export function computeAgingFromLedger(rows) {
+ 
+ export const AGING_BUCKETS = ['0–2w', '2–4w', '4–8w', '8w+'];
+ export const BUCKET_COLOR  = { '0–2w': '#27ae60', '2–4w': '#f39c12', '4–8w': '#e67e22', '8w+': '#c0392b' };
++
++/**
++ * Same FIFO heuristic as computeAgingFromLedger, but returns the full
++ * remaining-debit breakdown bucketed by days-old (0-30 / 31-60 / 61-90 /
++ * 90+) instead of collapsing to just the oldest one. Used by the staff
++ * Dealer CRM's Insights > Outstanding Ageing report, which shows a bucketed
++ * breakdown rather than a single "oldest debit" figure. Pure addition —
++ * does not change computeAgingFromLedger's existing behavior/callers.
++ */
++export function computeAgeingBuckets(rows, asOfDate) {
++  const asOf = asOfDate ? new Date(asOfDate) : new Date();
++  const sorted = [...rows]
++    .filter((r) => new Date(r.voucher_date || r.created_at) <= asOf)
++    .sort((a, b) => new Date(a.voucher_date || a.created_at) - new Date(b.voucher_date || b.created_at));
++
++  const debitQueue = [];
++  let creditPool = 0;
++
++  for (const row of sorted) {
++    const amount = Number(row.amount) || 0;
++    if (isDebitEntry(row)) {
++      const date = new Date(row.voucher_date || row.created_at);
++      const absorbed = Math.min(creditPool, amount);
++      creditPool -= absorbed;
++      const remaining = amount - absorbed;
++      if (remaining > 0.01) debitQueue.push({ date, remaining, voucherNo: row.voucher_no, voucherDate: row.voucher_date || row.created_at });
++    } else if (isCreditEntry(row)) {
++      let left = amount;
++      while (left > 0.01 && debitQueue.length > 0) {
++        const oldest = debitQueue[0];
++        const take = Math.min(oldest.remaining, left);
++        oldest.remaining -= take;
++        left -= take;
++        if (oldest.remaining <= 0.01) debitQueue.shift();
++      }
++      creditPool += left;
++    }
++  }
++
++  const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
++  let oldest = null;
++  for (const d of debitQueue) {
++    const daysOld = Math.floor((asOf.getTime() - d.date.getTime()) / 86400000);
++    if (daysOld <= 30) buckets['0-30'] += d.remaining;
++    else if (daysOld <= 60) buckets['31-60'] += d.remaining;
++    else if (daysOld <= 90) buckets['61-90'] += d.remaining;
++    else buckets['90+'] += d.remaining;
++    if (!oldest || d.date < oldest.date) oldest = d;
++  }
++
++  return {
++    buckets,
++    total: Object.values(buckets).reduce((s, v) => s + v, 0),
++    oldest: oldest ? { voucherNo: oldest.voucherNo, date: oldest.voucherDate, daysOverdue: Math.floor((asOf.getTime() - oldest.date.getTime()) / 86400000) } : null,
++  };
++}
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index 4c81b17..eb39685 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -3,21 +3,24 @@ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
+ import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
+-
+-// Dealer detail screen for Sales staff — reached by tapping a dealer in
+-// "My Dealers / Parties" on the Sales dashboard. Everything a rep needs
+-// before/during a call: contact info, credit terms, recent order history,
+-// and an inline check-in/check-out visit workflow: check-in requires GPS
+-// within 100m of the dealer and that the rep has already started their
+-// day (see DayCheckIn.jsx) — no photo needed here, that's Start Day's
+-// job. Check-out requires a board photo, a shop-interior photo, a dealer
+-// visiting-card photo, and a short shop video (all captured live via
+-// CameraCapture — no gallery picker, geo-tag burned in), re-checked
+-// against the same 100m geofence. A dealer's first-ever check-in sets its
+-// saved location if it doesn't have one yet (profiles.location_lat/lng).
++import { isDebitEntry, computeAgeingBuckets } from "../../lib/ledgerUtils";
++import { fmtCurrency, exportRowsToExcel, exportTableToPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
++import DealerLedgerTab from "../../components/staff/DealerLedgerTab";
++import DealerInsightsTab from "../../components/staff/DealerInsightsTab";
++
++// Dealer CRM screen for Sales staff — reached by tapping a dealer in
++// "My Dealers / Parties" on the Sales dashboard. Rebuilt (approved from
++// mockup/dealer-crm-mockup.html) into 5 tabs:
++//   Overview  — credit/outstanding, this-quarter stats, top products, dues
++//   Ledger    — full voucher history with running balance (DealerLedgerTab)
++//   Orders    — order history with line-item expand
++//   Visits    — the original check-in/check-out workflow, unchanged, just
++//               moved under its own tab so Overview has room to breathe
++//   Insights  — 9 reports + a per-dealer AI assistant (DealerInsightsTab)
+ //
+ // Every RPC here (get_dealer_detail, get_dealer_orders, get_dealer_visits,
+-// get_my_open_visit, start_dealer_visit, complete_dealer_visit) re-checks
++// get_my_open_visit, start_dealer_visit, complete_dealer_visit, and the new
++// get_dealer_report/get_dealer_ledger/get_order_items_for_staff) re-checks
+ // that this dealer is within the caller's own scope server-side — a rep
+ // can't view or check in against another rep's dealer just by knowing/
+ // guessing its id.
+@@ -31,6 +34,14 @@ const CARD_STYLE = {
+   boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+ };
+ 
++const TABS = [
++  { key: "overview", label: "📊 Overview" },
++  { key: "ledger", label: "📒 Ledger" },
++  { key: "orders", label: "🧾 Orders" },
++  { key: "visits", label: "📍 Visits" },
++  { key: "insights", label: "📈 Insights" },
++];
++
+ function initials(name) {
+   if (!name) return "?";
+   return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+@@ -76,12 +87,19 @@ export default function DealerDetail() {
+   const { id } = useParams();
+   const navigate = useNavigate();
+ 
++  const [tab, setTab] = useState("overview");
++
+   const [dealer, setDealer] = useState(null);
+   const [orders, setOrders] = useState([]);
+   const [visits, setVisits] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+ 
++  // Overview tab extras — this quarter's stats, top 3 products, ageing.
++  const [orderStats, setOrderStats] = useState(null);
++  const [topProducts, setTopProducts] = useState([]);
++  const [ageingRows, setAgeingRows] = useState([]);
++
+   // Whichever dealer (anywhere) the rep currently has an open check-in at.
+   const [openVisit, setOpenVisit] = useState(null);
+   const [openVisitLoading, setOpenVisitLoading] = useState(true);
+@@ -122,13 +140,17 @@ export default function DealerDetail() {
+   useEffect(() => {
+     if (!isSupabaseConfigured || !id) { setLoading(false); setOpenVisitLoading(false); return; }
+     let cancelled = false;
++    const quarter = periodToRange("this_quarter");
+     Promise.all([
+       supabase.rpc("get_dealer_detail", { p_dealer_id: id }),
+       supabase.rpc("get_dealer_orders", { p_dealer_id: id, p_limit: 20 }),
+       supabase.rpc("get_dealer_visits", { p_dealer_id: id, p_limit: 10 }),
+       supabase.rpc("get_my_open_visit"),
+       supabase.rpc("get_my_day_start"),
+-    ]).then(([detailRes, ordersRes, visitsRes, openRes, dayStartRes]) => {
++      supabase.rpc("get_dealer_report", { p_dealer_id: id, p_report: "order_stats", p_from: quarter.from, p_to: quarter.to }),
++      supabase.rpc("get_dealer_report", { p_dealer_id: id, p_report: "top_products", p_from: quarter.from, p_to: quarter.to }),
++      supabase.rpc("get_dealer_report", { p_dealer_id: id, p_report: "ageing", p_from: null, p_to: quarter.to }),
++    ]).then(([detailRes, ordersRes, visitsRes, openRes, dayStartRes, statsRes, productsRes, ageingRes]) => {
+       if (cancelled) return;
+       if (detailRes.error) {
+         setError(detailRes.error.message);
+@@ -150,6 +172,9 @@ export default function DealerDetail() {
+         const row = Array.isArray(dayStartRes.data) ? dayStartRes.data[0] : dayStartRes.data;
+         setDayStart(row || null);
+       }
++      if (!statsRes.error) setOrderStats(statsRes.data || null);
++      if (!productsRes.error) setTopProducts((productsRes.data || []).slice(0, 3));
++      if (!ageingRes.error) setAgeingRows(ageingRes.data || []);
+       setLoading(false);
+       setOpenVisitLoading(false);
+       setLoadingDayStart(false);
+@@ -195,11 +220,11 @@ export default function DealerDetail() {
+     try {
+       const pos = await getCurrentPosition();
+ 
+-      // Soft, non-blocking duration check — mobile browsers won't let us
+-      // force an exact recording length through the native camera.
++      // Soft, non-blocking duration check — recording auto-stops at 5s via
++      // CameraVideoSlot, this just catches anything unexpectedly long.
+       const duration = await getVideoDuration(videoFile);
+-      if (duration != null && duration > 20) {
+-        setCheckOutStatus({ type: "error", message: `That video is ${Math.round(duration)}s — please re-record a short ~5 second clip of the shop interior.` });
++      if (duration != null && duration > 8) {
++        setCheckOutStatus({ type: "error", message: `That video is ${Math.round(duration)}s — please re-record it.` });
+         setCheckingOut(false);
+         return;
+       }
+@@ -239,6 +264,33 @@ export default function DealerDetail() {
+     }
+   };
+ 
++  const handleExportStatement = async (format) => {
++    const { data } = await supabase.rpc("get_dealer_ledger", { p_dealer_id: id, p_from: null, p_to: null });
++    const rows = (data || []).map((r) => ({
++      Date: formatDate(r.voucher_date || r.created_at),
++      Particulars: r.type === "order" ? "Sales" : r.type === "payment" ? "Payment" : r.type === "credit_note" ? "Credit Note" : "Journal",
++      "Voucher No": r.voucher_no || "",
++      Debit: isDebitEntry(r) ? Number(r.amount) : "",
++      Credit: !isDebitEntry(r) ? Number(r.amount) : "",
++    }));
++    if (format === "excel") {
++      exportRowsToExcel({ filename: exportFilename(dealer?.dealer_code, "Statement", "xlsx"), sheetName: "Statement", rows });
++    } else {
++      exportTableToPdf({
++        filename: exportFilename(dealer?.dealer_code, "Statement", "pdf"),
++        title: `Statement — ${dealer?.name || ""}`,
++        subtitle: "All-time ledger",
++        columns: [
++          { header: "Date", key: "Date" }, { header: "Particulars", key: "Particulars" },
++          { header: "Voucher No", key: "Voucher No" },
++          { header: "Debit", key: "Debit", format: (v) => (v ? fmtCurrency(v) : "") },
++          { header: "Credit", key: "Credit", format: (v) => (v ? fmtCurrency(v) : "") },
++        ],
++        rows,
++      });
++    }
++  };
++
+   if (loading) {
+     return (
+       <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
+@@ -272,233 +324,451 @@ export default function DealerDetail() {
+ 
+   return (
+     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+-      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 40px", color: "#fff" }}>
+-        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 16 }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 18px 0", color: "#fff" }}>
++        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
+           ← Back
+         </button>
+-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
++        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+           <div style={{
+-            width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
++            width: 46, height: 46, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
+             border: "2px solid rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
+-            fontSize: 19, fontWeight: 800, color: "#fff", flexShrink: 0,
++            fontSize: 17, fontWeight: 800, color: "#fff", flexShrink: 0,
+           }}>
+             {initials(dealer.name)}
+           </div>
+-          <div>
+-            <div style={{ fontSize: 20, fontWeight: 800 }}>{dealer.name}</div>
+-            <div style={{ fontSize: 12.5, opacity: 0.85, marginTop: 2 }}>{dealer.dealer_code || "—"}</div>
++          <div style={{ minWidth: 0 }}>
++            <div style={{ fontSize: 18, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dealer.name}</div>
++            <div style={{ fontSize: 11.5, opacity: 0.8, marginTop: 1 }}>{dealer.dealer_code || "—"}</div>
+           </div>
++          <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexShrink: 0 }}>
++            {dealer.phone && <a href={`tel:${dealer.phone}`} style={ICON_BTN}>📞</a>}
++            {dealer.email && <a href={`mailto:${dealer.email}`} style={ICON_BTN}>✉️</a>}
++          </div>
++        </div>
++
++        <div style={{ display: "flex", gap: 6, marginTop: 16, background: "rgba(255,255,255,0.14)", borderRadius: 12, padding: 4, overflowX: "auto" }}>
++          {TABS.map((t) => (
++            <div
++              key={t.key}
++              onClick={() => setTab(t.key)}
++              style={{
++                flex: 1, textAlign: "center", padding: "9px 4px", borderRadius: 9, fontSize: 11.5, fontWeight: 800,
++                cursor: "pointer", whiteSpace: "nowrap",
++                background: tab === t.key ? "#fff" : "transparent",
++                color: tab === t.key ? "#7B2D8B" : "#fff",
++                opacity: tab === t.key ? 1 : 0.75,
++              }}
++            >
++              {t.label}
++            </div>
++          ))}
++        </div>
++        <div style={{ height: 16 }} />
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 20px 60px" }}>
++        {tab === "overview" && (
++          <OverviewTab
++            dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
++            territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
++            onExportStatement={handleExportStatement}
++          />
++        )}
++
++        {tab === "ledger" && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} />}
++
++        {tab === "orders" && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
++
++        {tab === "visits" && (
++          <VisitsTab
++            openVisitLoading={openVisitLoading} isCheckedInElsewhere={isCheckedInElsewhere} isCheckedInHere={isCheckedInHere}
++            openVisit={openVisit} navigate={navigate} boardFile={boardFile} setBoardFile={setBoardFile}
++            shopFile={shopFile} setShopFile={setShopFile} cardFile={cardFile} setCardFile={setCardFile}
++            videoFile={videoFile} setVideoFile={setVideoFile} checkoutNotes={checkoutNotes} setCheckoutNotes={setCheckoutNotes}
++            checkingOut={checkingOut} handleCheckOut={handleCheckOut} checkOutStatus={checkOutStatus}
++            loadingDayStart={loadingDayStart} dayStart={dayStart} checkingIn={checkingIn} handleCheckIn={handleCheckIn}
++            checkInStatus={checkInStatus} visits={visits} formatTime={formatTime} formatDateTime={formatDateTime}
++          />
++        )}
++
++        {tab === "insights" && <DealerInsightsTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} orders={orders} visits={visits} />}
++      </div>
++    </div>
++  );
++}
++
++const ICON_BTN = { width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.18)", border: "1.5px solid rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, textDecoration: "none" };
++
++// ── Overview tab ─────────────────────────────────────────────────────────
++
++function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, territories, orderStats, topProducts, ageingRows, onExportStatement }) {
++  const health = ageingHealth(ageingRows);
++  return (
++    <div>
++      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
++        <button onClick={() => onExportStatement("pdf")} style={STMT_BTN}>📄 Statement PDF</button>
++        <button onClick={() => onExportStatement("excel")} style={STMT_BTN}>📊 Statement Excel</button>
++      </div>
++
++      <div style={CARD_STYLE}>
++        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
++          <span>Outstanding</span>
++          <span style={{ color: outstanding > 0 ? "#d64545" : "#2fa84f" }}>{fmtCurrency(outstanding)}</span>
++        </div>
++        {creditLimit > 0 && (
++          <>
++            <div style={{ height: 8, background: "#f0eaf2", borderRadius: 999, overflow: "hidden" }}>
++              <div style={{ height: "100%", width: `${usedPct}%`, background: usedPct >= 90 ? "#d64545" : "linear-gradient(90deg, #7B2D8B, #c65fd3)", borderRadius: 999 }} />
++            </div>
++            <div style={{ fontSize: 11.5, color: "#999", marginTop: 6 }}>
++              {usedPct}% of {fmtCurrency(creditLimit)} credit limit used
++            </div>
++          </>
++        )}
++        <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
++          <span style={{ fontSize: 11.5, color: "#999" }}>Payment health</span>
++          <span style={{ fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 999, background: health.bg, color: health.fg }}>{health.label}</span>
+         </div>
++        {netRate && (
++          <div style={{ marginTop: 10, fontSize: 12, color: "#7B2D8B", fontWeight: 700, background: "#f8f4f8", borderRadius: 8, padding: "8px 12px" }}>
++            Net Rate = DLP × {netRate}% (Disc. {dealer.discount1 || 0}% + {dealer.discount2 || 0}%)
++          </div>
++        )}
+       </div>
+ 
+-      <div style={{ maxWidth: 640, margin: "-20px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++      {orderStats && (
+         <div style={CARD_STYLE}>
+-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+-            <span>Outstanding</span>
+-            <span style={{ color: outstanding > 0 ? "#d64545" : "#2fa84f" }}>₹{outstanding.toLocaleString("en-IN")}</span>
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>This Quarter</div>
++          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
++            <StatBox label="Last order value" value={orderStats.last_order_value != null ? fmtCurrency(orderStats.last_order_value) : "—"} />
++            <StatBox label="Orders pending" value={orderStats.orders_pending} />
++            <StatBox label="Total orders (lifetime)" value={orderStats.total_orders_lifetime} />
++            <StatBox label="Avg order value" value={fmtCurrency(orderStats.avg_order_value)} />
+           </div>
+-          {creditLimit > 0 && (
+-            <>
+-              <div style={{ height: 8, background: "#f0eaf2", borderRadius: 999, overflow: "hidden" }}>
+-                <div style={{ height: "100%", width: `${usedPct}%`, background: usedPct >= 90 ? "#d64545" : "linear-gradient(90deg, #7B2D8B, #c65fd3)", borderRadius: 999 }} />
+-              </div>
+-              <div style={{ fontSize: 11.5, color: "#999", marginTop: 6 }}>
+-                {usedPct}% of ₹{creditLimit.toLocaleString("en-IN")} credit limit used
+-              </div>
+-            </>
+-          )}
+-          {netRate && (
+-            <div style={{ marginTop: 10, fontSize: 12, color: "#7B2D8B", fontWeight: 700, background: "#f8f4f8", borderRadius: 8, padding: "8px 12px" }}>
+-              Net Rate = DLP × {netRate}% (Disc. {dealer.discount1 || 0}% + {dealer.discount2 || 0}%)
+-            </div>
+-          )}
+         </div>
++      )}
+ 
++      {topProducts.length > 0 && (
+         <div style={CARD_STYLE}>
+-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Contact</div>
+-          {dealer.phone && (
+-            <a href={`tel:${dealer.phone}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
+-              📞 {dealer.phone}{dealer.phone2 ? ` / ${dealer.phone2}` : ""}
+-            </a>
+-          )}
+-          {dealer.email && (
+-            <a href={`mailto:${dealer.email}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
+-              ✉️ {dealer.email}
+-            </a>
+-          )}
+-          {dealer.address && (
+-            <div style={{ fontSize: 13.5, color: "#666", lineHeight: 1.5 }}>📍 {dealer.address}</div>
+-          )}
+-          {dealer.gstin && (
+-            <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>GSTIN: {dealer.gstin}</div>
+-          )}
+-          {territories.length > 0 && (
+-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+-              {territories.map((t) => (
+-                <span key={t} style={{ fontSize: 11, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6", borderRadius: 999, padding: "3px 10px" }}>{t}</span>
+-              ))}
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Top Products Ordered</div>
++          {topProducts.map((p, i) => (
++            <div key={p.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: i < topProducts.length - 1 ? "1px solid #f2e6f4" : "none" }}>
++              <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
++                <span style={{ width: 20, height: 20, borderRadius: 6, background: "#f3e6f6", color: "#7B2D8B", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginRight: 8, flexShrink: 0 }}>{i + 1}</span>
++                <div style={{ minWidth: 0 }}>
++                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
++                  <div style={{ fontSize: 10.5, color: "#999" }}>{p.qty} pcs across {p.orders_count} orders</div>
++                </div>
++              </div>
++              <div style={{ fontSize: 12, fontWeight: 800, color: "#7B2D8B", flexShrink: 0 }}>{fmtCurrency(p.amount)}</div>
+             </div>
+-          )}
+-          {!dealer.phone && !dealer.email && !dealer.address && (
+-            <div style={{ fontSize: 12.5, color: "#aaa" }}>No contact details on file yet.</div>
+-          )}
++          ))}
+         </div>
++      )}
+ 
+-        {/* ── Visit check-in / check-out ─────────────────────────────── */}
++      {health.dues && (
+         <div style={CARD_STYLE}>
+-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Visit</div>
+-          <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12, lineHeight: 1.5 }}>
+-            You must be within 100m of this dealer to check in or out. A dealer's first-ever check-in sets its saved location.
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Dues</div>
++          <DueRow label="Oldest unpaid invoice" value={health.dues.voucherNo || "—"} />
++          <DueRow label="Days overdue" value={health.dues.daysOverdue > 0 ? `${health.dues.daysOverdue} days` : "Not overdue"} strong={health.dues.daysOverdue > 30} />
++        </div>
++      )}
++
++      <div style={CARD_STYLE}>
++        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Contact</div>
++        {dealer.phone && (
++          <a href={`tel:${dealer.phone}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
++            📞 {dealer.phone}{dealer.phone2 ? ` / ${dealer.phone2}` : ""}
++          </a>
++        )}
++        {dealer.email && (
++          <a href={`mailto:${dealer.email}`} style={{ display: "block", fontSize: 13.5, color: "#222", textDecoration: "none", marginBottom: 6 }}>
++            ✉️ {dealer.email}
++          </a>
++        )}
++        {dealer.address && (
++          <div style={{ fontSize: 13.5, color: "#666", lineHeight: 1.5 }}>📍 {dealer.address}</div>
++        )}
++        {dealer.gstin && (
++          <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>GSTIN: {dealer.gstin}</div>
++        )}
++        {territories.length > 0 && (
++          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
++            {territories.map((t) => (
++              <span key={t} style={{ fontSize: 11, fontWeight: 700, color: "#7B2D8B", background: "#f3e6f6", borderRadius: 999, padding: "3px 10px" }}>{t}</span>
++            ))}
+           </div>
++        )}
++        {!dealer.phone && !dealer.email && !dealer.address && (
++          <div style={{ fontSize: 12.5, color: "#aaa" }}>No contact details on file yet.</div>
++        )}
++      </div>
++    </div>
++  );
++}
+ 
+-          {openVisitLoading ? (
+-            <div style={{ fontSize: 12.5, color: "#999" }}>Checking visit status…</div>
+-          ) : isCheckedInElsewhere ? (
+-            <div>
+-              <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+-                You're checked in at <b>{openVisit.dealer_name}</b> since {formatTime(openVisit.check_in_at)}. Check out there before starting a visit here.
+-              </div>
+-              <button
+-                onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
+-                style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+-              >
+-                Go check out at {openVisit.dealer_name}
+-              </button>
+-            </div>
+-          ) : isCheckedInHere ? (
+-            <>
+-              <div style={{ fontSize: 12, fontWeight: 700, color: "#2fa84f", marginBottom: 12 }}>
+-                🟢 Checked in since {formatTime(openVisit.check_in_at)} — complete check-out below.
+-              </div>
+-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+-                <CameraPhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
+-                <CameraPhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
+-                <CameraPhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
+-              </div>
+-              <div style={{ marginBottom: 12 }}>
+-                <CameraVideoSlot file={videoFile} onChange={setVideoFile} disabled={checkingOut} />
++const STMT_BTN = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", borderRadius: 9, border: "1.5px solid #7B2D8B", background: "#fff", color: "#7B2D8B", fontSize: 11.5, fontWeight: 800, cursor: "pointer" };
++
++function StatBox({ label, value }) {
++  return (
++    <div style={{ background: "#faf5fb", borderRadius: 10, padding: "10px 12px" }}>
++      <div style={{ fontSize: 17, fontWeight: 800, color: "#222" }}>{value}</div>
++      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
++    </div>
++  );
++}
++
++function DueRow({ label, value, strong }) {
++  return (
++    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}>
++      <span style={{ fontSize: 12, color: "#888" }}>{label}</span>
++      <span style={{ fontSize: 12, fontWeight: 800, color: strong ? "#d64545" : "#333" }}>{value}</span>
++    </div>
++  );
++}
++
++// Real payment-health signal computed from actual ageing — deliberately not
++// a fabricated "credit rating" (no such data exists; see ageing bucket calc
++// in ledgerUtils.js). Good/Watch/Overdue purely from days-overdue.
++function ageingHealth(rows) {
++  const b = computeAgeingBuckets(rows || [], null);
++  if (!b.oldest) return { label: "🟢 Good — no invoice overdue", bg: "#e6f7ec", fg: "#2fa84f", dues: null };
++  if (b.oldest.daysOverdue > 30) return { label: "🔴 Overdue", bg: "#fdeaea", fg: "#d64545", dues: b.oldest };
++  if (b.oldest.daysOverdue > 0) return { label: "🟡 Watch", bg: "#fff4e0", fg: "#c98400", dues: b.oldest };
++  return { label: "🟢 Good — no invoice overdue", bg: "#e6f7ec", fg: "#2fa84f", dues: b.oldest };
++}
++
++// ── Orders tab ───────────────────────────────────────────────────────────
++
++function OrdersTab({ orders, dealerCode }) {
++  const [openId, setOpenId] = useState(null);
++  const [items, setItems] = useState({});
++
++  const toggle = (order) => {
++    if (openId === order.id) { setOpenId(null); return; }
++    setOpenId(order.id);
++    if (!items[order.id]) {
++      supabase.rpc("get_order_items_for_staff", { p_order_id: order.id }).then(({ data, error }) => {
++        if (!error) setItems((prev) => ({ ...prev, [order.id]: data || [] }));
++      });
++    }
++  };
++
++  const handleExport = (format) => {
++    const rows = orders.map((o) => ({
++      Date: formatDate(o.created_at),
++      Amount: Number(o.total || 0),
++      Status: o.status,
++    }));
++    if (format === "excel") {
++      exportRowsToExcel({ filename: exportFilename(dealerCode, "Orders", "xlsx"), sheetName: "Orders", rows });
++    } else {
++      exportTableToPdf({
++        filename: exportFilename(dealerCode, "Orders", "pdf"),
++        title: "Order History",
++        columns: [
++          { header: "Date", key: "Date" },
++          { header: "Amount", key: "Amount", format: (v) => fmtCurrency(v) },
++          { header: "Status", key: "Status" },
++        ],
++        rows,
++      });
++    }
++  };
++
++  return (
++    <div>
++      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
++        <button onClick={() => handleExport("pdf")} style={STMT_BTN}>📄 Export PDF</button>
++        <button onClick={() => handleExport("excel")} style={STMT_BTN}>📊 Export Excel</button>
++      </div>
++      <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++        {orders.length === 0 ? (
++          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No orders yet.</div>
++        ) : (
++          orders.map((o) => (
++            <div key={o.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
++              <div onClick={() => toggle(o)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", cursor: "pointer" }}>
++                <div>
++                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fmtCurrency(o.total)}</div>
++                  <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{formatDate(o.created_at)}</div>
++                </div>
++                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++                  <StatusBadge status={o.status} />
++                  <span style={{ fontSize: 12, color: "#ccc" }}>{openId === o.id ? "▴" : "▾"}</span>
++                </div>
+               </div>
+-              <textarea
+-                value={checkoutNotes}
+-                onChange={(e) => setCheckoutNotes(e.target.value)}
+-                placeholder="Notes for this visit (optional)"
+-                rows={2}
+-                style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10, boxSizing: "border-box" }}
+-              />
+-              <button
+-                onClick={handleCheckOut}
+-                disabled={checkingOut}
+-                style={{
+-                  width: "100%", padding: "11px", border: "none", borderRadius: 8,
+-                  background: checkingOut ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
+-                  cursor: checkingOut ? "default" : "pointer",
+-                }}
+-              >
+-                {checkingOut ? "Checking out…" : "Check Out"}
+-              </button>
+-              {checkOutStatus && (
+-                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkOutStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
+-                  {checkOutStatus.message}
++              {openId === o.id && (
++                <div style={{ padding: "0 16px 14px", fontSize: 12, color: "#666", lineHeight: 1.7 }}>
++                  {!items[o.id] ? (
++                    "Loading items…"
++                  ) : items[o.id].length === 0 ? (
++                    "No line items found."
++                  ) : (
++                    items[o.id].map((it, i) => (
++                      <div key={i} style={{ display: "flex", justifyContent: "space-between" }}>
++                        <span>{it.name} × {it.qty}</span>
++                        <span style={{ fontWeight: 700, color: "#333" }}>{fmtCurrency(it.qty * it.price)}</span>
++                      </div>
++                    ))
++                  )}
+                 </div>
+               )}
+-            </>
+-          ) : loadingDayStart ? (
+-            <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
+-          ) : dayStart?.ended_at ? (
+-            <div style={{ fontSize: 12.5, color: "#888", fontWeight: 600, background: "#f2f2f2", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>
+-              Your day has ended — you can't check in anywhere else until you start a new day tomorrow.
+             </div>
+-          ) : !dayStart ? (
+-            <div>
+-              <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
+-                You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
++          ))
++        )}
++      </div>
++    </div>
++  );
++}
++
++// ── Visits tab (original check-in/check-out workflow, unchanged) ────────
++
++function VisitsTab({
++  openVisitLoading, isCheckedInElsewhere, isCheckedInHere, openVisit, navigate,
++  boardFile, setBoardFile, shopFile, setShopFile, cardFile, setCardFile, videoFile, setVideoFile,
++  checkoutNotes, setCheckoutNotes, checkingOut, handleCheckOut, checkOutStatus,
++  loadingDayStart, dayStart, checkingIn, handleCheckIn, checkInStatus,
++  visits, formatTime, formatDateTime,
++}) {
++  return (
++    <div>
++      <div style={CARD_STYLE}>
++        <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 4 }}>Visit</div>
++        <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12, lineHeight: 1.5 }}>
++          You must be within 100m of this dealer to check in or out. A dealer's first-ever check-in sets its saved location.
++        </div>
++
++        {openVisitLoading ? (
++          <div style={{ fontSize: 12.5, color: "#999" }}>Checking visit status…</div>
++        ) : isCheckedInElsewhere ? (
++          <div>
++            <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
++              You're checked in at <b>{openVisit.dealer_name}</b> since {formatTime(openVisit.check_in_at)}. Check out there before starting a visit here.
++            </div>
++            <button
++              onClick={() => navigate(`/staff/sales/dealer/${openVisit.dealer_id}`)}
++              style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
++            >
++              Go check out at {openVisit.dealer_name}
++            </button>
++          </div>
++        ) : isCheckedInHere ? (
++          <>
++            <div style={{ fontSize: 12, fontWeight: 700, color: "#2fa84f", marginBottom: 12 }}>
++              🟢 Checked in since {formatTime(openVisit.check_in_at)} — complete check-out below.
++            </div>
++            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
++              <CameraPhotoSlot label="Shop board" file={boardFile} onChange={setBoardFile} disabled={checkingOut} />
++              <CameraPhotoSlot label="Shop interior" file={shopFile} onChange={setShopFile} disabled={checkingOut} />
++              <CameraPhotoSlot label="Dealer card" file={cardFile} onChange={setCardFile} disabled={checkingOut} />
++            </div>
++            <div style={{ marginBottom: 12 }}>
++              <CameraVideoSlot file={videoFile} onChange={setVideoFile} disabled={checkingOut} />
++            </div>
++            <textarea
++              value={checkoutNotes}
++              onChange={(e) => setCheckoutNotes(e.target.value)}
++              placeholder="Notes for this visit (optional)"
++              rows={2}
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eee", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 10, boxSizing: "border-box" }}
++            />
++            <button
++              onClick={handleCheckOut}
++              disabled={checkingOut}
++              style={{
++                width: "100%", padding: "11px", border: "none", borderRadius: 8,
++                background: checkingOut ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
++                cursor: checkingOut ? "default" : "pointer",
++              }}
++            >
++              {checkingOut ? "Checking out…" : "Check Out"}
++            </button>
++            {checkOutStatus && (
++              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkOutStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
++                {checkOutStatus.message}
+               </div>
+-              <button
+-                onClick={() => navigate("/staff/sales/day-checkin")}
+-                style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+-              >
+-                🛵 Start Day
+-              </button>
++            )}
++          </>
++        ) : loadingDayStart ? (
++          <div style={{ fontSize: 12.5, color: "#999" }}>Checking your day status…</div>
++        ) : dayStart?.ended_at ? (
++          <div style={{ fontSize: 12.5, color: "#888", fontWeight: 600, background: "#f2f2f2", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>
++            Your day has ended — you can't check in anywhere else until you start a new day tomorrow.
++          </div>
++        ) : !dayStart ? (
++          <div>
++            <div style={{ fontSize: 12.5, color: "#c98400", fontWeight: 600, background: "#fff8ea", borderRadius: 8, padding: "10px 12px", marginBottom: 10, lineHeight: 1.5 }}>
++              You haven't started your day yet. Start your day first (a quick meter-reading photo) before checking in here.
++            </div>
++            <button
++              onClick={() => navigate("/staff/sales/day-checkin")}
++              style={{ width: "100%", padding: "10px", border: "1.5px solid #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
++            >
++              🛵 Start Day
++            </button>
++          </div>
++        ) : (
++          <>
++            <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12 }}>
++              Tap below to confirm — you must be within 100m of this dealer.
+             </div>
+-          ) : (
+-            <>
+-              <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12 }}>
+-                Tap below to confirm — you must be within 100m of this dealer.
++            <button
++              onClick={handleCheckIn}
++              disabled={checkingIn}
++              style={{
++                width: "100%", padding: "11px", border: "none", borderRadius: 8,
++                background: checkingIn ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
++                cursor: checkingIn ? "default" : "pointer",
++              }}
++            >
++              {checkingIn ? "Checking in…" : "📍 Check In"}
++            </button>
++            {checkInStatus && (
++              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkInStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
++                {checkInStatus.message}
+               </div>
+-              <button
+-                onClick={handleCheckIn}
+-                disabled={checkingIn}
+-                style={{
+-                  width: "100%", padding: "11px", border: "none", borderRadius: 8,
+-                  background: checkingIn ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 700,
+-                  cursor: checkingIn ? "default" : "pointer",
+-                }}
+-              >
+-                {checkingIn ? "Checking in…" : "📍 Check In"}
+-              </button>
+-              {checkInStatus && (
+-                <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: checkInStatus.type === "success" ? "#2fa84f" : "#d64545" }}>
+-                  {checkInStatus.message}
+-                </div>
+-              )}
+-            </>
+-          )}
+-        </div>
++            )}
++          </>
++        )}
++      </div>
+ 
+-        <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Recent Visits</div>
+-        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+-          {visits.length === 0 ? (
+-            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No visits logged yet.</div>
+-          ) : (
+-            visits.map((v) => (
+-              <div key={v.id} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
+-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+-                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{v.staff_name}</div>
+-                  <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(v.check_in_at || v.visited_at)}</div>
+-                </div>
+-                <div style={{ marginTop: 3 }}>
+-                  {v.status === "open" ? (
+-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 8px" }}>Still checked in</span>
+-                  ) : (
+-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#2fa84f", background: "#e6f7ec", borderRadius: 999, padding: "2px 8px" }}>
+-                      Checked out{v.check_out_at ? ` ${formatTime(v.check_out_at)}` : ""}
+-                    </span>
+-                  )}
+-                </div>
+-                {v.notes && <div style={{ fontSize: 12.5, color: "#666", marginTop: 6, lineHeight: 1.5 }}>{v.notes}</div>}
+-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
+-                  {v.duty_on_photo_url && <a href={v.duty_on_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Duty-on photo</a>}
+-                  {v.board_photo_url && <a href={v.board_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Board photo</a>}
+-                  {v.shop_photo_url && <a href={v.shop_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Shop photo</a>}
+-                  {v.card_photo_url && <a href={v.card_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Card photo</a>}
+-                  {v.video_url && <a href={v.video_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Video</a>}
+-                  {v.latitude != null && v.longitude != null && (
+-                    <a href={`https://www.google.com/maps?q=${v.latitude},${v.longitude}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>
+-                      📍 Location
+-                    </a>
+-                  )}
+-                </div>
++      <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Recent Visits</div>
++      <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++        {visits.length === 0 ? (
++          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No visits logged yet.</div>
++        ) : (
++          visits.map((v) => (
++            <div key={v.id} style={{ padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
++              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
++                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{v.staff_name}</div>
++                <div style={{ fontSize: 11, color: "#999" }}>{formatDateTime(v.check_in_at || v.visited_at)}</div>
+               </div>
+-            ))
+-          )}
+-        </div>
+-
+-        <div style={{ fontSize: 15, fontWeight: 800, margin: "20px 0 12px" }}>Order History</div>
+-        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+-          {orders.length === 0 ? (
+-            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No orders yet.</div>
+-          ) : (
+-            orders.map((o) => (
+-              <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", borderBottom: "1px solid #f2f2f2" }}>
+-                <div>
+-                  <div style={{ fontSize: 13, fontWeight: 700 }}>₹{Number(o.total || 0).toLocaleString("en-IN")}</div>
+-                  <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>{formatDate(o.created_at)}</div>
+-                </div>
+-                <StatusBadge status={o.status} />
++              <div style={{ marginTop: 3 }}>
++                {v.status === "open" ? (
++                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 8px" }}>Still checked in</span>
++                ) : (
++                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#2fa84f", background: "#e6f7ec", borderRadius: 999, padding: "2px 8px" }}>
++                    Checked out{v.check_out_at ? ` ${formatTime(v.check_out_at)}` : ""}
++                  </span>
++                )}
+               </div>
+-            ))
+-          )}
+-        </div>
++              {v.notes && <div style={{ fontSize: 12.5, color: "#666", marginTop: 6, lineHeight: 1.5 }}>{v.notes}</div>}
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
++                {v.duty_on_photo_url && <a href={v.duty_on_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Duty-on photo</a>}
++                {v.board_photo_url && <a href={v.board_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Board photo</a>}
++                {v.shop_photo_url && <a href={v.shop_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Shop photo</a>}
++                {v.card_photo_url && <a href={v.card_photo_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Card photo</a>}
++                {v.video_url && <a href={v.video_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>Video</a>}
++                {v.latitude != null && v.longitude != null && (
++                  <a href={`https://www.google.com/maps?q=${v.latitude},${v.longitude}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, textDecoration: "none" }}>
++                    📍 Location
++                  </a>
++                )}
++              </div>
++            </div>
++          ))
++        )}
+       </div>
+     </div>
+   );
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 77a2efd..b61a868 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -4,6 +4,7 @@ import { useApp } from "../../context/AppContext";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { staffRoleLabel } from "../../utils/staffRoles";
+ import { featuresForRole } from "../../utils/staffFeatures";
++import DashboardAiCard from "../../components/staff/DashboardAiCard";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+ // senior_sales_associate, senior_sales_executive). Design approved against
+@@ -432,6 +433,15 @@ export default function SalesDashboard() {
+       </div>
+ 
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
++        <DashboardAiCard
++          repName={staffProfile?.name}
++          dealers={dealers}
++          visitsToday={visits.filter((v) => {
++            const ts = v.check_in_at || v.visited_at;
++            return ts && new Date(ts).toDateString() === todayStr;
++          })}
++        />
++
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+           <StatCard
+diff --git a/supabase/migrations/dealer_crm_staff.sql b/supabase/migrations/dealer_crm_staff.sql
+new file mode 100644
+index 0000000..87349c7
+--- /dev/null
++++ b/supabase/migrations/dealer_crm_staff.sql
+@@ -0,0 +1,404 @@
++-- dealer_crm_staff.sql
++--
++-- Backs the rebuilt staff-facing Dealer CRM screen (src/screens/staff/
++-- DealerDetail.jsx): Overview / Ledger / Orders / Visits / Insights tabs,
++-- approved from mockup/dealer-crm-mockup.html.
++--
++-- All new functions reuse the exact same rep-scope visibility rule already
++-- used by get_dealer_detail/get_dealer_orders/get_dealer_visits (re-derives
++-- caller identity from auth.uid() -> staff_profiles, never trusts a
++-- client-passed dealer id) — factored into one helper, _staff_dealer_scope_ok,
++-- so it isn't duplicated six more times.
++--
++-- Ageing is deliberately NOT recomputed in SQL: get_dealer_report(...,
++-- 'ageing', ...) hands back raw ledger rows and the client runs the one
++-- canonical FIFO heuristic in src/lib/ledgerUtils.js (computeAgingFromLedger)
++-- on them — same logic AgingReport.jsx and admin DealerCRM.jsx already use,
++-- not a second implementation that could drift out of sync.
++--
++-- Run in Supabase SQL Editor.
++
++create or replace function public._staff_dealer_scope_ok(p_dealer_id uuid)
++returns boolean
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_allowed boolean := false;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return false;
++  end if;
++
++  select exists (
++    select 1 from public.profiles p
++    where p.id = p_dealer_id
++      and p.deleted_at is null
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++  ) into v_allowed;
++
++  return v_allowed;
++end;
++$$;
++
++grant execute on function public._staff_dealer_scope_ok(uuid) to authenticated;
++
++-- ─────────────────────────────────────────────────────────────────────────
++-- Ledger tab — real voucher rows for a date range. Client computes the
++-- running balance forward from an opening balance (get_dealer_balance_asof
++-- called with the day before p_from) using isDebitEntry/isCreditEntry from
++-- ledgerUtils.js — same helpers the aging calc uses, not reimplemented here.
++-- ─────────────────────────────────────────────────────────────────────────
++create or replace function public.get_dealer_ledger(p_dealer_id uuid, p_from date default null, p_to date default null)
++returns table (
++  id            uuid,
++  type          text,
++  voucher_type  text,
++  voucher_no    text,
++  voucher_date  date,
++  created_at    timestamptz,
++  narration     text,
++  amount        numeric,
++  dr_dealer     boolean,
++  cr_dealer     boolean,
++  method        text,
++  reference_no  text,
++  reason        text,
++  dr_account    text,
++  cr_account    text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_from date := coalesce(p_from, '2000-01-01'::date);
++  v_to   date := coalesce(p_to, current_date);
++begin
++  if not public._staff_dealer_scope_ok(p_dealer_id) then
++    return;
++  end if;
++
++  return query
++    select
++      dl.id, dl.type, dl.voucher_type, dl.voucher_no,
++      coalesce(dl.voucher_date, dl.created_at::date) as voucher_date,
++      dl.created_at, dl.narration, dl.amount, dl.dr_dealer, dl.cr_dealer,
++      dl.method, dl.reference_no, dl.reason, dl.dr_account, dl.cr_account
++    from public.dealer_ledger dl
++    where dl.dealer_id = p_dealer_id
++      and coalesce(dl.voucher_date, dl.created_at::date) between v_from and v_to
++    order by coalesce(dl.voucher_date, dl.created_at::date) asc, dl.created_at asc;
++end;
++$$;
++
++grant execute on function public.get_dealer_ledger(uuid, date, date) to authenticated;
++
++-- Outstanding balance as of a given date (or right now if null) — used for
++-- the Ledger tab's Opening Balance line, the Ageing report's "as of" date,
++-- and anywhere else a point-in-time balance is needed.
++create or replace function public.get_dealer_balance_asof(p_dealer_id uuid, p_asof date default null)
++returns numeric
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_asof date := coalesce(p_asof, current_date);
++  v_balance numeric;
++begin
++  if not public._staff_dealer_scope_ok(p_dealer_id) then
++    return null;
++  end if;
++
++  select coalesce(sum(case
++        when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
++        when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
++        else 0
++      end), 0)
++  into v_balance
++  from public.dealer_ledger dl
++  where dl.dealer_id = p_dealer_id
++    and coalesce(dl.voucher_date, dl.created_at::date) <= v_asof;
++
++  return v_balance;
++end;
++$$;
++
++grant execute on function public.get_dealer_balance_asof(uuid, date) to authenticated;
++
++-- Line items for one order, for the Orders tab's expand-on-tap — scope is
++-- checked via the order's own dealer_id rather than trusting a client-sent
++-- dealer id alongside the order id.
++create or replace function public.get_order_items_for_staff(p_order_id uuid)
++returns table (
++  name  text,
++  qty   int,
++  price numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_dealer_id uuid;
++begin
++  select o.dealer_id into v_dealer_id from public.orders o where o.id = p_order_id;
++  if v_dealer_id is null or not public._staff_dealer_scope_ok(v_dealer_id) then
++    return;
++  end if;
++
++  return query
++    select oi.name, oi.qty, oi.price
++    from public.order_items oi
++    where oi.order_id = p_order_id
++    order by oi.id;
++end;
++$$;
++
++grant execute on function public.get_order_items_for_staff(uuid) to authenticated;
++
++-- ─────────────────────────────────────────────────────────────────────────
++-- Insights tab — one RPC, dispatched by report name, each branch computed
++-- for the [p_from, p_to] window the client passes for that specific report
++-- (each report in the UI has its own independent period picker). Returns
++-- jsonb rather than nine separate typed functions to keep this one function
++-- signature the client needs to know about.
++-- ─────────────────────────────────────────────────────────────────────────
++create or replace function public.get_dealer_report(
++  p_dealer_id uuid,
++  p_report    text,
++  p_from      date default null,
++  p_to        date default null
++)
++returns jsonb
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_from date := coalesce(p_from, '2000-01-01'::date);
++  v_to   date := coalesce(p_to, current_date);
++  v_result jsonb;
++begin
++  if not public._staff_dealer_scope_ok(p_dealer_id) then
++    return null;
++  end if;
++
++  if p_report = 'order_stats' then
++    select jsonb_build_object(
++      'total_orders_lifetime', (select count(*) from public.orders o where o.dealer_id = p_dealer_id),
++      'orders_pending', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.status = 'pending'),
++      'orders_in_period', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'last_order_value', (select o.total from public.orders o where o.dealer_id = p_dealer_id order by o.created_at desc limit 1),
++      'last_order_date', (select o.created_at from public.orders o where o.dealer_id = p_dealer_id order by o.created_at desc limit 1),
++      'avg_order_value', (select coalesce(round(avg(o.total)::numeric, 2), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to)
++    ) into v_result;
++
++  elsif p_report = 'top_products' then
++    select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) into v_result
++    from (
++      select oi.name, sum(oi.qty) as qty, count(distinct oi.order_id) as orders_count, sum(oi.qty * oi.price) as amount
++      from public.order_items oi
++      join public.orders o on o.id = oi.order_id
++      where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to
++      group by oi.name
++      order by sum(oi.qty * oi.price) desc
++      limit 10
++    ) t;
++
++  elsif p_report = 'sales_trend' then
++    select coalesce(jsonb_agg(row_to_json(t) order by t.month_start), '[]'::jsonb) into v_result
++    from (
++      select
++        to_char(m.month_start, 'Mon') as month_label,
++        m.month_start,
++        coalesce(sum(o.total), 0) as amount
++      from generate_series(date_trunc('month', v_from), date_trunc('month', v_to), interval '1 month') as m(month_start)
++      left join public.orders o
++        on o.dealer_id = p_dealer_id
++        and date_trunc('month', o.created_at) = m.month_start
++      group by m.month_start
++    ) t;
++
++  elsif p_report = 'payment_collection' then
++    select jsonb_build_object(
++      'collected', (
++        select coalesce(sum(dl.amount), 0) from public.dealer_ledger dl
++        where dl.dealer_id = p_dealer_id and dl.type = 'payment'
++          and coalesce(dl.voucher_date, dl.created_at::date) between v_from and v_to
++      ),
++      'still_due', (
++        select coalesce(sum(case
++              when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
++              when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
++              else 0
++            end), 0)
++        from public.dealer_ledger dl where dl.dealer_id = p_dealer_id
++      )
++    ) into v_result;
++
++  elsif p_report = 'ageing' then
++    select coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) into v_result
++    from (
++      select dl.id, dl.type, dl.voucher_type, dl.voucher_no,
++             coalesce(dl.voucher_date, dl.created_at::date) as voucher_date,
++             dl.created_at, dl.amount, dl.dr_dealer, dl.cr_dealer
++      from public.dealer_ledger dl
++      where dl.dealer_id = p_dealer_id and coalesce(dl.voucher_date, dl.created_at::date) <= v_to
++      order by coalesce(dl.voucher_date, dl.created_at::date)
++    ) t;
++
++  elsif p_report = 'gst_summary' then
++    select jsonb_build_object(
++      'taxable_value', (select coalesce(sum(o.subtotal), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'cgst', (select coalesce(sum(o.cgst), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'sgst', (select coalesce(sum(o.sgst), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'igst', (select coalesce(sum(o.igst), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'total_invoice_value', (select coalesce(sum(o.total), 0) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to)
++    ) into v_result;
++
++  elsif p_report = 'order_status' then
++    select jsonb_build_object(
++      'pending', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.status = 'pending' and o.created_at::date between v_from and v_to),
++      'confirmed', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.status = 'confirmed' and o.created_at::date between v_from and v_to),
++      'dispatched', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.status in ('dispatched','out_for_delivery') and o.created_at::date between v_from and v_to),
++      'delivered', (select count(*) from public.orders o where o.dealer_id = p_dealer_id and o.status = 'delivered' and o.created_at::date between v_from and v_to)
++    ) into v_result;
++
++  elsif p_report = 'returns' then
++    select jsonb_build_object(
++      'count', (select count(*) from public.dealer_ledger dl where dl.dealer_id = p_dealer_id and dl.type = 'credit_note' and coalesce(dl.voucher_date, dl.created_at::date) between v_from and v_to),
++      'total_value', (select coalesce(sum(dl.amount), 0) from public.dealer_ledger dl where dl.dealer_id = p_dealer_id and dl.type = 'credit_note' and coalesce(dl.voucher_date, dl.created_at::date) between v_from and v_to),
++      'top_reason', (
++        select dl.reason from public.dealer_ledger dl
++        where dl.dealer_id = p_dealer_id and dl.type = 'credit_note' and dl.reason is not null
++          and coalesce(dl.voucher_date, dl.created_at::date) between v_from and v_to
++        group by dl.reason order by count(*) desc limit 1
++      )
++    ) into v_result;
++
++  elsif p_report = 'order_frequency' then
++    select jsonb_build_object(
++      'avg_days_between_orders', (
++        select round(avg(extract(epoch from (o.created_at - prev_at)) / 86400)::numeric, 1)
++        from (
++          select o.created_at, lag(o.created_at) over (order by o.created_at) as prev_at
++          from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to
++        ) o
++        where prev_at is not null
++      ),
++      'days_since_last_order', (select floor(extract(epoch from (now() - max(o.created_at))) / 86400) from public.orders o where o.dealer_id = p_dealer_id),
++      'active_months', (select count(distinct date_trunc('month', o.created_at)) from public.orders o where o.dealer_id = p_dealer_id and o.created_at::date between v_from and v_to),
++      'total_months', greatest(1, (extract(year from age(v_to, v_from)) * 12 + extract(month from age(v_to, v_from)) + 1)::int)
++    ) into v_result;
++
++  elsif p_report = 'visit_conversion' then
++    with vis as (
++      select sv.id, coalesce(sv.check_in_at, sv.visited_at) as visit_time
++      from public.sales_visits sv
++      where sv.dealer_id = p_dealer_id and coalesce(sv.check_in_at, sv.visited_at)::date between v_from and v_to
++    ),
++    conv as (
++      select v.id from vis v
++      where exists (
++        select 1 from public.orders o
++        where o.dealer_id = p_dealer_id
++          and o.created_at between v.visit_time - interval '2 days' and v.visit_time + interval '2 days'
++      )
++    )
++    select jsonb_build_object(
++      'visits_count', (select count(*) from vis),
++      'converted_count', (select count(*) from conv),
++      'conversion_rate', case when (select count(*) from vis) = 0 then 0
++        else round((select count(*) from conv)::numeric / (select count(*) from vis) * 100, 0) end
++    ) into v_result;
++
++  else
++    v_result := jsonb_build_object('error', 'unknown report');
++  end if;
++
++  return v_result;
++end;
++$$;
++
++grant execute on function public.get_dealer_report(uuid, text, date, date) to authenticated;
++
++-- ─────────────────────────────────────────────────────────────────────────
++-- AI assistant support — bulk ledger rows across every dealer in the
++-- caller's own scope (or a specific subset), so the dashboard-level "Ask AI
++-- about your dealers" card can run the same computeAgingFromLedger() heuristic
++-- per dealer client-side (e.g. "which dealers are 30+ days overdue") without
++-- a second FIFO implementation in SQL. Same scope rule as every other
++-- dealer-facing RPC, just evaluated per-row via a join instead of a single
++-- p_dealer_id check.
++-- ─────────────────────────────────────────────────────────────────────────
++create or replace function public.get_my_dealers_ledger_rows(p_dealer_ids uuid[] default null)
++returns table (
++  dealer_id     uuid,
++  type          text,
++  voucher_date  date,
++  created_at    timestamptz,
++  amount        numeric,
++  dr_dealer     boolean,
++  cr_dealer     boolean
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select dl.dealer_id, dl.type, coalesce(dl.voucher_date, dl.created_at::date), dl.created_at, dl.amount, dl.dr_dealer, dl.cr_dealer
++    from public.dealer_ledger dl
++    join public.profiles p on p.id = dl.dealer_id
++    where p.deleted_at is null
++      and (p_dealer_ids is null or dl.dealer_id = any(p_dealer_ids))
++      and (
++        (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++        or (v_role = 'senior_sales_associate' and (
++              p.assigned_sales_rep = v_email
++              or p.assigned_sales_rep in (
++                select sp2.email from public.staff_profiles sp2 where sp2.reports_to = v_email
++              )
++            ))
++        or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++              select sp3.email from public.staff_profiles sp3 where sp3.department = 'Sales'
++            ))
++      )
++    order by dl.dealer_id, coalesce(dl.voucher_date, dl.created_at::date);
++end;
++$$;
++
++grant execute on function public.get_my_dealers_ledger_rows(uuid[]) to authenticated;
+-- 
+2.43.0
+

@@ -59,3 +59,59 @@ export function computeAgingFromLedger(rows) {
 
 export const AGING_BUCKETS = ['0–2w', '2–4w', '4–8w', '8w+'];
 export const BUCKET_COLOR  = { '0–2w': '#27ae60', '2–4w': '#f39c12', '4–8w': '#e67e22', '8w+': '#c0392b' };
+
+/**
+ * Same FIFO heuristic as computeAgingFromLedger, but returns the full
+ * remaining-debit breakdown bucketed by days-old (0-30 / 31-60 / 61-90 /
+ * 90+) instead of collapsing to just the oldest one. Used by the staff
+ * Dealer CRM's Insights > Outstanding Ageing report, which shows a bucketed
+ * breakdown rather than a single "oldest debit" figure. Pure addition —
+ * does not change computeAgingFromLedger's existing behavior/callers.
+ */
+export function computeAgeingBuckets(rows, asOfDate) {
+  const asOf = asOfDate ? new Date(asOfDate) : new Date();
+  const sorted = [...rows]
+    .filter((r) => new Date(r.voucher_date || r.created_at) <= asOf)
+    .sort((a, b) => new Date(a.voucher_date || a.created_at) - new Date(b.voucher_date || b.created_at));
+
+  const debitQueue = [];
+  let creditPool = 0;
+
+  for (const row of sorted) {
+    const amount = Number(row.amount) || 0;
+    if (isDebitEntry(row)) {
+      const date = new Date(row.voucher_date || row.created_at);
+      const absorbed = Math.min(creditPool, amount);
+      creditPool -= absorbed;
+      const remaining = amount - absorbed;
+      if (remaining > 0.01) debitQueue.push({ date, remaining, voucherNo: row.voucher_no, voucherDate: row.voucher_date || row.created_at });
+    } else if (isCreditEntry(row)) {
+      let left = amount;
+      while (left > 0.01 && debitQueue.length > 0) {
+        const oldest = debitQueue[0];
+        const take = Math.min(oldest.remaining, left);
+        oldest.remaining -= take;
+        left -= take;
+        if (oldest.remaining <= 0.01) debitQueue.shift();
+      }
+      creditPool += left;
+    }
+  }
+
+  const buckets = { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
+  let oldest = null;
+  for (const d of debitQueue) {
+    const daysOld = Math.floor((asOf.getTime() - d.date.getTime()) / 86400000);
+    if (daysOld <= 30) buckets['0-30'] += d.remaining;
+    else if (daysOld <= 60) buckets['31-60'] += d.remaining;
+    else if (daysOld <= 90) buckets['61-90'] += d.remaining;
+    else buckets['90+'] += d.remaining;
+    if (!oldest || d.date < oldest.date) oldest = d;
+  }
+
+  return {
+    buckets,
+    total: Object.values(buckets).reduce((s, v) => s + v, 0),
+    oldest: oldest ? { voucherNo: oldest.voucherNo, date: oldest.voucherDate, daysOverdue: Math.floor((asOf.getTime() - oldest.date.getTime()) / 86400000) } : null,
+  };
+}
