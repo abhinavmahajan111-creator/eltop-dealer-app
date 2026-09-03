@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: "/admin/products", label: "Products", icon: "\u{1F6CE}\u{FE0F}" },
   { to: "/admin/dealers", label: "Dealers & Customers", icon: "\u{1F465}" },
   { to: "/admin/staff", label: "Staff", icon: "\u{1F9D1}\u{200D}\u{1F4BC}" },
+  { to: "/admin/visits", label: "Field Activity", icon: "\u{1F9ED}" },
   { to: "/admin/health", label: "Health Check", icon: "\u{1F6A8}" },
   { to: "/admin/aging", label: "Aging Report", icon: "\u{1F4C5}" },
 ];
