@@ -382,7 +382,7 @@ export default function DealerDetail() {
           <OverviewTab
             dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
             territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
-            onExportStatement={handleExportStatement}
+            onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
           />
         )}
 
@@ -412,7 +412,7 @@ const ICON_BTN = { width: 32, height: 32, borderRadius: 8, background: "rgba(255
 
 // ── Overview tab ─────────────────────────────────────────────────────────
 
-function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, territories, orderStats, topProducts, ageingRows, onExportStatement }) {
+function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, territories, orderStats, topProducts, ageingRows, onExportStatement, onGoToOrders }) {
   const health = ageingHealth(ageingRows);
   return (
     <div>
@@ -451,10 +451,10 @@ function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, terri
         <div style={CARD_STYLE}>
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>This Quarter</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <StatBox label="Last order value" value={orderStats.last_order_value != null ? fmtCurrency(orderStats.last_order_value) : "—"} />
-            <StatBox label="Orders pending" value={orderStats.orders_pending} />
-            <StatBox label="Total orders (lifetime)" value={orderStats.total_orders_lifetime} />
-            <StatBox label="Avg order value" value={fmtCurrency(orderStats.avg_order_value)} />
+            <StatBox label="Last order value" value={orderStats.last_order_value != null ? fmtCurrency(orderStats.last_order_value) : "—"} onClick={onGoToOrders} />
+            <StatBox label="Orders pending" value={orderStats.orders_pending} onClick={onGoToOrders} />
+            <StatBox label="Total orders (lifetime)" value={orderStats.total_orders_lifetime} onClick={onGoToOrders} />
+            <StatBox label="Avg order value" value={fmtCurrency(orderStats.avg_order_value)} onClick={onGoToOrders} />
           </div>
         </div>
       )}
@@ -520,11 +520,30 @@ function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, terri
 
 const STMT_BTN = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", borderRadius: 9, border: "1.5px solid #7B2D8B", background: "#fff", color: "#7B2D8B", fontSize: 11.5, fontWeight: 800, cursor: "pointer" };
 
-function StatBox({ label, value }) {
+// Clickable when onClick is passed (This Quarter's stat tiles jump to the
+// Orders tab, since that's the list these numbers summarize) — plain,
+// non-interactive rendering otherwise.
+function StatBox({ label, value, onClick }) {
   return (
-    <div style={{ background: "#faf5fb", borderRadius: 10, padding: "10px 12px" }}>
+    <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+      style={{
+        background: "#faf5fb", borderRadius: 10, padding: "10px 12px",
+        cursor: onClick ? "pointer" : "default",
+        border: onClick ? "1.3px solid transparent" : "none",
+        transition: "border-color 0.15s, background 0.15s",
+      }}
+      onMouseEnter={onClick ? (e) => { e.currentTarget.style.borderColor = "#d9b8e0"; e.currentTarget.style.background = "#f3e6f6"; } : undefined}
+      onMouseLeave={onClick ? (e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "#faf5fb"; } : undefined}
+    >
       <div style={{ fontSize: 17, fontWeight: 800, color: "#222" }}>{value}</div>
-      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+        {label}
+        {onClick && <span style={{ color: "#7B2D8B", fontSize: 10 }}>›</span>}
+      </div>
     </div>
   );
 }

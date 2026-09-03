@@ -1,0 +1,95 @@
+From b233806b01f02e1fdddab0055c57324532512978 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 07:12:05 +0000
+Subject: [PATCH] Make the "This Quarter" stat tiles clickable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Last order value / Orders pending / Total orders (lifetime) / Avg order
+value on the dealer Overview tab were static — tap any of them now jumps
+to the Orders tab, since that's the order list these numbers summarize.
+Hover/focus affordance (border highlight + a chevron) added to StatBox
+only when it's given an onClick, so plain (non-clickable) stat tiles
+elsewhere are unaffected.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/DealerDetail.jsx | 37 ++++++++++++++++++++++--------
+ 1 file changed, 28 insertions(+), 9 deletions(-)
+
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index 1348992..a33e21c 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -382,7 +382,7 @@ export default function DealerDetail() {
+           <OverviewTab
+             dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
+             territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
+-            onExportStatement={handleExportStatement}
++            onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
+           />
+         )}
+ 
+@@ -412,7 +412,7 @@ const ICON_BTN = { width: 32, height: 32, borderRadius: 8, background: "rgba(255
+ 
+ // ── Overview tab ─────────────────────────────────────────────────────────
+ 
+-function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, territories, orderStats, topProducts, ageingRows, onExportStatement }) {
++function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, territories, orderStats, topProducts, ageingRows, onExportStatement, onGoToOrders }) {
+   const health = ageingHealth(ageingRows);
+   return (
+     <div>
+@@ -451,10 +451,10 @@ function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, terri
+         <div style={CARD_STYLE}>
+           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>This Quarter</div>
+           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+-            <StatBox label="Last order value" value={orderStats.last_order_value != null ? fmtCurrency(orderStats.last_order_value) : "—"} />
+-            <StatBox label="Orders pending" value={orderStats.orders_pending} />
+-            <StatBox label="Total orders (lifetime)" value={orderStats.total_orders_lifetime} />
+-            <StatBox label="Avg order value" value={fmtCurrency(orderStats.avg_order_value)} />
++            <StatBox label="Last order value" value={orderStats.last_order_value != null ? fmtCurrency(orderStats.last_order_value) : "—"} onClick={onGoToOrders} />
++            <StatBox label="Orders pending" value={orderStats.orders_pending} onClick={onGoToOrders} />
++            <StatBox label="Total orders (lifetime)" value={orderStats.total_orders_lifetime} onClick={onGoToOrders} />
++            <StatBox label="Avg order value" value={fmtCurrency(orderStats.avg_order_value)} onClick={onGoToOrders} />
+           </div>
+         </div>
+       )}
+@@ -520,11 +520,30 @@ function OverviewTab({ dealer, outstanding, creditLimit, usedPct, netRate, terri
+ 
+ const STMT_BTN = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 8px", borderRadius: 9, border: "1.5px solid #7B2D8B", background: "#fff", color: "#7B2D8B", fontSize: 11.5, fontWeight: 800, cursor: "pointer" };
+ 
+-function StatBox({ label, value }) {
++// Clickable when onClick is passed (This Quarter's stat tiles jump to the
++// Orders tab, since that's the list these numbers summarize) — plain,
++// non-interactive rendering otherwise.
++function StatBox({ label, value, onClick }) {
+   return (
+-    <div style={{ background: "#faf5fb", borderRadius: 10, padding: "10px 12px" }}>
++    <div
++      onClick={onClick}
++      role={onClick ? "button" : undefined}
++      tabIndex={onClick ? 0 : undefined}
++      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
++      style={{
++        background: "#faf5fb", borderRadius: 10, padding: "10px 12px",
++        cursor: onClick ? "pointer" : "default",
++        border: onClick ? "1.3px solid transparent" : "none",
++        transition: "border-color 0.15s, background 0.15s",
++      }}
++      onMouseEnter={onClick ? (e) => { e.currentTarget.style.borderColor = "#d9b8e0"; e.currentTarget.style.background = "#f3e6f6"; } : undefined}
++      onMouseLeave={onClick ? (e) => { e.currentTarget.style.borderColor = "transparent"; e.currentTarget.style.background = "#faf5fb"; } : undefined}
++    >
+       <div style={{ fontSize: 17, fontWeight: 800, color: "#222" }}>{value}</div>
+-      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
++      <div style={{ fontSize: 10.5, color: "#888", fontWeight: 600, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
++        {label}
++        {onClick && <span style={{ color: "#7B2D8B", fontSize: 10 }}>›</span>}
++      </div>
+     </div>
+   );
+ }
+-- 
+2.43.0
+
