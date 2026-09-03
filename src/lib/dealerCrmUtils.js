@@ -84,6 +84,24 @@ export function fmtCurrency2(n) {
   return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// PDF-only currency formatters — jsPDF's built-in fonts (Helvetica etc.)
+// don't include the ₹ glyph, so it silently falls back to an unrelated
+// character (shows up as a stray "1" in front of every figure). The
+// app's other PDF generator (generatePriceListPDF.js) already works
+// around this the same way — "Rs." instead of the ₹ symbol — so these
+// mirror that exact convention. Use these (never fmtCurrency/fmtCurrency2)
+// for any text that ends up inside a jsPDF document; the ₹-symbol
+// versions are fine everywhere else (on-screen UI, Excel exports).
+export function fmtCurrencyPdf(n) {
+  const v = Number(n || 0);
+  return `Rs. ${v.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
+export function fmtCurrencyPdf2(n) {
+  const v = Number(n || 0);
+  return `Rs. ${v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function fmtDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
@@ -153,9 +171,14 @@ const COMPANY_INFO = {
 // Overview tab's "Statement" export and the Ledger tab's own export, so
 // every PDF a rep generates from this screen looks like one document.
 export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabel, openingBalance, closingBalance, rows, filename }) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  // Landscape — a portrait A4 was too narrow once a Details column (the
+  // same info the app's own expand-a-voucher view shows: method/reference,
+  // credit-note reason, journal accounts) was added alongside Date/
+  // Particulars/Vch Type/Vch No./Debit/Credit/Balance, and it also fixes
+  // numbers crowding/overflowing their columns.
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const PW = doc.internal.pageSize.getWidth();
-  let y = 42;
+  let y = 32;
 
   const center = (text, size, color, bold) => {
     doc.setFont(undefined, bold ? "bold" : "normal");
@@ -190,15 +213,20 @@ export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabe
   y += 6;
 
   // ── Ledger table ──
-  const dr = (v) => (v > 0.004 ? fmtCurrency2(v) : "");
-  const cr = (v) => (v < -0.004 ? fmtCurrency2(-v) : "");
-  const bal = (v) => `${fmtCurrency2(Math.abs(v))} ${v >= 0 ? "Dr" : "Cr"}`;
+  // Plain numbers in the cells — the "Rs." unit is stated once in the
+  // Debit/Credit/Balance column headers instead of repeating on every
+  // row (jsPDF's Helvetica can't render ₹, hence "Rs." rather than the
+  // symbol — see fmtCurrencyPdf2's definition above for the full story).
+  const num2 = (v) => v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dr = (v) => (v > 0.004 ? num2(v) : "");
+  const cr = (v) => (v < -0.004 ? num2(-v) : "");
+  const bal = (v) => `${num2(Math.abs(v))} ${v >= 0 ? "Dr" : "Cr"}`;
 
   const totalDebit = rows.reduce((s, r) => s + (r._debit ? Number(r.amount) : 0), 0);
   const totalCredit = rows.reduce((s, r) => s + (!r._debit ? Number(r.amount) : 0), 0);
 
   const openRow = [
-    { content: "Opening Balance", colSpan: 4, styles: { fontStyle: "bold" } },
+    { content: "Opening Balance", colSpan: 5, styles: { fontStyle: "bold" } },
     { content: dr(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
     { content: cr(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
     { content: bal(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
@@ -208,18 +236,19 @@ export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabe
     voucherParticularsForExport(r),
     voucherLabelForExport(r),
     r.voucher_no || "",
-    { content: r._debit ? fmtCurrency2(r.amount) : "", styles: { halign: "right" } },
-    { content: !r._debit ? fmtCurrency2(r.amount) : "", styles: { halign: "right" } },
+    voucherDetailForExport(r),
+    { content: r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
+    { content: !r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
     { content: bal(r._after), styles: { halign: "right" } },
   ]);
   const totalRow = [
-    { content: "Total", colSpan: 4, styles: { fontStyle: "bold", fillColor: [248, 240, 249] } },
-    { content: fmtCurrency2(totalDebit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
-    { content: fmtCurrency2(totalCredit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
+    { content: "Total", colSpan: 5, styles: { fontStyle: "bold", fillColor: [248, 240, 249] } },
+    { content: num2(totalDebit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
+    { content: num2(totalCredit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
     { content: "", styles: { fillColor: [248, 240, 249] } },
   ];
   const closeRow = [
-    { content: "Closing Balance", colSpan: 4, styles: { fontStyle: "bold", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
+    { content: "Closing Balance", colSpan: 5, styles: { fontStyle: "bold", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
     { content: dr(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
     { content: cr(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
     { content: bal(closingBalance), styles: { fontStyle: "bold", halign: "right", fillColor: [243, 230, 246], textColor: [123, 45, 139] } },
@@ -227,21 +256,28 @@ export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabe
 
   autoTable(doc, {
     startY: y,
-    head: [["Date", "Particulars", "Vch Type", "Vch No.", "Debit", "Credit", "Balance"]],
+    head: [["Date", "Particulars", "Vch Type", "Vch No.", "Details", "Debit (Rs.)", "Credit (Rs.)", "Balance (Rs.)"]],
     body: [openRow, ...voucherRows, totalRow, closeRow],
     theme: "grid",
-    styles: { fontSize: 8, cellPadding: 5, lineColor: [225, 210, 228], lineWidth: 0.6 },
-    headStyles: { fillColor: [123, 45, 139], textColor: 255, fontStyle: "bold" },
+    styles: { fontSize: 8, cellPadding: 5, lineColor: [225, 210, 228], lineWidth: 0.6, overflow: "linebreak" },
+    headStyles: { fillColor: [123, 45, 139], textColor: 255, fontStyle: "bold", halign: "center" },
     columnStyles: {
-      4: { halign: "right" }, 5: { halign: "right" }, 6: { halign: "right" },
+      0: { cellWidth: 48 },
+      1: { cellWidth: 110 },
+      2: { cellWidth: 62 },
+      3: { cellWidth: 78 },
+      4: { cellWidth: "auto" },
+      5: { cellWidth: 78, halign: "right" },
+      6: { cellWidth: 78, halign: "right" },
+      7: { cellWidth: 92, halign: "right" },
     },
-    margin: { left: 40, right: 40 },
+    margin: { left: 32, right: 32 },
     didDrawPage: () => {
       const ph = doc.internal.pageSize.getHeight();
       doc.setFontSize(7.5);
       doc.setTextColor(160, 160, 160);
-      doc.text(`Generated ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`, 40, ph - 20);
-      doc.text(`Page ${doc.internal.getNumberOfPages()}`, PW - 40, ph - 20, { align: "right" });
+      doc.text("Sales vouchers show narration only — full item breakdown is one tap away on the Orders tab.", 32, ph - 20);
+      doc.text(`Generated ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}  ·  Page ${doc.internal.getNumberOfPages()}`, PW - 32, ph - 20, { align: "right" });
     },
   });
 
@@ -259,6 +295,28 @@ function voucherParticularsForExport(row) {
   if (row.type === "credit_note") return "Credit Note";
   if (row.type === "journal") return row.dr_account || row.cr_account || "Journal";
   return voucherLabelForExport(row);
+}
+
+// The same voucher-type-specific fields the app's own expand-a-voucher
+// view shows (DealerLedgerTab.jsx's VoucherDetail) — printed directly in
+// the PDF's Details column since a static document has no "tap to
+// expand"; every voucher is effectively pre-expanded.
+function voucherDetailForExport(row) {
+  if (row.type === "payment") {
+    const parts = [];
+    if (row.reference_no) parts.push(`Ref: ${row.reference_no}`);
+    if (row.narration) parts.push(row.narration);
+    return parts.join(" · ") || "—";
+  }
+  if (row.type === "credit_note") return row.reason ? `Reason: ${row.reason}` : "—";
+  if (row.type === "journal") {
+    const parts = [];
+    if (row.dr_account) parts.push(`Dr: ${row.dr_account}`);
+    if (row.cr_account) parts.push(`Cr: ${row.cr_account}`);
+    if (row.narration) parts.push(row.narration);
+    return parts.join(" · ") || "—";
+  }
+  return row.narration || "—";
 }
 
 function dateSuffix() {

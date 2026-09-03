@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { computeAgeingBuckets } from "../../lib/ledgerUtils";
 import {
-  fmtCurrency, fmtCurrency2, exportRowsToExcel, exportTableToPdf, exportFilename,
+  fmtCurrency, fmtCurrencyPdf2, exportRowsToExcel, exportTableToPdf, exportFilename,
   buildDealerAiSystemPrompt, askAi,
 } from "../../lib/dealerCrmUtils";
 import PeriodPicker from "./PeriodPicker";
@@ -16,11 +16,15 @@ import PeriodPicker from "./PeriodPicker";
 const ITEM_CARD = { background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 12, marginBottom: 8, overflow: "hidden" };
 const GROUP_LABEL = { fontSize: 10.5, fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: 0.5, margin: "14px 2px 6px" };
 
+// fmtCurrencyPdf2 here (never fmtCurrency2) — this feeds the PDF export
+// only (handleExportExcel below uses the raw numeric rows directly), and
+// jsPDF's default font can't render the ₹ glyph — see fmtCurrencyPdf2's
+// definition in dealerCrmUtils.js.
 function fmtExportValue(key, v) {
   if (typeof v !== "number") return v;
   const k = key.toLowerCase();
   if (k.includes("amount") || k.includes("value") || k.includes("collected") || k.includes("due") || ["cgst", "sgst", "igst"].includes(k)) {
-    return fmtCurrency2(v);
+    return fmtCurrencyPdf2(v);
   }
   return String(v);
 }

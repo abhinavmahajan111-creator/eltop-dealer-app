@@ -5,7 +5,7 @@ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../ut
 import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
 import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
 import { isDebitEntry, computeAgeingBuckets } from "../../lib/ledgerUtils";
-import { fmtCurrency, exportRowsToExcel, exportLedgerStatementPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
+import { fmtCurrency, fmtCurrencyPdf, exportRowsToExcel, exportLedgerStatementPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
 import DealerLedgerTab from "../../components/staff/DealerLedgerTab";
 import DealerInsightsTab from "../../components/staff/DealerInsightsTab";
 
@@ -579,7 +579,7 @@ function OrdersTab({ orders, dealerCode }) {
         title: "Order History",
         columns: [
           { header: "Date", key: "Date" },
-          { header: "Amount", key: "Amount", format: (v) => fmtCurrency(v) },
+          { header: "Amount", key: "Amount", format: (v) => fmtCurrencyPdf(v) },
           { header: "Status", key: "Status" },
         ],
         rows,
