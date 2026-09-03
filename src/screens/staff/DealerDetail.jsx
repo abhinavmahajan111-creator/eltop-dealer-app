@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
 import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
+import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
 import { isDebitEntry, computeAgeingBuckets } from "../../lib/ledgerUtils";
 import { fmtCurrency, exportRowsToExcel, exportTableToPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
 import DealerLedgerTab from "../../components/staff/DealerLedgerTab";
@@ -638,6 +639,8 @@ function VisitsTab({
         <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12, lineHeight: 1.5 }}>
           You must be within 100m of this dealer to check in or out. A dealer's first-ever check-in sets its saved location.
         </div>
+
+        <LocationPermissionBanner />
 
         {openVisitLoading ? (
           <div style={{ fontSize: 12.5, color: "#999" }}>Checking visit status…</div>

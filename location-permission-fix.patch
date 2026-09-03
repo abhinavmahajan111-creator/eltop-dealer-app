@@ -1,0 +1,179 @@
+From bebbcf7260530afbe773d1e2cd829269aba7df0d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 05:27:41 +0000
+Subject: [PATCH] Proactively request location permission for
+ check-in/check-out
+
+Location was only ever requested lazily inside handleCheckIn/handleCheckOut,
+so once a rep's browser denied it (or the OS prompt never surfaced), all
+they saw was a bare "permission denied" error with no way to act on it.
+
+Add LocationPermissionBanner: checks the Permissions API on mount and
+shows an "Enable Location Access" button (a real user gesture, so it
+actually triggers the native prompt) when permission hasn't been decided,
+or clear device-specific re-enable instructions with a Retry button when
+it's already been denied (browsers won't re-show that dialog via JS).
+Wired into DayCheckIn's check-in/checkout screen and DealerDetail's
+Visits tab.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ .../staff/LocationPermissionBanner.jsx        | 94 +++++++++++++++++++
+ src/screens/staff/DayCheckIn.jsx              |  3 +
+ src/screens/staff/DealerDetail.jsx            |  3 +
+ 3 files changed, 100 insertions(+)
+ create mode 100644 src/components/staff/LocationPermissionBanner.jsx
+
+diff --git a/src/components/staff/LocationPermissionBanner.jsx b/src/components/staff/LocationPermissionBanner.jsx
+new file mode 100644
+index 0000000..cd9a93e
+--- /dev/null
++++ b/src/components/staff/LocationPermissionBanner.jsx
+@@ -0,0 +1,94 @@
++import { useEffect, useState } from "react";
++import { getCurrentPosition } from "../../utils/visitMedia";
++
++// Proactively surfaces the device's location-permission state above the
++// check-in/check-out flow, instead of only finding out via a failed
++// "permission denied" error after tapping Check In. Browsers show the
++// native OS/browser permission dialog at most once per site (on the first
++// geolocation call made inside a real user gesture) — so:
++//   - permission not yet decided ("prompt") → show a button; tapping it
++//     calls getCurrentPosition() from a click handler, which is what
++//     actually triggers that native dialog.
++//   - permission already denied → no JS API can re-open that dialog, the
++//     rep has to flip it in their browser/OS settings, so we spell out
++//     exactly how and offer a "Retry" once they're back.
++// Renders nothing once permission is granted (or while first checking).
++
++function checkStatus(setStatus) {
++  if (!navigator.geolocation) {
++    setStatus("unsupported");
++    return;
++  }
++  if (!navigator.permissions || !navigator.permissions.query) {
++    // Permissions API isn't available (older Safari) — we can't know the
++    // state ahead of time, so just offer the "Enable" button; the actual
++    // getCurrentPosition() call will sort it out either way.
++    setStatus("prompt");
++    return;
++  }
++  navigator.permissions
++    .query({ name: "geolocation" })
++    .then((result) => {
++      setStatus(result.state); // "granted" | "denied" | "prompt"
++      result.onchange = () => setStatus(result.state);
++    })
++    .catch(() => setStatus("prompt"));
++}
++
++export default function LocationPermissionBanner() {
++  const [status, setStatus] = useState("checking");
++  const [requesting, setRequesting] = useState(false);
++
++  useEffect(() => {
++    checkStatus(setStatus);
++  }, []);
++
++  if (status === "checking" || status === "granted") return null;
++
++  const handleEnable = () => {
++    setRequesting(true);
++    getCurrentPosition()
++      .catch(() => {})
++      .finally(() => {
++        setRequesting(false);
++        checkStatus(setStatus);
++      });
++  };
++
++  if (status === "denied") {
++    return (
++      <div style={{ background: "#fdeceb", border: "1.5px solid #e8b4ae", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
++        <div style={{ fontSize: 12.5, fontWeight: 800, color: "#c0392b", marginBottom: 6 }}>📍 Location access is off for this site</div>
++        <div style={{ fontSize: 11.5, color: "#8a4a44", lineHeight: 1.6, marginBottom: 10 }}>
++          Your browser only asks once, and it was declined — so check-in can't confirm you're at the dealer. To fix it:
++          <br />• iPhone: Settings → Privacy &amp; Security → Location Services → Safari Websites → Allow. Or tap "aA" in the address bar → Website Settings → Location → Allow.
++          <br />• Android Chrome: tap the 🔒 icon next to the address bar → Permissions → Location → Allow.
++        </div>
++        <button
++          onClick={handleEnable}
++          disabled={requesting}
++          style={{ padding: "8px 14px", border: "1.5px solid #c0392b", borderRadius: 8, background: "#fff", color: "#c0392b", fontSize: 12, fontWeight: 800, cursor: requesting ? "default" : "pointer" }}
++        >
++          {requesting ? "Checking…" : "I've turned it on — Retry"}
++        </button>
++      </div>
++    );
++  }
++
++  // "prompt" or "unsupported" — worth a try either way, since a browser
++  // that lacks the Permissions API may still support geolocation fine.
++  return (
++    <div style={{ background: "#f8f0f9", border: "1.5px solid #d9b8e0", borderRadius: 10, padding: "12px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++      <div style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
++        📍 We need your location to check you in at a dealer.
++      </div>
++      <button
++        onClick={handleEnable}
++        disabled={requesting}
++        style={{ padding: "9px 14px", border: "none", borderRadius: 8, background: "#7B2D8B", color: "#fff", fontSize: 12, fontWeight: 800, cursor: requesting ? "default" : "pointer", flexShrink: 0 }}
++      >
++        {requesting ? "Requesting…" : "Enable Location Access"}
++      </button>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 4836d14..ee53485 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
+ import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
++import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
+ 
+ // Combined "Day" + "Check In" screen, replacing the old separate
+ // StartDay.jsx / CheckIn.jsx screens — approved from a mockup. Two tabs:
+@@ -458,6 +459,7 @@ export default function DayCheckIn() {
+               </div>
+             ) : openVisit ? (
+               <>
++                <LocationPermissionBanner />
+                 <div style={BOX_STYLE}>
+                   <span style={{ fontSize: 10.5, fontWeight: 800, borderRadius: 999, padding: "3px 10px", background: "#fff4e0", color: "#c98400" }}>
+                     🟢 Checked in at {openVisit.dealer_name} · since {timeLabel(openVisit.check_in_at)}
+@@ -494,6 +496,7 @@ export default function DayCheckIn() {
+               </>
+             ) : (
+               <>
++                <LocationPermissionBanner />
+                 <input
+                   value={search}
+                   onChange={(e) => setSearch(e.target.value)}
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index eb39685..1f6fcad 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
+ import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
++import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
+ import { isDebitEntry, computeAgeingBuckets } from "../../lib/ledgerUtils";
+ import { fmtCurrency, exportRowsToExcel, exportTableToPdf, exportFilename, periodToRange } from "../../lib/dealerCrmUtils";
+ import DealerLedgerTab from "../../components/staff/DealerLedgerTab";
+@@ -639,6 +640,8 @@ function VisitsTab({
+           You must be within 100m of this dealer to check in or out. A dealer's first-ever check-in sets its saved location.
+         </div>
+ 
++        <LocationPermissionBanner />
++
+         {openVisitLoading ? (
+           <div style={{ fontSize: 12.5, color: "#999" }}>Checking visit status…</div>
+         ) : isCheckedInElsewhere ? (
+-- 
+2.43.0
+

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
 import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
+import LocationPermissionBanner from "../../components/staff/LocationPermissionBanner";
 
 // Combined "Day" + "Check In" screen, replacing the old separate
 // StartDay.jsx / CheckIn.jsx screens — approved from a mockup. Two tabs:
@@ -458,6 +459,7 @@ export default function DayCheckIn() {
               </div>
             ) : openVisit ? (
               <>
+                <LocationPermissionBanner />
                 <div style={BOX_STYLE}>
                   <span style={{ fontSize: 10.5, fontWeight: 800, borderRadius: 999, padding: "3px 10px", background: "#fff4e0", color: "#c98400" }}>
                     🟢 Checked in at {openVisit.dealer_name} · since {timeLabel(openVisit.check_in_at)}
@@ -494,6 +496,7 @@ export default function DayCheckIn() {
               </>
             ) : (
               <>
+                <LocationPermissionBanner />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
