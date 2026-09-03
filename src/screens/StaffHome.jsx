@@ -36,7 +36,6 @@ export default function StaffHome() {
             style={{ height: 20, width: "auto" }}
             onError={(e) => { e.target.style.display = "none"; }}
           />
-          <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
         </div>
         <button
           onClick={handleLogout}

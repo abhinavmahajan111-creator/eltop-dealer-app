@@ -310,7 +310,6 @@ export default function SalesDashboard() {
               style={{ height: 20, width: "auto", filter: "brightness(0) invert(1)" }}
               onError={(e) => { e.target.style.display = "none"; }}
             />
-            <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
           </div>
           <button
             onClick={handleLogout}
