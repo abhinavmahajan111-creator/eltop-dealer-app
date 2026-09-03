@@ -1,0 +1,57 @@
+From f21986f0918df1051e43d89cbf7c767412ce12f2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 03:40:50 +0000
+Subject: [PATCH] Show both Eltop and Embassy logos in staff app headers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Matches the pattern already used on the dealer-facing Store header
+(both logos side by side) — the staff headers had only the Eltop
+mark. Adds the Embassy logo next to it in both places (white on the
+purple Sales Dashboard header, normal color on StaffHome's white one).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/StaffHome.jsx            | 6 ++++++
+ src/screens/staff/SalesDashboard.jsx | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/src/screens/StaffHome.jsx b/src/screens/StaffHome.jsx
+index e4ccdca..40aab4b 100644
+--- a/src/screens/StaffHome.jsx
++++ b/src/screens/StaffHome.jsx
+@@ -30,6 +30,12 @@ export default function StaffHome() {
+             style={{ height: 22, width: "auto" }}
+             onError={(e) => { e.target.style.display = "none"; }}
+           />
++          <img
++            src="/assets/EMBASSY%20LOGO.png"
++            alt="Embassy"
++            style={{ height: 20, width: "auto" }}
++            onError={(e) => { e.target.style.display = "none"; }}
++          />
+           <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
+         </div>
+         <button
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 471939d..529b0b7 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -304,6 +304,12 @@ export default function SalesDashboard() {
+               style={{ height: 22, width: "auto", filter: "brightness(0) invert(1)" }}
+               onError={(e) => { e.target.style.display = "none"; }}
+             />
++            <img
++              src="/assets/EMBASSY%20LOGO.png"
++              alt="Embassy"
++              style={{ height: 20, width: "auto", filter: "brightness(0) invert(1)" }}
++              onError={(e) => { e.target.style.display = "none"; }}
++            />
+             <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
+           </div>
+           <button
+-- 
+2.43.0
+

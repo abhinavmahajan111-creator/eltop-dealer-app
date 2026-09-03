@@ -1,0 +1,497 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index c0134e1..fb4d42c 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -25,6 +25,7 @@ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
+ import DayCheckIn from "./screens/staff/DayCheckIn";
++import Attendance from "./screens/staff/Attendance";
+ import ComingSoon from "./screens/staff/ComingSoon";
+ import AdminLayout from "./admin/AdminLayout";
+ import AdminDashboard from "./admin/AdminDashboard";
+@@ -110,6 +111,7 @@ export default function App() {
+             combined tabbed screen that replaced them. */}
+         <Route path="/staff/sales/check-in" element={<Navigate to="/staff/sales/day-checkin" replace />} />
+         <Route path="/staff/sales/start-day" element={<Navigate to="/staff/sales/day-checkin" replace />} />
++        <Route path="/staff/sales/attendance" element={<Attendance />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+diff --git a/src/screens/StaffHome.jsx b/src/screens/StaffHome.jsx
+index 018fa64..e4ccdca 100644
+--- a/src/screens/StaffHome.jsx
++++ b/src/screens/StaffHome.jsx
+@@ -23,7 +23,15 @@ export default function StaffHome() {
+   return (
+     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #eee" }}>
+-        <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
++        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++          <img
++            src="/assets/ELTOP%20LOGO.png"
++            alt="Eltop"
++            style={{ height: 22, width: "auto" }}
++            onError={(e) => { e.target.style.display = "none"; }}
++          />
++          <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
++        </div>
+         <button
+           onClick={handleLogout}
+           style={{ background: "none", border: "1.5px solid #ddd", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 700, color: "#555", cursor: "pointer" }}
+diff --git a/src/screens/staff/Attendance.jsx b/src/screens/staff/Attendance.jsx
+new file mode 100644
+index 0000000..c374a7b
+--- /dev/null
++++ b/src/screens/staff/Attendance.jsx
+@@ -0,0 +1,176 @@
++import { useEffect, useMemo, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++
++// Monthly attendance calendar — approved from a mockup. A day counts as
++// "present" simply by starting it (sales_day_starts, via the Day tab), so
++// there's no separate punch-in here — just a read-only view driven by
++// get_my_attendance_month() (see supabase/migrations/sales_attendance.sql).
++//
++// Leaves and Holidays are shown as a fixed 0 — neither is a real feature
++// yet (no leave-request flow or holiday calendar), same as Territory /
++// Targets / Commission stay marked "Soon" elsewhere in the app rather than
++// showing made-up numbers.
++
++const DOW = ["M", "T", "W", "T", "F", "S", "S"];
++const MONTH_NAMES = [
++  "January", "February", "March", "April", "May", "June",
++  "July", "August", "September", "October", "November", "December",
++];
++
++const CAL_CARD_STYLE = {
++  background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14,
++  padding: "14px 8px 6px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
++};
++
++const STAT_CARD_STYLE = {
++  flex: 1, background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14,
++  padding: "14px 6px", textAlign: "center", boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
++};
++
++// Monday-first weekday index (0=Mon .. 6=Sun) for the 1st of a given
++// year/month (1-12).
++function firstWeekdayIndex(year, month) {
++  const jsDay = new Date(year, month - 1, 1).getDay(); // 0=Sun..6=Sat
++  return (jsDay + 6) % 7;
++}
++
++function daysInMonth(year, month) {
++  return new Date(year, month, 0).getDate();
++}
++
++export default function Attendance() {
++  const navigate = useNavigate();
++  const now = useMemo(() => new Date(), []);
++  const [viewYear, setViewYear] = useState(now.getFullYear());
++  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1); // 1-12
++
++  const [presentDays, setPresentDays] = useState(new Set());
++  const [loading, setLoading] = useState(true);
++
++  const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth() + 1;
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoading(false); return; }
++    let cancelled = false;
++    setLoading(true);
++    supabase.rpc("get_my_attendance_month", { p_year: viewYear, p_month: viewMonth }).then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) {
++        const days = new Set((data || []).map((r) => new Date(r.work_date).getDate()));
++        setPresentDays(days);
++      }
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, [viewYear, viewMonth]);
++
++  const goPrevMonth = () => {
++    if (viewMonth === 1) { setViewYear((y) => y - 1); setViewMonth(12); }
++    else setViewMonth((m) => m - 1);
++  };
++  const goNextMonth = () => {
++    if (isCurrentMonth) return; // no future months
++    if (viewMonth === 12) { setViewYear((y) => y + 1); setViewMonth(1); }
++    else setViewMonth((m) => m + 1);
++  };
++
++  const leadingBlanks = firstWeekdayIndex(viewYear, viewMonth);
++  const totalDays = daysInMonth(viewYear, viewMonth);
++  const today = isCurrentMonth ? now.getDate() : null;
++
++  const cells = [];
++  for (let i = 0; i < leadingBlanks; i++) cells.push(null);
++  for (let d = 1; d <= totalDays; d++) cells.push(d);
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
++        <button
++          onClick={() => navigate("/staff/sales")}
++          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}
++        >
++          ← Dashboard
++        </button>
++        <div style={{ fontSize: 18, fontWeight: 800 }}>🗓️ Attendance</div>
++        <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
++          Every day you start counts as present — no separate punch needed.
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 60px" }}>
++        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px 12px" }}>
++          <span
++            onClick={goPrevMonth}
++            style={{ fontSize: 18, fontWeight: 800, color: "#7B2D8B", cursor: "pointer", padding: "4px 10px" }}
++          >
++            ‹
++          </span>
++          <span style={{ fontSize: 15, fontWeight: 800, color: "#333" }}>
++            {MONTH_NAMES[viewMonth - 1]} {viewYear}
++          </span>
++          <span
++            onClick={goNextMonth}
++            style={{
++              fontSize: 18, fontWeight: 800, padding: "4px 10px",
++              color: isCurrentMonth ? "#ddd" : "#7B2D8B",
++              cursor: isCurrentMonth ? "default" : "pointer",
++            }}
++          >
++            ›
++          </span>
++        </div>
++
++        <div style={CAL_CARD_STYLE}>
++          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
++            {DOW.map((d, i) => (
++              <div key={i} style={{ fontSize: 10.5, fontWeight: 800, color: "#999", padding: "6px 0 10px" }}>{d}</div>
++            ))}
++            {cells.map((d, i) => (
++              <div key={i} style={{ padding: "8px 0 10px" }}>
++                {d && (
++                  <>
++                    <div style={
++                      d === today
++                        ? { fontSize: 12.5, fontWeight: 700, background: "#7B2D8B", color: "#fff", borderRadius: "50%", width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center" }
++                        : { fontSize: 12.5, fontWeight: 700, color: "#333" }
++                    }>
++                      {d}
++                    </div>
++                    {presentDays.has(d) && (
++                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#2fa84f", margin: "4px auto 0" }} />
++                    )}
++                  </>
++                )}
++              </div>
++            ))}
++          </div>
++        </div>
++
++        <div style={{ display: "flex", gap: 14, justifyContent: "center", padding: "12px 0 4px", fontSize: 10, color: "#888", fontWeight: 600 }}>
++          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
++            <i style={{ width: 6, height: 6, borderRadius: "50%", background: "#2fa84f", display: "inline-block" }} /> Present
++          </span>
++        </div>
++
++        <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
++          <div style={STAT_CARD_STYLE}>
++            <div style={{ fontSize: 22, fontWeight: 800, color: "#2fa84f" }}>{loading ? "…" : presentDays.size}</div>
++            <div style={{ fontSize: 10.5, color: "#888", fontWeight: 700, marginTop: 4 }}>Present</div>
++          </div>
++          <div style={STAT_CARD_STYLE}>
++            <div style={{ fontSize: 22, fontWeight: 800, color: "#d64545" }}>0</div>
++            <div style={{ fontSize: 10.5, color: "#888", fontWeight: 700, marginTop: 4 }}>Leaves</div>
++          </div>
++          <div style={STAT_CARD_STYLE}>
++            <div style={{ fontSize: 22, fontWeight: 800, color: "#c98400" }}>0</div>
++            <div style={{ fontSize: 10.5, color: "#888", fontWeight: 700, marginTop: 4 }}>Holidays</div>
++          </div>
++        </div>
++        <div style={{ fontSize: 11, color: "#999", textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>
++          Leaves and Holidays aren't tracked yet — coming soon.
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index d24e447..471939d 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -7,7 +7,10 @@ import { featuresForRole } from "../../utils/staffFeatures";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+ // senior_sales_associate, senior_sales_executive). Design approved against
+-// the "richer" mockup (avatar header, stat cards, dealer list).
++// the "richer" mockup (avatar header, stat cards, dealer list), then
++// reworked again (3 Sep 2026) against a second mockup adding ring-style
++// stat cards and an Attendance calendar, inspired by a reference field-app
++// screenshot the user shared.
+ //
+ // What's real here: the "My Dealers / Parties" list and its two stat cards
+ // (count, total outstanding) — all come from get_my_dealers(), a SECURITY
+@@ -16,11 +19,16 @@ import { featuresForRole } from "../../utils/staffFeatures";
+ // them to a rep via AdminDealers' new "Assigned Sales Rep" field.
+ // "My Visits" is also real now — recent visits logged from a dealer's
+ // detail screen (get_my_visits(), see supabase/migrations/sales_visits.sql).
++// The header's two ring stats are real too: "Today's Visits" is derived
++// from that same visits list (filtered to today), and "This Month" comes
++// from get_my_attendance_month() (see supabase/migrations/
++// sales_attendance.sql) — tapping it opens the new Attendance screen,
++// which shares the same RPC for its full calendar.
+ //
+-// What's still "coming soon": territory map, targets, commission, and
+-// (for Senior tiers) a real team-performance view — none of those have a
+-// data model yet, so rather than show made-up numbers in a live app,
+-// those sections stay clearly marked as not built yet.
++// What's still "coming soon": territory map, targets, commission, leaves,
++// expenses, and (for Senior tiers) a real team-performance view — none of
++// those have a data model yet, so rather than show made-up numbers in a
++// live app, those sections stay clearly marked as not built yet.
+ 
+ function initials(name) {
+   if (!name) return "?";
+@@ -133,10 +141,71 @@ function FeatureTile({ icon, title, onClick }) {
+   );
+ }
+ 
++// Same tile look as FeatureTile, minus the "Soon" badge — for real,
++// already-built shortcuts (My Dealers, My Visits, Attendance).
++function NavTile({ icon, title, onClick }) {
++  return (
++    <div
++      onClick={onClick}
++      style={{
++        background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "16px 8px", textAlign: "center",
++        boxShadow: "0 2px 10px rgba(0,0,0,0.05)", cursor: "pointer",
++      }}
++    >
++      <div style={{
++        width: 40, height: 40, borderRadius: 12, background: "#f3e6f6",
++        display: "flex", alignItems: "center", justifyContent: "center",
++        fontSize: 19, margin: "0 auto 8px",
++      }}>
++        {icon}
++      </div>
++      <div style={{ fontSize: 11, fontWeight: 700, color: "#444", lineHeight: 1.3 }}>{title}</div>
++    </div>
++  );
++}
++
++// Circular progress "ring" stat — used for Today's Visits / This Month
++// attendance in the header. `value`/`total` drive both the fraction drawn
++// and the "n/N" label; total===0 just draws an empty ring rather than
++// dividing by zero.
++const RING_RADIUS = 34;
++const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
++
++function RingStat({ title, value, total, sub, onClick }) {
++  const fraction = total > 0 ? Math.max(0, Math.min(1, value / total)) : 0;
++  const offset = RING_CIRCUMFERENCE * (1 - fraction);
++  return (
++    <div
++      onClick={onClick}
++      style={{
++        flex: 1, background: "#fff", borderRadius: 16, padding: "14px 10px 16px", textAlign: "center",
++        boxShadow: "0 4px 16px rgba(0,0,0,0.12)", border: "1.5px solid #7B2D8B", cursor: onClick ? "pointer" : "default",
++      }}
++    >
++      <div style={{ fontSize: 12, fontWeight: 800, color: "#333", marginBottom: 10, textAlign: "left", paddingLeft: 2 }}>{title}</div>
++      <div style={{ position: "relative", width: 84, height: 84, margin: "0 auto" }}>
++        <svg width={84} height={84} style={{ transform: "rotate(-90deg)" }}>
++          <circle cx={42} cy={42} r={RING_RADIUS} fill="none" stroke="#f0e2f2" strokeWidth={8} />
++          <circle
++            cx={42} cy={42} r={RING_RADIUS} fill="none" stroke="#7B2D8B" strokeWidth={8} strokeLinecap="round"
++            strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={offset}
++            style={{ transition: "stroke-dashoffset 0.6s ease" }}
++          />
++        </svg>
++        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
++          <div style={{ fontSize: 18, fontWeight: 800, color: "#222" }}>{value}/{total}</div>
++          <div style={{ fontSize: 9.5, color: "#999", fontWeight: 700 }}>{sub}</div>
++        </div>
++      </div>
++    </div>
++  );
++}
++
+ export default function SalesDashboard() {
+   const navigate = useNavigate();
+   const { staffProfile, signOut } = useApp();
+   const dealersSectionRef = useRef(null);
++  const visitsSectionRef = useRef(null);
+ 
+   const [dealers, setDealers] = useState([]);
+   const [loadingDealers, setLoadingDealers] = useState(true);
+@@ -154,9 +223,16 @@ export default function SalesDashboard() {
+   const [dayStart, setDayStart] = useState(null);
+   const [loadingDayStart, setLoadingDayStart] = useState(true);
+ 
++  // "This Month" attendance ring — just the current month's present-day
++  // count from the same RPC the Attendance screen's calendar uses. See
++  // supabase/migrations/sales_attendance.sql.
++  const [presentThisMonth, setPresentThisMonth] = useState(0);
++  const [loadingAttendance, setLoadingAttendance] = useState(true);
++
+   useEffect(() => {
+     if (!isSupabaseConfigured) {
+       setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
++      setLoadingAttendance(false);
+       return;
+     }
+     let cancelled = false;
+@@ -191,6 +267,12 @@ export default function SalesDashboard() {
+       }
+       setLoadingDayStart(false);
+     });
++    const now = new Date();
++    supabase.rpc("get_my_attendance_month", { p_year: now.getFullYear(), p_month: now.getMonth() + 1 }).then(({ data, error }) => {
++      if (cancelled) return;
++      if (!error) setPresentThisMonth((data || []).length);
++      setLoadingAttendance(false);
++    });
+     return () => { cancelled = true; };
+   }, []);
+ 
+@@ -199,6 +281,13 @@ export default function SalesDashboard() {
+   const totalOutstanding = dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0);
+   const dealersLabel = staffProfile?.role === "senior_sales_executive" ? "Dealers, Sales dept." : "My dealers / parties";
+ 
++  const todayStr = new Date().toDateString();
++  const visitsToday = visits.filter((v) => {
++    const ts = v.check_in_at || v.visited_at;
++    return ts && new Date(ts).toDateString() === todayStr;
++  }).length;
++  const daysElapsedThisMonth = new Date().getDate();
++
+   const handleLogout = async () => {
+     await signOut();
+     navigate("/login");
+@@ -208,7 +297,15 @@ export default function SalesDashboard() {
+     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "22px 24px 44px", color: "#fff" }}>
+         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+-          <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
++          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++            <img
++              src="/assets/ELTOP%20LOGO.png"
++              alt="Eltop"
++              style={{ height: 22, width: "auto", filter: "brightness(0) invert(1)" }}
++              onError={(e) => { e.target.style.display = "none"; }}
++            />
++            <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
++          </div>
+           <button
+             onClick={handleLogout}
+             style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+@@ -310,6 +407,23 @@ export default function SalesDashboard() {
+             </button>
+           )}
+         </div>
++
++        <div style={{ display: "flex", gap: 12, marginTop: 18, paddingBottom: 4 }}>
++          <RingStat
++            title="Today's Visits"
++            value={loadingVisits ? 0 : visitsToday}
++            total={loadingDealers ? 0 : dealers.length}
++            sub="dealers"
++            onClick={() => visitsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
++          />
++          <RingStat
++            title="This Month"
++            value={loadingAttendance ? 0 : presentThisMonth}
++            total={daysElapsedThisMonth}
++            sub="present"
++            onClick={() => navigate("/staff/sales/attendance")}
++          />
++        </div>
+       </div>
+ 
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+@@ -323,6 +437,13 @@ export default function SalesDashboard() {
+           />
+         </div>
+ 
++        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>Sales</div>
++        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
++          <NavTile icon="🏬" title="My Dealers" onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
++          <NavTile icon="📍" title="My Visits" onClick={() => visitsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })} />
++          <NavTile icon="🗓️" title="Attendance" onClick={() => navigate("/staff/sales/attendance")} />
++        </div>
++
+         <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
+         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingDealers ? (
+@@ -340,7 +461,7 @@ export default function SalesDashboard() {
+           )}
+         </div>
+ 
+-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
++        <div ref={visitsSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Visits</div>
+         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingVisits ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+diff --git a/supabase/migrations/sales_attendance.sql b/supabase/migrations/sales_attendance.sql
+new file mode 100644
+index 0000000..719fcd0
+--- /dev/null
++++ b/supabase/migrations/sales_attendance.sql
+@@ -0,0 +1,51 @@
++-- sales_attendance.sql
++--
++-- Attendance calendar (mockup approved 3 Sep 2026): a day counts as
++-- "present" simply by starting it (sales_day_starts) — there's no separate
++-- punch-in concept, so this doesn't add a new table, just a read-only RPC
++-- listing which days in a given month the caller was present. Used by:
++--   - The new Attendance screen's monthly calendar (with month nav).
++--   - The dashboard's "This Month" ring stat (current month only).
++--
++-- Leaves and Holidays aren't real features yet (no leave-request or
++-- holiday-calendar data model), so the screen shows those counts as a
++-- fixed 0 rather than querying anything — same "clearly not built yet"
++-- approach already used for Territory/Targets/Commission.
++--
++-- Run in Supabase SQL Editor, after sales_day_end_and_activity.sql.
++
++create or replace function public.get_my_attendance_month(p_year int, p_month int)
++returns table (work_date date)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_start date;
++  v_end   date;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  if p_year is null or p_month is null or p_month < 1 or p_month > 12 then
++    return;
++  end if;
++
++  v_start := make_date(p_year, p_month, 1);
++  v_end   := (v_start + interval '1 month')::date;
++
++  return query
++    select sds.work_date
++    from public.sales_day_starts sds
++    where sds.staff_email = v_email
++      and sds.work_date >= v_start
++      and sds.work_date < v_end
++    order by sds.work_date asc;
++end;
++$$;
++
++grant execute on function public.get_my_attendance_month(int, int) to authenticated;

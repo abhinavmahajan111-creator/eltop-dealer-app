@@ -1,0 +1,46 @@
+From 431d9833eef91bc82285dcb58f0a42c730f78b1d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 03:45:58 +0000
+Subject: [PATCH] =?UTF-8?q?Remove=20"Eltop=20Staff"=20text=20from=20staff?=
+ =?UTF-8?q?=20headers=20=E2=80=94=20logos=20speak=20for=20themselves?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Both headers now show the Eltop + Embassy logos side by side with no
+accompanying text label.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/StaffHome.jsx            | 1 -
+ src/screens/staff/SalesDashboard.jsx | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/src/screens/StaffHome.jsx b/src/screens/StaffHome.jsx
+index 40aab4b..c5da8db 100644
+--- a/src/screens/StaffHome.jsx
++++ b/src/screens/StaffHome.jsx
+@@ -36,7 +36,6 @@ export default function StaffHome() {
+             style={{ height: 20, width: "auto" }}
+             onError={(e) => { e.target.style.display = "none"; }}
+           />
+-          <div style={{ fontSize: 20, fontWeight: 800, color: "#7B2D8B" }}>Eltop Staff</div>
+         </div>
+         <button
+           onClick={handleLogout}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 529b0b7..77a2efd 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -310,7 +310,6 @@ export default function SalesDashboard() {
+               style={{ height: 20, width: "auto", filter: "brightness(0) invert(1)" }}
+               onError={(e) => { e.target.style.display = "none"; }}
+             />
+-            <div style={{ fontSize: 18, fontWeight: 800, opacity: 0.9 }}>Eltop Staff</div>
+           </div>
+           <button
+             onClick={handleLogout}
+-- 
+2.43.0
+
