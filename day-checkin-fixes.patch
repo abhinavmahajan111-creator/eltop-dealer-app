@@ -1,0 +1,207 @@
+From 469aadcd5a619672221d1244ed9908ba1292dfc3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 2 Sep 2026 15:32:44 +0000
+Subject: [PATCH] Fix live check-in bug; add Day-tab shortcut and clickable
+ outstanding stat
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- profiles.location_lat/location_lng were never added by any prior
+  migration even though start_dealer_visit() has always assumed they
+  exist, so every real check-in attempt failed with "column
+  p.location_lat does not exist". Adds them (idempotent).
+- Once the day is active, the dashboard header now shows both "Day"
+  and "Check In" buttons side by side instead of only "Check In", so
+  the Day tab (End Day, Day Activity log) stays reachable — DayCheckIn
+  now honors an explicit tab passed via navigation state.
+- "Total outstanding" stat card is now clickable and scrolls to the
+  My Dealers / Parties list, which already shows each dealer's own
+  outstanding amount.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/DayCheckIn.jsx              | 31 +++++++---
+ src/screens/staff/SalesDashboard.jsx          | 58 +++++++++++++------
+ .../sales_profiles_location_columns_fix.sql   | 15 +++++
+ 3 files changed, 79 insertions(+), 25 deletions(-)
+ create mode 100644 supabase/migrations/sales_profiles_location_columns_fix.sql
+
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 6f85293..991ec9f 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useRef, useState } from "react";
+-import { useNavigate } from "react-router-dom";
++import { useLocation, useNavigate } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { getCurrentPosition, getVideoDuration, uploadVisitMedia } from "../../utils/visitMedia";
+ import { CameraPhotoSlot, CameraVideoSlot } from "../../components/staff/CameraCapture";
+@@ -42,6 +42,14 @@ const ACTIVITY_ICON = { start: "🛵", end: "⏹", checkin: "📍", checkout: "
+ 
+ export default function DayCheckIn() {
+   const navigate = useNavigate();
++  const location = useLocation();
++  // Dashboard's two-button row (once the day is started) passes an explicit
++  // tab via navigation state — e.g. { state: { tab: "day" } } — so tapping
++  // "🛵 Day" there always lands on Day even though Check In is otherwise
++  // the default once the day has started. Falls back to the normal
++  // auto-selection below when nothing is passed (direct URL, redirects,
++  // the amber "checked in" banner, etc).
++  const requestedTab = location.state?.tab === "day" || location.state?.tab === "checkin" ? location.state.tab : null;
+ 
+   const [activeTab, setActiveTab] = useState("day");
+   const defaultTabSetRef = useRef(false);
+@@ -128,13 +136,20 @@ export default function DayCheckIn() {
+ 
+       if (!defaultTabSetRef.current) {
+         defaultTabSetRef.current = true;
+-        // Default lands on whichever tab is actionable: Day if there's
+-        // nothing to check in for yet (not started / already ended),
+-        // otherwise Check In — which, if already checked in somewhere,
+-        // is the checkout screen. Never defaults back to Day after a
+-        // check-in.
+-        if (!day || day.ended_at) setActiveTab("day");
+-        else setActiveTab("checkin");
++        if (requestedTab) {
++          // Explicit tab requested via navigation state (dashboard's
++          // "🛵 Day" / "📍 Check In" buttons) — honor it as-is.
++          setActiveTab(requestedTab);
++        } else if (!day || day.ended_at) {
++          // Default lands on whichever tab is actionable: Day if there's
++          // nothing to check in for yet (not started / already ended),
++          // otherwise Check In — which, if already checked in somewhere,
++          // is the checkout screen. Never defaults back to Day after a
++          // check-in.
++          setActiveTab("day");
++        } else {
++          setActiveTab("checkin");
++        }
+       }
+ 
+       setLoadingDealers(false);
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 6ac4392..d24e447 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -1,4 +1,4 @@
+-import { useEffect, useState } from "react";
++import { useEffect, useRef, useState } from "react";
+ import { useNavigate } from "react-router-dom";
+ import { useApp } from "../../context/AppContext";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+@@ -36,12 +36,17 @@ const CARD_STYLE = {
+   boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+ };
+ 
+-function StatCard({ icon, value, label }) {
++function StatCard({ icon, value, label, onClick }) {
+   return (
+-    <div style={CARD_STYLE}>
++    <div
++      onClick={onClick}
++      style={onClick ? { ...CARD_STYLE, cursor: "pointer" } : CARD_STYLE}
++    >
+       <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+       <div style={{ fontSize: 22, fontWeight: 800 }}>{value}</div>
+-      <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>{label}</div>
++      <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>
++        {label}{onClick ? " ›" : ""}
++      </div>
+     </div>
+   );
+ }
+@@ -131,6 +136,7 @@ function FeatureTile({ icon, title, onClick }) {
+ export default function SalesDashboard() {
+   const navigate = useNavigate();
+   const { staffProfile, signOut } = useApp();
++  const dealersSectionRef = useRef(null);
+ 
+   const [dealers, setDealers] = useState([]);
+   const [loadingDealers, setLoadingDealers] = useState(true);
+@@ -264,17 +270,30 @@ export default function SalesDashboard() {
+           )}
+ 
+           {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart && !dayStart.ended_at && (
+-            <button
+-              onClick={() => navigate("/staff/sales/day-checkin")}
+-              style={{
+-                width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+-                background: "#fff", border: "none", borderRadius: 14,
+-                padding: "16px", color: "#7B2D8B", fontSize: 15, fontWeight: 800, cursor: "pointer",
+-                boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+-              }}
+-            >
+-              <span style={{ fontSize: 20 }}>📍</span> Check In at a Shop
+-            </button>
++            <div style={{ display: "flex", gap: 10 }}>
++              <button
++                onClick={() => navigate("/staff/sales/day-checkin", { state: { tab: "day" } })}
++                style={{
++                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
++                  background: "#fff", border: "none", borderRadius: 14,
++                  padding: "16px 8px", color: "#7B2D8B", fontSize: 14, fontWeight: 800, cursor: "pointer",
++                  boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
++                }}
++              >
++                <span style={{ fontSize: 18 }}>🛵</span> Day
++              </button>
++              <button
++                onClick={() => navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } })}
++                style={{
++                  flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
++                  background: "#fff", border: "none", borderRadius: 14,
++                  padding: "16px 8px", color: "#7B2D8B", fontSize: 14, fontWeight: 800, cursor: "pointer",
++                  boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
++                }}
++              >
++                <span style={{ fontSize: 18 }}>📍</span> Check In
++              </button>
++            </div>
+           )}
+ 
+           {!loadingOpenVisit && !openVisit && !loadingDayStart && dayStart?.ended_at && (
+@@ -296,10 +315,15 @@ export default function SalesDashboard() {
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+-          <StatCard icon="₹" value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`} label="Total outstanding" />
++          <StatCard
++            icon="₹"
++            value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`}
++            label="Total outstanding"
++            onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
++          />
+         </div>
+ 
+-        <div style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
++        <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
+         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingDealers ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+diff --git a/supabase/migrations/sales_profiles_location_columns_fix.sql b/supabase/migrations/sales_profiles_location_columns_fix.sql
+new file mode 100644
+index 0000000..7b0642c
+--- /dev/null
++++ b/supabase/migrations/sales_profiles_location_columns_fix.sql
+@@ -0,0 +1,15 @@
++-- sales_profiles_location_columns_fix.sql
++--
++-- Fixes a live bug: checking in at a shop was failing with
++-- "column p.location_lat does not exist" — start_dealer_visit() (and the
++-- first-check-in-sets-location fallback) has always assumed profiles has
++-- location_lat/location_lng columns, but they were never actually added
++-- to the table by any prior migration. This adds them.
++--
++-- Safe to run any time — IF NOT EXISTS makes it a no-op if they're
++-- somehow already there.
++--
++-- Run in Supabase SQL Editor.
++
++alter table public.profiles add column if not exists location_lat double precision;
++alter table public.profiles add column if not exists location_lng double precision;
+-- 
+2.43.0
+

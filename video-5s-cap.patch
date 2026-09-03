@@ -1,0 +1,148 @@
+From 7f62b39a4cc47623821101de49c9ff1436f570b6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 02:54:28 +0000
+Subject: [PATCH] Hard-cap checkout video recording at 5 seconds
+
+CameraVideoSlot's MediaRecorder previously ran until the rep tapped
+stop, with only a soft after-the-fact duration warning on checkout.
+Now recording auto-stops at MAX_VIDEO_SECONDS (5s) via a timer, with
+a live "stops automatically in Ns" countdown shown in the camera
+modal. The old >20s check in DayCheckIn's checkout handler is now
+just a safety net for encoder padding, tightened to >8s.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/components/staff/CameraCapture.jsx | 48 ++++++++++++++++++++++++--
+ src/screens/staff/DayCheckIn.jsx       |  7 ++--
+ src/utils/visitMedia.js                |  6 ++--
+ 3 files changed, 53 insertions(+), 8 deletions(-)
+
+diff --git a/src/components/staff/CameraCapture.jsx b/src/components/staff/CameraCapture.jsx
+index ad2f95d..d29e752 100644
+--- a/src/components/staff/CameraCapture.jsx
++++ b/src/components/staff/CameraCapture.jsx
+@@ -164,14 +164,40 @@ export function CameraPhotoSlot({ label, file, onChange, disabled }) {
+   );
+ }
+ 
+-export function CameraVideoSlot({ label = "Record ~5s video of shop interior", file, onChange, disabled }) {
++// Hard cap on the shop-interior video — recording auto-stops at this many
++// seconds, so there's no way to submit a long clip (previously this was
++// only a soft, after-the-fact warning; now it's enforced live).
++const MAX_VIDEO_SECONDS = 5;
++
++export function CameraVideoSlot({ label = "Record 5s video of shop interior", file, onChange, disabled }) {
+   const [open, setOpen] = useState(false);
+   const [recording, setRecording] = useState(false);
++  const [secondsLeft, setSecondsLeft] = useState(MAX_VIDEO_SECONDS);
+   const { videoRef, streamRef, error } = useCameraStream(open, true);
+   const recorderRef = useRef(null);
+   const chunksRef = useRef([]);
++  const stopTimeoutRef = useRef(null);
++  const tickIntervalRef = useRef(null);
++
++  const clearTimers = () => {
++    if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
++    if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null; }
++  };
+ 
+-  const handleOpen = () => { if (!disabled) setOpen(true); };
++  // Timers are tied to the camera modal's lifetime, not the component's —
++  // clear them whenever the modal closes for any reason (stop button,
++  // auto-stop, or the ✕ close button), so a reopened modal always starts
++  // its own fresh 5s window.
++  useEffect(() => {
++    if (!open) clearTimers();
++    return () => { if (!open) clearTimers(); };
++  }, [open]);
++
++  const handleOpen = () => {
++    if (disabled) return;
++    setSecondsLeft(MAX_VIDEO_SECONDS);
++    setOpen(true);
++  };
+ 
+   const startRecording = () => {
+     if (!streamRef.current) return;
+@@ -179,6 +205,7 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
+     const recorder = new MediaRecorder(streamRef.current);
+     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+     recorder.onstop = () => {
++      clearTimers();
+       const blob = new Blob(chunksRef.current, { type: "video/webm" });
+       onChange(blob);
+       setOpen(false);
+@@ -187,9 +214,18 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
+     recorder.start();
+     recorderRef.current = recorder;
+     setRecording(true);
++    setSecondsLeft(MAX_VIDEO_SECONDS);
++
++    tickIntervalRef.current = setInterval(() => {
++      setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
++    }, 1000);
++    stopTimeoutRef.current = setTimeout(() => {
++      stopRecording();
++    }, MAX_VIDEO_SECONDS * 1000);
+   };
+ 
+   const stopRecording = () => {
++    clearTimers();
+     if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
+   };
+ 
+@@ -208,7 +244,13 @@ export function CameraVideoSlot({ label = "Record ~5s video of shop interior", f
+       </div>
+ 
+       {open && (
+-        <CameraModal title="Record video" videoRef={videoRef} error={error} onClose={() => { stopRecording(); setOpen(false); }}>
++        <CameraModal
++          title="Record video"
++          videoRef={videoRef}
++          error={error}
++          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${MAX_VIDEO_SECONDS}s — recording stops automatically`}
++          onClose={() => { stopRecording(); setOpen(false); }}
++        >
+           {!recording ? (
+             <button
+               onClick={startRecording}
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 991ec9f..4836d14 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -256,9 +256,12 @@ export default function DayCheckIn() {
+     setCheckingOut(true);
+     try {
+       const pos = await getCurrentPosition();
++      // Recording itself now auto-stops at 5s (see CameraVideoSlot), so
++      // this is just a safety-net check in case a device's encoder pads
++      // the clip slightly beyond that.
+       const duration = await getVideoDuration(videoFile);
+-      if (duration != null && duration > 20) {
+-        setCheckOutError(`That video is ${Math.round(duration)}s — please re-record a short ~5 second clip.`);
++      if (duration != null && duration > 8) {
++        setCheckOutError(`That video is ${Math.round(duration)}s — please re-record it.`);
+         setCheckingOut(false);
+         return;
+       }
+diff --git a/src/utils/visitMedia.js b/src/utils/visitMedia.js
+index 4f3c426..a93576f 100644
+--- a/src/utils/visitMedia.js
++++ b/src/utils/visitMedia.js
+@@ -5,9 +5,9 @@
+ // components/staff/CameraCapture.jsx) rather than a file/gallery picker —
+ // there's no way to substitute an old or fake photo, since capture and
+ // the geo-tag/timestamp burn-in both happen at the moment of shooting.
+-// There's also no way to hard-cap the video at exactly 5 seconds; the UI
+-// guides the rep to keep it short and does a soft (non-blocking) duration
+-// check instead of rejecting longer clips outright.
++// The shop-interior video recording auto-stops at 5 seconds (see
++// MAX_VIDEO_SECONDS in CameraCapture.jsx); getVideoDuration() below is
++// only used as an extra safety-net check after the fact.
+ 
+ import { supabase } from "../lib/supabase";
+ 
+-- 
+2.43.0
+
