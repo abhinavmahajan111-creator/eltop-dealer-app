@@ -35,7 +35,18 @@ export default function DealerLedgerTab({ dealerId, dealerCode, dealer }) {
   const [rows, setRows] = useState([]);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [openId, setOpenId] = useState(null);
+  // Multiple vouchers can stay expanded at once (each card toggles only
+  // itself) — this used to be an accordion (opening one closed the last),
+  // which the user found annoying.
+  const [openIds, setOpenIds] = useState(() => new Set());
+  const toggleOpen = (id) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!range) return;
@@ -75,6 +86,7 @@ export default function DealerLedgerTab({ dealerId, dealerCode, dealer }) {
       openingBalance,
       closingBalance,
       rows: withBalance,
+      expandedIds: openIds,
       filename: exportFilename(dealerCode, "Ledger", "pdf"),
     });
   };
@@ -115,7 +127,7 @@ export default function DealerLedgerTab({ dealerId, dealerCode, dealer }) {
         <div style={{ textAlign: "center", padding: 30, color: "#999", fontSize: 13 }}>No vouchers in this period.</div>
       ) : (
         withBalance.map((r) => (
-          <VoucherCard key={r.id} row={r} open={openId === r.id} onToggle={() => setOpenId(openId === r.id ? null : r.id)} />
+          <VoucherCard key={r.id} row={r} open={openIds.has(r.id)} onToggle={() => toggleOpen(r.id)} />
         ))
       )}
 

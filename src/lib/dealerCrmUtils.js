@@ -170,7 +170,13 @@ const COMPANY_INFO = {
 // Closing Balance row — replacing the old bare flat table. Shared by the
 // Overview tab's "Statement" export and the Ledger tab's own export, so
 // every PDF a rep generates from this screen looks like one document.
-export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabel, openingBalance, closingBalance, rows, filename }) {
+export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabel, openingBalance, closingBalance, rows, filename, expandedIds }) {
+  // expandedIds — the set of voucher row ids the user had manually expanded
+  // on screen (Balance before -> this voucher -> Balance after) at the time
+  // of export. Those rows get an extra breakdown line right under them in
+  // the PDF, mirroring the app's own expand/collapse state instead of
+  // showing (or guessing) it for every row.
+  const expanded = expandedIds instanceof Set ? expandedIds : new Set(expandedIds || []);
   // Landscape — a portrait A4 was too narrow once a Details column (the
   // same info the app's own expand-a-voucher view shows: method/reference,
   // credit-note reason, journal accounts) was added alongside Date/
@@ -231,16 +237,29 @@ export function exportLedgerStatementPdf({ dealer, dealerCode, fromLabel, toLabe
     { content: cr(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
     { content: bal(openingBalance), styles: { fontStyle: "bold", halign: "right" } },
   ];
-  const voucherRows = rows.map((r) => [
-    fmtDateShort(r.voucher_date || r.created_at),
-    voucherParticularsForExport(r),
-    voucherLabelForExport(r),
-    r.voucher_no || "",
-    voucherDetailForExport(r),
-    { content: r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
-    { content: !r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
-    { content: bal(r._after), styles: { halign: "right" } },
-  ]);
+  const voucherRows = rows.flatMap((r) => {
+    const mainRow = [
+      fmtDateShort(r.voucher_date || r.created_at),
+      voucherParticularsForExport(r),
+      voucherLabelForExport(r),
+      r.voucher_no || "",
+      voucherDetailForExport(r),
+      { content: r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
+      { content: !r._debit ? num2(Number(r.amount)) : "", styles: { halign: "right" } },
+      { content: bal(r._after), styles: { halign: "right" } },
+    ];
+    if (!expanded.has(r.id)) return [mainRow];
+
+    const amt = Number(r.amount) || 0;
+    const impactRow = [
+      {
+        content: `Balance before: ${bal(r._before)}      This voucher: ${r._debit ? "-" : "+"} ${num2(amt)}      Balance after: ${bal(r._after)}`,
+        colSpan: 8,
+        styles: { fontStyle: "italic", fontSize: 7.5, textColor: [123, 45, 139], fillColor: [250, 245, 251], halign: "left", cellPadding: { top: 3, right: 6, bottom: 5, left: 16 } },
+      },
+    ];
+    return [mainRow, impactRow];
+  });
   const totalRow = [
     { content: "Total", colSpan: 5, styles: { fontStyle: "bold", fillColor: [248, 240, 249] } },
     { content: num2(totalDebit), styles: { fontStyle: "bold", halign: "right", fillColor: [248, 240, 249] } },
