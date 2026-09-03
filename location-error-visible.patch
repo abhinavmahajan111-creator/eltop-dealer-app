@@ -1,0 +1,133 @@
+From 9dba9aad46e5253d94ce87af5ba86942d881722d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 3 Sep 2026 09:52:11 +0000
+Subject: [PATCH] Surface the real error when "Enable Location Access" fails
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The button's getCurrentPosition() failure was silently swallowed
+(.catch(() => {})), so on iPhone — where this is very often the phone's
+master Location Services toggle being off rather than the per-site Safari
+permission — tapping the button appeared to do nothing at all. Now the
+actual error is shown, with a pointer to the iOS system Location Services
+setting alongside the existing per-site instructions. Also hardened
+checkStatus() against a synchronous throw from
+navigator.permissions.query({name:"geolocation"}), which iOS Safari does
+not reliably support, so the banner can't get stuck rendering nothing.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ .../staff/LocationPermissionBanner.jsx        | 67 ++++++++++++++-----
+ 1 file changed, 49 insertions(+), 18 deletions(-)
+
+diff --git a/src/components/staff/LocationPermissionBanner.jsx b/src/components/staff/LocationPermissionBanner.jsx
+index cd9a93e..c5febbc 100644
+--- a/src/components/staff/LocationPermissionBanner.jsx
++++ b/src/components/staff/LocationPermissionBanner.jsx
+@@ -26,18 +26,29 @@ function checkStatus(setStatus) {
+     setStatus("prompt");
+     return;
+   }
+-  navigator.permissions
+-    .query({ name: "geolocation" })
+-    .then((result) => {
+-      setStatus(result.state); // "granted" | "denied" | "prompt"
+-      result.onchange = () => setStatus(result.state);
+-    })
+-    .catch(() => setStatus("prompt"));
++  try {
++    // iOS Safari has historically not supported querying the "geolocation"
++    // permission name (unlike camera/microphone/notifications) — some
++    // versions throw synchronously here rather than rejecting the promise,
++    // which would otherwise leave the banner stuck on "checking" (i.e.
++    // rendering nothing) forever. Guard the call itself, not just its
++    // promise, so we always fall back to offering the button.
++    navigator.permissions
++      .query({ name: "geolocation" })
++      .then((result) => {
++        setStatus(result.state); // "granted" | "denied" | "prompt"
++        result.onchange = () => setStatus(result.state);
++      })
++      .catch(() => setStatus("prompt"));
++  } catch {
++    setStatus("prompt");
++  }
+ }
+ 
+ export default function LocationPermissionBanner() {
+   const [status, setStatus] = useState("checking");
+   const [requesting, setRequesting] = useState(false);
++  const [error, setError] = useState(null);
+ 
+   useEffect(() => {
+     checkStatus(setStatus);
+@@ -47,8 +58,20 @@ export default function LocationPermissionBanner() {
+ 
+   const handleEnable = () => {
+     setRequesting(true);
++    setError(null);
+     getCurrentPosition()
+-      .catch(() => {})
++      .then(() => setError(null))
++      .catch((err) => {
++        // Previously swallowed silently — tapping "Enable" would just sit
++        // there with no feedback at all (the exact "nothing happens after
++        // I tap it" report on iPhone). Most often on iPhone this isn't the
++        // per-site Safari permission at all — it's the phone's master
++        // Location Services switch being off entirely, which iOS reports
++        // to the page as a plain permission error with no extra detail,
++        // so we spell that out here too rather than repeating only the
++        // per-site instructions already covered by the "denied" banner.
++        setError((err?.message || "Couldn't get your location.") + " If you already allowed this site, check iPhone Settings → Privacy & Security → Location Services is turned on.");
++      })
+       .finally(() => {
+         setRequesting(false);
+         checkStatus(setStatus);
+@@ -71,6 +94,9 @@ export default function LocationPermissionBanner() {
+         >
+           {requesting ? "Checking…" : "I've turned it on — Retry"}
+         </button>
++        {error && (
++          <div style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, marginTop: 8, lineHeight: 1.5 }}>{error}</div>
++        )}
+       </div>
+     );
+   }
+@@ -78,17 +104,22 @@ export default function LocationPermissionBanner() {
+   // "prompt" or "unsupported" — worth a try either way, since a browser
+   // that lacks the Permissions API may still support geolocation fine.
+   return (
+-    <div style={{ background: "#f8f0f9", border: "1.5px solid #d9b8e0", borderRadius: 10, padding: "12px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+-      <div style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
+-        📍 We need your location to check you in at a dealer.
++    <div style={{ background: "#f8f0f9", border: "1.5px solid #d9b8e0", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
++      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
++        <div style={{ flex: 1, minWidth: 180, fontSize: 11.5, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
++          📍 We need your location to check you in at a dealer.
++        </div>
++        <button
++          onClick={handleEnable}
++          disabled={requesting}
++          style={{ padding: "9px 14px", border: "none", borderRadius: 8, background: "#7B2D8B", color: "#fff", fontSize: 12, fontWeight: 800, cursor: requesting ? "default" : "pointer", flexShrink: 0 }}
++        >
++          {requesting ? "Requesting…" : "Enable Location Access"}
++        </button>
+       </div>
+-      <button
+-        onClick={handleEnable}
+-        disabled={requesting}
+-        style={{ padding: "9px 14px", border: "none", borderRadius: 8, background: "#7B2D8B", color: "#fff", fontSize: 12, fontWeight: 800, cursor: requesting ? "default" : "pointer", flexShrink: 0 }}
+-      >
+-        {requesting ? "Requesting…" : "Enable Location Access"}
+-      </button>
++      {error && (
++        <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 700, marginTop: 10, lineHeight: 1.5 }}>{error}</div>
++      )}
+     </div>
+   );
+ }
+-- 
+2.43.0
+
