@@ -230,6 +230,11 @@ export default function SalesDashboard() {
   const [presentThisMonth, setPresentThisMonth] = useState(0);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
 
+  // AI assistant is a small trigger chip under "Log out" (approved change
+  // from the full inline card that used to sit at the top of the page) —
+  // opens the same DashboardAiCard as a modal on tap.
+  const [aiOpen, setAiOpen] = useState(false);
+
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
@@ -312,12 +317,24 @@ export default function SalesDashboard() {
               onError={(e) => { e.target.style.display = "none"; }}
             />
           </div>
-          <button
-            onClick={handleLogout}
-            style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
-          >
-            Log out
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <button
+              onClick={handleLogout}
+              style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+            >
+              Log out
+            </button>
+            <button
+              onClick={() => setAiOpen(true)}
+              style={{
+                display: "flex", alignItems: "center", gap: 5, background: "rgba(255,255,255,0.15)",
+                border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 999, padding: "6px 12px",
+                fontSize: 11.5, fontWeight: 700, color: "#fff", cursor: "pointer",
+              }}
+            >
+              ✨ Ask AI
+            </button>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 22 }}>
           <div style={{
@@ -433,15 +450,6 @@ export default function SalesDashboard() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
-        <DashboardAiCard
-          repName={staffProfile?.name}
-          dealers={dealers}
-          visitsToday={visits.filter((v) => {
-            const ts = v.check_in_at || v.visited_at;
-            return ts && new Date(ts).toDateString() === todayStr;
-          })}
-        />
-
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
           <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
           <StatCard
@@ -496,6 +504,31 @@ export default function SalesDashboard() {
           ))}
         </div>
       </div>
+
+      {aiOpen && (
+        <div
+          onClick={() => setAiOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(20,10,25,0.5)", zIndex: 50,
+            display: "flex", alignItems: "flex-end", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "100%", maxWidth: 640, maxHeight: "85vh", overflowY: "auto", padding: "16px 16px calc(16px + env(safe-area-inset-bottom))" }}
+          >
+            <DashboardAiCard
+              repName={staffProfile?.name}
+              dealers={dealers}
+              visitsToday={visits.filter((v) => {
+                const ts = v.check_in_at || v.visited_at;
+                return ts && new Date(ts).toDateString() === todayStr;
+              })}
+              onClose={() => setAiOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

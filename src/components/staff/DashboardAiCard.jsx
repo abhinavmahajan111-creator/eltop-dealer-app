@@ -14,7 +14,7 @@ import { buildDashboardAiSystemPrompt, askAi } from "../../lib/dealerCrmUtils";
 
 const SUGGESTED_PROMPTS = ["Meri sales summary batao", "Overdue dealers", "Today's visits pending"];
 
-export default function DashboardAiCard({ repName, dealers, visitsToday }) {
+export default function DashboardAiCard({ repName, dealers, visitsToday, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -52,8 +52,21 @@ export default function DashboardAiCard({ repName, dealers, visitsToday }) {
 
   return (
     <div style={{ background: "linear-gradient(135deg, #f7ecf9 0%, #fdf8fe 100%)", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: "14px 16px", marginBottom: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#7B2D8B", marginBottom: 10 }}>
-        ✨ Ask AI about your dealers
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 800, color: "#7B2D8B" }}>
+          ✨ Ask AI about your dealers
+        </div>
+        {onClose && (
+          <div
+            onClick={onClose}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClose(); } }}
+            style={{ width: 24, height: 24, borderRadius: "50%", background: "#fff", border: "1.3px solid #d9b8e0", color: "#7B2D8B", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
+          >
+            ×
+          </div>
+        )}
       </div>
 
       {messages.length > 0 && (
