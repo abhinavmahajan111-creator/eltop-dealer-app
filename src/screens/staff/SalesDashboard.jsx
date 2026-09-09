@@ -74,7 +74,14 @@ function DealerRow({ dealer, onClick }) {
         {initials(dealer.name)}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{dealer.name || "Unnamed"}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+          {dealer.name || "Unnamed"}
+          {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
+              🆕 New
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
           {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
         </div>
@@ -480,7 +487,24 @@ export default function SalesDashboard() {
               No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
             </div>
           ) : (
-            dealers.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => navigate(`/staff/sales/dealer/${d.id}`)} />)
+            dealers.map((d) => (
+              <DealerRow
+                key={d.id}
+                dealer={d}
+                onClick={() => {
+                  // A dealer someone added straight from the field isn't a
+                  // real onboarded account yet — no ledger/orders exist for
+                  // it, so there's no CRM detail page to show. Send them to
+                  // Check In instead, where check-in/checkout already works
+                  // on it right away.
+                  if (d.dealer_kind && d.dealer_kind !== "profile") {
+                    navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } });
+                  } else {
+                    navigate(`/staff/sales/dealer/${d.id}`);
+                  }
+                }}
+              />
+            ))
           )}
         </div>
 
@@ -493,7 +517,19 @@ export default function SalesDashboard() {
               No visits logged yet.<br />Open a dealer to log your first visit.
             </div>
           ) : (
-            visits.map((v) => <VisitRow key={v.id} visit={v} onClick={() => navigate(`/staff/sales/dealer/${v.dealer_id}`)} />)
+            visits.map((v) => (
+              <VisitRow
+                key={v.id}
+                visit={v}
+                onClick={() => {
+                  if (v.is_field_dealer) {
+                    navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } });
+                  } else {
+                    navigate(`/staff/sales/dealer/${v.dealer_id}`);
+                  }
+                }}
+              />
+            ))
           )}
         </div>
 
