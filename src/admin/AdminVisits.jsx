@@ -62,6 +62,48 @@ export default function AdminVisits() {
   const [resettingDealerId, setResettingDealerId] = useState(null);
   const [message, setMessage] = useState("");
 
+  // New dealers reps added straight from the field (Check In screen) —
+  // they can already check in/out there before this review happens
+  // (that's the point: approval is oversight, not a gate). Approve just
+  // marks it reviewed; Reject blocks any *future* check-ins there but
+  // doesn't touch visit history already logged.
+  const [fieldDealers, setFieldDealers] = useState([]);
+  const [loadingFieldDealers, setLoadingFieldDealers] = useState(true);
+  const [reviewingId, setReviewingId] = useState(null);
+
+  const loadFieldDealers = () => {
+    if (!isSupabaseConfigured) { setLoadingFieldDealers(false); return; }
+    setLoadingFieldDealers(true);
+    supabase.rpc("admin_list_field_dealers", { p_status: "pending" }).then(({ data, error }) => {
+      if (!error) setFieldDealers(data || []);
+      setLoadingFieldDealers(false);
+    });
+  };
+
+  useEffect(() => { loadFieldDealers(); }, []);
+
+  const handleReviewFieldDealer = async (row, status) => {
+    let note = null;
+    if (status === "rejected") {
+      note = window.prompt(`Reject "${row.shop_name}"? Optional reason (visible to admin only):`, "");
+      if (note === null) return; // cancelled
+    }
+    setReviewingId(row.id);
+    const { data, error } = await supabase.rpc("admin_review_field_dealer", {
+      p_id: row.id,
+      p_status: status,
+      p_note: note,
+    });
+    const result = Array.isArray(data) ? data[0] : data;
+    setReviewingId(null);
+    if (error || !result?.success) {
+      setMessage(`Couldn't ${status === "approved" ? "approve" : "reject"} "${row.shop_name}": ${error?.message || result?.message || "unknown error"}.`);
+      return;
+    }
+    setMessage(`${status === "approved" ? "Approved" : "Rejected"} "${row.shop_name}".`);
+    loadFieldDealers();
+  };
+
   const load = () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
@@ -161,6 +203,49 @@ export default function AdminVisits() {
         )}
       </div>
 
+      {!loadingFieldDealers && fieldDealers.length > 0 && (
+        <div style={{ background: "#fffaf0", border: "1.5px solid #f0d9a8", borderRadius: 10, padding: "14px 16px", marginBottom: 18 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: "#c98400", marginBottom: 8 }}>
+            🆕 New Dealer Submissions — {fieldDealers.length} pending review
+          </div>
+          <div style={{ fontSize: 11.5, color: "#8a6d1a", marginBottom: 12, lineHeight: 1.5 }}>
+            Added by reps directly from the field — they can already check in/out there. Approve just marks it
+            reviewed; Reject blocks future check-ins but keeps any visit already logged.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {fieldDealers.map((fd) => (
+              <div key={fd.id} style={{ background: "#fff", border: "1px solid #f2e6c8", borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}</div>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                    {[fd.owner_name, fd.phone, fd.address].filter(Boolean).join(" · ") || "No extra details"}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "#aaa", marginTop: 2 }}>
+                    Added by {fd.added_by_name || fd.added_by_email} · {fmtDateTime(fd.created_at)}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button
+                    onClick={() => handleReviewFieldDealer(fd, "approved")}
+                    disabled={reviewingId === fd.id}
+                    style={{ background: "#e6f7ec", border: "1.3px solid #a8dcb8", color: "#2fa84f", fontSize: 11, fontWeight: 800, borderRadius: 7, padding: "6px 12px", cursor: reviewingId === fd.id ? "default" : "pointer" }}
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    onClick={() => handleReviewFieldDealer(fd, "rejected")}
+                    disabled={reviewingId === fd.id}
+                    style={{ background: "#fdeceb", border: "1.3px solid #e8b4ae", color: "#c0392b", fontSize: 11, fontWeight: 800, borderRadius: 7, padding: "6px 12px", cursor: reviewingId === fd.id ? "default" : "pointer" }}
+                  >
+                    ✕ Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {message && (
         <div style={{ background: "#f3e6f6", border: "1.3px solid #d9b8e0", color: "#7B2D8B", fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "9px 14px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
           <span>{message}</span>
@@ -224,7 +309,14 @@ export default function AdminVisits() {
                   <td style={{ textAlign: "center", color: "var(--muted)", fontSize: 12, fontWeight: 600 }}>{i + 1}</td>
                   <td><StatusBadge status={r.status} forced={r.forced_checkout} /></td>
                   <td>
-                    <div style={{ fontSize: 13, fontWeight: 700 }}>{r.dealer_name || "Unnamed"}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                      {r.dealer_name || "Unnamed"}
+                      {r.is_field_dealer && (
+                        <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px", whiteSpace: "nowrap" }}>
+                          🆕 New
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: "var(--muted)" }}>{r.dealer_code || "—"}</div>
                   </td>
                   <td>
@@ -253,13 +345,15 @@ export default function AdminVisits() {
                           ⚡ Force Checkout
                         </button>
                       )}
-                      <button
-                        onClick={() => handleResetGps(r)}
-                        disabled={resettingDealerId === r.dealer_id}
-                        style={{ background: "#fff", border: "1.3px solid #ddd", color: "#666", fontSize: 11, fontWeight: 700, borderRadius: 7, padding: "5px 10px", cursor: resettingDealerId === r.dealer_id ? "default" : "pointer" }}
-                      >
-                        {resettingDealerId === r.dealer_id ? "Resetting…" : "📍 Reset GPS"}
-                      </button>
+                      {!r.is_field_dealer && (
+                        <button
+                          onClick={() => handleResetGps(r)}
+                          disabled={resettingDealerId === r.dealer_id}
+                          style={{ background: "#fff", border: "1.3px solid #ddd", color: "#666", fontSize: 11, fontWeight: 700, borderRadius: 7, padding: "5px 10px", cursor: resettingDealerId === r.dealer_id ? "default" : "pointer" }}
+                        >
+                          {resettingDealerId === r.dealer_id ? "Resetting…" : "📍 Reset GPS"}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

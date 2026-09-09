@@ -82,6 +82,18 @@ export default function DayCheckIn() {
   const [checkingInId, setCheckingInId] = useState(null);
   const [checkInError, setCheckInError] = useState(null);
 
+  // "+ Add New Dealer" — a rep can log a brand-new shop straight from the
+  // field, no admin step first. It shows up in their own Check In list
+  // immediately (tagged "New"), and check-in/checkout both work on it
+  // right away — approval is just an admin review step, not a gate.
+  const [showAddDealer, setShowAddDealer] = useState(false);
+  const [newShopName, setNewShopName] = useState("");
+  const [newOwnerName, setNewOwnerName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newAddress, setNewAddress] = useState("");
+  const [addingDealer, setAddingDealer] = useState(false);
+  const [addDealerError, setAddDealerError] = useState(null);
+
   const [boardFile, setBoardFile] = useState(null);
   const [shopFile, setShopFile] = useState(null);
   const [cardFile, setCardFile] = useState(null);
@@ -111,6 +123,15 @@ export default function DayCheckIn() {
     return supabase.rpc("get_my_day_activity").then(({ data, error }) => {
       if (!error) setActivity(data || []);
       setLoadingActivity(false);
+    });
+  };
+
+  const loadDealers = () => {
+    setLoadingDealers(true);
+    return supabase.rpc("get_my_dealers").then(({ data, error }) => {
+      if (error) setDealerError(error.message);
+      else { setDealerError(null); setDealers(data || []); }
+      setLoadingDealers(false);
     });
   };
 
@@ -245,6 +266,35 @@ export default function DayCheckIn() {
     } catch (err) {
       setCheckInError(err.message || "Couldn't check in.");
       setCheckingInId(null);
+    }
+  };
+
+  const handleAddDealer = async () => {
+    setAddDealerError(null);
+    if (!newShopName.trim()) { setAddDealerError("Shop name is required."); return; }
+    setAddingDealer(true);
+    try {
+      const pos = await getCurrentPosition();
+      const { data, error } = await supabase.rpc("add_field_dealer", {
+        p_shop_name: newShopName.trim(),
+        p_owner_name: newOwnerName.trim() || null,
+        p_phone: newPhone.trim() || null,
+        p_address: newAddress.trim() || null,
+        p_latitude: pos.latitude,
+        p_longitude: pos.longitude,
+      });
+      const result = Array.isArray(data) ? data[0] : data;
+      if (error || !result?.success) {
+        setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+      } else {
+        setNewShopName(""); setNewOwnerName(""); setNewPhone(""); setNewAddress("");
+        setShowAddDealer(false);
+        await loadDealers();
+      }
+    } catch (err) {
+      setAddDealerError(err.message || "Couldn't get your location.");
+    } finally {
+      setAddingDealer(false);
     }
   };
 
@@ -497,6 +547,54 @@ export default function DayCheckIn() {
             ) : (
               <>
                 <LocationPermissionBanner />
+
+                <button
+                  onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); }}
+                  style={{ width: "100%", padding: 11, marginBottom: 12, border: "1.5px dashed #7B2D8B", borderRadius: 10, background: showAddDealer ? "#f8f0f9" : "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+                >
+                  {showAddDealer ? "✕ Cancel" : "+ Add New Dealer"}
+                </button>
+
+                {showAddDealer && (
+                  <div style={BOX_STYLE}>
+                    <div style={{ fontSize: 12.5, color: "#888", lineHeight: 1.5, marginBottom: 10 }}>
+                      Add a brand-new shop right now — it'll appear in your list below tagged "New" and you can check in/out immediately. Admin reviews it later; you don't have to wait.
+                    </div>
+                    <input
+                      value={newShopName}
+                      onChange={(e) => setNewShopName(e.target.value)}
+                      placeholder="Shop name *"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    <input
+                      value={newOwnerName}
+                      onChange={(e) => setNewOwnerName(e.target.value)}
+                      placeholder="Owner name (optional)"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    <input
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                      placeholder="Phone (optional)"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    <input
+                      value={newAddress}
+                      onChange={(e) => setNewAddress(e.target.value)}
+                      placeholder="Address (optional)"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
+                    />
+                    <button
+                      onClick={handleAddDealer}
+                      disabled={addingDealer || !newShopName.trim()}
+                      style={{ width: "100%", padding: 12, border: "none", borderRadius: 10, background: addingDealer ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: addingDealer ? "default" : "pointer" }}
+                    >
+                      {addingDealer ? "Adding…" : "📍 Add Dealer at My Current Location"}
+                    </button>
+                    {addDealerError && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: "#d64545" }}>{addDealerError}</div>}
+                  </div>
+                )}
+
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -530,7 +628,14 @@ export default function DayCheckIn() {
                           {initials(d.name)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700 }}>{d.name || "Unnamed"}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                            {d.name || "Unnamed"}
+                            {d.dealer_kind && d.dealer_kind !== "profile" && (
+                              <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
+                                🆕 New{d.dealer_kind === "field_pending" ? " · pending" : ""}
+                              </span>
+                            )}
+                          </div>
                           <div style={{ fontSize: 11, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 800, color: "#7B2D8B" }}>
