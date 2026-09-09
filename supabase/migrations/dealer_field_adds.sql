@@ -104,7 +104,7 @@ begin
 end;
 $$;
 
-grant execute on function public.add_field_dealer(text, text, text, double precision, double precision) to authenticated;
+grant execute on function public.add_field_dealer(text, text, text, text, double precision, double precision) to authenticated;
 
 -- ── 3. sales_visits can now point at either table ────────────────────────
 

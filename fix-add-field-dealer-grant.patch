@@ -1,0 +1,37 @@
+From 62e3ff6b86cc6b6aaa8ca7af6ba4a31558a7eb96 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 9 Sep 2026 10:58:18 +0000
+Subject: [PATCH] Fix add_field_dealer() GRANT statement missing a parameter
+ type
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The function takes 6 params (4 text + 2 double precision) but its GRANT
+line only listed 5 types, so Postgres couldn't find a matching overload
+to grant on — the whole migration transaction aborted and rolled back
+(including the table/function that had just been created), caught while
+applying dealer_field_adds.sql in Supabase SQL Editor.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ supabase/migrations/dealer_field_adds.sql | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/supabase/migrations/dealer_field_adds.sql b/supabase/migrations/dealer_field_adds.sql
+index 6de722d..413d59c 100644
+--- a/supabase/migrations/dealer_field_adds.sql
++++ b/supabase/migrations/dealer_field_adds.sql
+@@ -104,7 +104,7 @@ begin
+ end;
+ $$;
+ 
+-grant execute on function public.add_field_dealer(text, text, text, double precision, double precision) to authenticated;
++grant execute on function public.add_field_dealer(text, text, text, text, double precision, double precision) to authenticated;
+ 
+ -- ── 3. sales_visits can now point at either table ────────────────────────
+ 
+-- 
+2.43.0
+
