@@ -75,8 +75,8 @@ function DealerRow({ dealer, onClick }) {
         {initials(dealer.name)}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-          {dealer.name || "Unnamed"}
+        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {dealer.name || "Unnamed"}{dealer.alias_name ? ` (${dealer.alias_name})` : ""}
           {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
             <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
               🆕 New
@@ -251,6 +251,7 @@ export default function SalesDashboard() {
   const [showAddDealer, setShowAddDealer] = useState(false);
   const [newShopName, setNewShopName] = useState("");
   const [newOwnerName, setNewOwnerName] = useState("");
+  const [newAlias, setNewAlias] = useState("");
   const [newWhatsapp, setNewWhatsapp] = useState("");
   const [newAlternate, setNewAlternate] = useState("");
   const [newAddress, setNewAddress] = useState("");
@@ -309,6 +310,7 @@ export default function SalesDashboard() {
       const { data, error } = await supabase.rpc("add_field_dealer", {
         p_shop_name: newShopName.trim(),
         p_owner_name: newOwnerName.trim() || null,
+        p_alias_name: newAlias.trim() || null,
         p_whatsapp_number: newWhatsapp.trim(),
         p_alternate_number: newAlternate.trim() || null,
         p_address: newAddress.trim() || null,
@@ -319,7 +321,7 @@ export default function SalesDashboard() {
       if (error || !result?.success) {
         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
       } else {
-        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
         setDupMatches([]);
         setShowAddDealer(false);
         await loadDealers();
@@ -578,6 +580,12 @@ export default function SalesDashboard() {
               value={newOwnerName}
               onChange={(e) => setNewOwnerName(e.target.value)}
               placeholder="Owner name (optional)"
+              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+            />
+            <input
+              value={newAlias}
+              onChange={(e) => setNewAlias(e.target.value)}
+              placeholder="Alias — e.g. Sharma Shahdra (optional)"
               style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
             />
             <input

@@ -216,7 +216,7 @@ export default function AdminVisits() {
             {fieldDealers.map((fd) => (
               <div key={fd.id} style={{ background: "#fff", border: "1px solid #f2e6c8", borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}</div>
                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
                     {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
                   </div>

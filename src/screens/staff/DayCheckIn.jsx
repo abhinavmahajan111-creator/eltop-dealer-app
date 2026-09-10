@@ -89,6 +89,7 @@ export default function DayCheckIn() {
   const [showAddDealer, setShowAddDealer] = useState(false);
   const [newShopName, setNewShopName] = useState("");
   const [newOwnerName, setNewOwnerName] = useState("");
+  const [newAlias, setNewAlias] = useState("");
   const [newWhatsapp, setNewWhatsapp] = useState("");
   const [newAlternate, setNewAlternate] = useState("");
   const [newAddress, setNewAddress] = useState("");
@@ -219,7 +220,9 @@ export default function DayCheckIn() {
   const filteredDealers = dealers.filter((d) => {
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
-    return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
+    return (d.name || "").toLowerCase().includes(q)
+      || (d.dealer_code || "").toLowerCase().includes(q)
+      || (d.alias_name || "").toLowerCase().includes(q);
   });
 
   const handleStartDay = async () => {
@@ -313,6 +316,7 @@ export default function DayCheckIn() {
       const { data, error } = await supabase.rpc("add_field_dealer", {
         p_shop_name: newShopName.trim(),
         p_owner_name: newOwnerName.trim() || null,
+        p_alias_name: newAlias.trim() || null,
         p_whatsapp_number: newWhatsapp.trim(),
         p_alternate_number: newAlternate.trim() || null,
         p_address: newAddress.trim() || null,
@@ -323,7 +327,7 @@ export default function DayCheckIn() {
       if (error || !result?.success) {
         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
       } else {
-        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
         setDupMatches([]);
         setShowAddDealer(false);
         await loadDealers();
@@ -610,6 +614,12 @@ export default function DayCheckIn() {
                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
                     />
                     <input
+                      value={newAlias}
+                      onChange={(e) => setNewAlias(e.target.value)}
+                      placeholder="Alias — e.g. Sharma Shahdra (optional)"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    <input
                       value={newWhatsapp}
                       onChange={(e) => setNewWhatsapp(e.target.value)}
                       placeholder="WhatsApp number *"
@@ -691,8 +701,8 @@ export default function DayCheckIn() {
                           {initials(d.name)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-                            {d.name || "Unnamed"}
+                          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            {d.name || "Unnamed"}{d.alias_name ? ` (${d.alias_name})` : ""}
                             {d.dealer_kind && d.dealer_kind !== "profile" && (
                               <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
                                 🆕 New{d.dealer_kind === "field_pending" ? " · pending" : ""}
