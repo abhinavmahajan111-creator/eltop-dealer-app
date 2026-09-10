@@ -89,10 +89,44 @@ export default function DayCheckIn() {
   const [showAddDealer, setShowAddDealer] = useState(false);
   const [newShopName, setNewShopName] = useState("");
   const [newOwnerName, setNewOwnerName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
+  const [newWhatsapp, setNewWhatsapp] = useState("");
+  const [newAlternate, setNewAlternate] = useState("");
   const [newAddress, setNewAddress] = useState("");
   const [addingDealer, setAddingDealer] = useState(false);
   const [addDealerError, setAddDealerError] = useState(null);
+
+  // Duplicate-phone check — as the rep types either number, look it up
+  // live against other field-added dealers and real dealer profiles.
+  // Purely a nudge (never blocks Add) — same phone can legitimately be
+  // shared across shops (e.g. a family business, an office landline).
+  const [dupMatches, setDupMatches] = useState([]);
+  const [checkingDup, setCheckingDup] = useState(false);
+  const dupTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
+    const w = newWhatsapp.trim();
+    const a = newAlternate.trim();
+    if (w.length < 6 && a.length < 6) {
+      setDupMatches([]);
+      return;
+    }
+    dupTimerRef.current = setTimeout(async () => {
+      setCheckingDup(true);
+      try {
+        const { data, error } = await supabase.rpc("check_duplicate_dealer_phone", {
+          p_whatsapp: w.length >= 6 ? w : null,
+          p_alternate: a.length >= 6 ? a : null,
+        });
+        setDupMatches(error ? [] : data || []);
+      } catch {
+        setDupMatches([]);
+      } finally {
+        setCheckingDup(false);
+      }
+    }, 600);
+    return () => { if (dupTimerRef.current) clearTimeout(dupTimerRef.current); };
+  }, [newWhatsapp, newAlternate]);
 
   const [boardFile, setBoardFile] = useState(null);
   const [shopFile, setShopFile] = useState(null);
@@ -272,13 +306,15 @@ export default function DayCheckIn() {
   const handleAddDealer = async () => {
     setAddDealerError(null);
     if (!newShopName.trim()) { setAddDealerError("Shop name is required."); return; }
+    if (!newWhatsapp.trim()) { setAddDealerError("WhatsApp number is required."); return; }
     setAddingDealer(true);
     try {
       const pos = await getCurrentPosition();
       const { data, error } = await supabase.rpc("add_field_dealer", {
         p_shop_name: newShopName.trim(),
         p_owner_name: newOwnerName.trim() || null,
-        p_phone: newPhone.trim() || null,
+        p_whatsapp_number: newWhatsapp.trim(),
+        p_alternate_number: newAlternate.trim() || null,
         p_address: newAddress.trim() || null,
         p_latitude: pos.latitude,
         p_longitude: pos.longitude,
@@ -287,7 +323,8 @@ export default function DayCheckIn() {
       if (error || !result?.success) {
         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
       } else {
-        setNewShopName(""); setNewOwnerName(""); setNewPhone(""); setNewAddress("");
+        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+        setDupMatches([]);
         setShowAddDealer(false);
         await loadDealers();
       }
@@ -549,7 +586,7 @@ export default function DayCheckIn() {
                 <LocationPermissionBanner />
 
                 <button
-                  onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); }}
+                  onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); setDupMatches([]); }}
                   style={{ width: "100%", padding: 11, marginBottom: 12, border: "1.5px dashed #7B2D8B", borderRadius: 10, background: showAddDealer ? "#f8f0f9" : "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
                 >
                   {showAddDealer ? "✕ Cancel" : "+ Add New Dealer"}
@@ -573,11 +610,37 @@ export default function DayCheckIn() {
                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
                     />
                     <input
-                      value={newPhone}
-                      onChange={(e) => setNewPhone(e.target.value)}
-                      placeholder="Phone (optional)"
+                      value={newWhatsapp}
+                      onChange={(e) => setNewWhatsapp(e.target.value)}
+                      placeholder="WhatsApp number *"
+                      inputMode="tel"
                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
                     />
+                    <input
+                      value={newAlternate}
+                      onChange={(e) => setNewAlternate(e.target.value)}
+                      placeholder="Alternate number (optional)"
+                      inputMode="tel"
+                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                    />
+                    {checkingDup && (
+                      <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
+                    )}
+                    {!checkingDup && dupMatches.length > 0 && (
+                      <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
+                          ⚠️ This number is already on file
+                        </div>
+                        {dupMatches.map((m, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
+                            "{m.name}" ({m.matched_number}) — {m.extra}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 11, color: "#a56a00", marginTop: 4 }}>
+                          Same shop? Search for it above instead of adding again. If it's genuinely a different shop, go ahead — this is just a heads-up.
+                        </div>
+                      </div>
+                    )}
                     <input
                       value={newAddress}
                       onChange={(e) => setNewAddress(e.target.value)}
@@ -586,7 +649,7 @@ export default function DayCheckIn() {
                     />
                     <button
                       onClick={handleAddDealer}
-                      disabled={addingDealer || !newShopName.trim()}
+                      disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}
                       style={{ width: "100%", padding: 12, border: "none", borderRadius: 10, background: addingDealer ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: addingDealer ? "default" : "pointer" }}
                     >
                       {addingDealer ? "Adding…" : "📍 Add Dealer at My Current Location"}

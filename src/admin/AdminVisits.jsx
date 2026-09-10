@@ -218,7 +218,7 @@ export default function AdminVisits() {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}</div>
                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                    {[fd.owner_name, fd.phone, fd.address].filter(Boolean).join(" · ") || "No extra details"}
+                    {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
                   </div>
                   <div style={{ fontSize: 10.5, color: "#aaa", marginTop: 2 }}>
                     Added by {fd.added_by_name || fd.added_by_email} · {fmtDateTime(fd.created_at)}
