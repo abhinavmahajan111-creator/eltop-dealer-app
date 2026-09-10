@@ -657,12 +657,27 @@ export default function DayCheckIn() {
                     {checkingDup && (
                       <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
                     )}
-                    {!checkingDup && dupMatches.length > 0 && (
+                    {!checkingDup && dupMatches.filter((m) => m.match_type === "rejected").length > 0 && (
+                      <div style={{ background: "#fdeaea", border: "1.5px solid #eec2c2", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: "#a53535", marginBottom: 4 }}>
+                          🔁 This might be a previously rejected dealer
+                        </div>
+                        {dupMatches.filter((m) => m.match_type === "rejected").map((m, i) => (
+                          <div key={i} style={{ fontSize: 11.5, color: "#8a4040", marginBottom: 2 }}>
+                            "{m.name}" ({m.matched_number}) — {m.extra}, rejected
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 11, color: "#a53535", marginTop: 4 }}>
+                          Please check before adding again — if the situation has genuinely changed, go ahead.
+                        </div>
+                      </div>
+                    )}
+                    {!checkingDup && dupMatches.filter((m) => m.match_type !== "rejected").length > 0 && (
                       <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
                           ⚠️ This number is already on file
                         </div>
-                        {dupMatches.map((m, i) => (
+                        {dupMatches.filter((m) => m.match_type !== "rejected").map((m, i) => (
                           <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
                             "{m.name}" ({m.matched_number}) — {m.extra}
                           </div>

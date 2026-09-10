@@ -48,6 +48,30 @@ function initials(name) {
   return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 }
 
+// R3 — ledger access is restricted (owner, hierarchy-above, or an
+// explicit grant); Overview/Ledger/Orders/Insights all show this instead
+// of their real content when the viewer doesn't have it. Visits stays
+// untouched (R2 — check-in is universal).
+function LockedLedgerBanner({ dealer }) {
+  const askName = dealer?.owner_name || "the owner";
+  return (
+    <div style={{
+      display: "flex", gap: 10, alignItems: "flex-start", background: "#f8f0f9",
+      border: "1.5px solid #eadcec", borderRadius: 12, padding: "14px 16px", marginBottom: 16,
+    }}>
+      <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
+      <div>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: "#5e2270" }}>
+          Overview, Ledger, Orders and Insights are locked
+        </div>
+        <div style={{ fontSize: 11.5, color: "#7B2D8B", marginTop: 4, lineHeight: 1.5 }}>
+          Only {askName} (owner) or someone senior on your team can grant you access to this dealer's numbers. You can still check in and out from the Visits tab.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
@@ -378,17 +402,21 @@ export default function DealerDetail() {
       </div>
 
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 20px 60px" }}>
+        {tab !== "visits" && dealer.has_ledger_access === false && <LockedLedgerBanner dealer={dealer} />}
+
         {tab === "overview" && (
-          <OverviewTab
-            dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
-            territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
-            onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
-          />
+          dealer.has_ledger_access === false ? null : (
+            <OverviewTab
+              dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
+              territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
+              onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
+            />
+          )
         )}
 
-        {tab === "ledger" && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} />}
+        {tab === "ledger" && dealer.has_ledger_access !== false && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} />}
 
-        {tab === "orders" && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
+        {tab === "orders" && dealer.has_ledger_access !== false && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
 
         {tab === "visits" && (
           <VisitsTab
@@ -402,7 +430,7 @@ export default function DealerDetail() {
           />
         )}
 
-        {tab === "insights" && <DealerInsightsTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} orders={orders} visits={visits} />}
+        {tab === "insights" && dealer.has_ledger_access !== false && <DealerInsightsTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} orders={orders} visits={visits} />}
       </div>
     </div>
   );

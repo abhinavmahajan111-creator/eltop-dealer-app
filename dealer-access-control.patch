@@ -1,0 +1,1797 @@
+From e3e185b294e9ab651b0ac06dd79d176e1d3a985f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 10 Sep 2026 13:55:09 +0000
+Subject: [PATCH] Add Sales dealer ledger access control (universal directory +
+ check-in, gated ledger)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Splits what used to be one bundled gate (assigned_sales_rep, cascaded
+through the Sales hierarchy) into two independent things, per Sumaksh's
+spec: every Sales staff member now sees every dealer and can check in
+anywhere (R1/R2), while the financial ledger (Overview/Ledger/Orders/
+Insights) stays restricted to the owner, hierarchy-above, or an explicit
+grant (R3) — grantable/revocable by Senior Sales Associate (scoped to
+their own reports) and Senior Sales Executive (full override), multiple
+grantees at once, via a new Team & Access screen. Adds a rejected-lead
+duplicate-phone caution (R1a) and an in-app + email notification when
+access is granted.
+
+New: dealer_access_grants + staff_notifications tables, grant/revoke/
+list RPCs, TeamAccess.jsx screen, NotificationBell.jsx, a Resend edge
+function for the grant email. Rewrites get_my_dealers/get_dealer_detail/
+get_dealer_orders/get_dealer_visits/start_dealer_visit/
+check_duplicate_dealer_phone to the new visibility-vs-ledger split.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                                   |   2 +
+ src/components/staff/NotificationBell.jsx     | 136 +++
+ src/screens/staff/DayCheckIn.jsx              |  19 +-
+ src/screens/staff/DealerDetail.jsx            |  44 +-
+ src/screens/staff/SalesDashboard.jsx          |  61 +-
+ src/screens/staff/TeamAccess.jsx              | 302 ++++++
+ .../send-access-grant-email/index.ts          |  97 ++
+ supabase/migrations/dealer_access_control.sql | 959 ++++++++++++++++++
+ 8 files changed, 1598 insertions(+), 22 deletions(-)
+ create mode 100644 src/components/staff/NotificationBell.jsx
+ create mode 100644 src/screens/staff/TeamAccess.jsx
+ create mode 100644 supabase/functions/send-access-grant-email/index.ts
+ create mode 100644 supabase/migrations/dealer_access_control.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 0859a50..52e1f56 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -25,6 +25,7 @@ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
+ import DealerDetail from "./screens/staff/DealerDetail";
+ import FieldDealerDetail from "./screens/staff/FieldDealerDetail";
++import TeamAccess from "./screens/staff/TeamAccess";
+ import DayCheckIn from "./screens/staff/DayCheckIn";
+ import Attendance from "./screens/staff/Attendance";
+ import ComingSoon from "./screens/staff/ComingSoon";
+@@ -117,6 +118,7 @@ export default function App() {
+         <Route path="/staff/sales/attendance" element={<Attendance />} />
+         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
+         <Route path="/staff/sales/field-dealer/:id" element={<FieldDealerDetail />} />
++        <Route path="/staff/sales/team-access" element={<TeamAccess />} />
+         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
+         <Route path="/staff/after-sales" element={<StaffHome />} />
+         <Route path="/staff/dispatch" element={<StaffHome />} />
+diff --git a/src/components/staff/NotificationBell.jsx b/src/components/staff/NotificationBell.jsx
+new file mode 100644
+index 0000000..b73ee4c
+--- /dev/null
++++ b/src/components/staff/NotificationBell.jsx
+@@ -0,0 +1,136 @@
++import { useEffect, useRef, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { supabase } from "../../lib/supabase";
++
++// Lightweight in-app notification bell — the in-app half of the "in app
++// alert plus notification on email" decision (§5.4 of the Dealer Access
++// Control design doc, 10 Sep 2026). Today the only notification kind is
++// 'ledger_access_granted' (fired from grant_dealer_access()), but the
++// list/mark-read RPCs are generic so future kinds slot in with no client
++// change needed.
++
++function formatWhen(iso) {
++  if (!iso) return "";
++  const d = new Date(iso);
++  const diffMs = Date.now() - d.getTime();
++  const mins = Math.floor(diffMs / 60000);
++  if (mins < 1) return "just now";
++  if (mins < 60) return `${mins}m ago`;
++  const hrs = Math.floor(mins / 60);
++  if (hrs < 24) return `${hrs}h ago`;
++  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
++}
++
++export default function NotificationBell({ dark }) {
++  const navigate = useNavigate();
++  const [open, setOpen] = useState(false);
++  const [items, setItems] = useState([]);
++  const [loaded, setLoaded] = useState(false);
++  const boxRef = useRef(null);
++
++  const load = () => {
++    supabase.rpc("get_my_notifications", { p_limit: 30 }).then(({ data, error }) => {
++      if (!error) setItems(data || []);
++      setLoaded(true);
++    });
++  };
++
++  useEffect(() => {
++    load();
++    const timer = setInterval(load, 60000); // light poll, no live-push infra here
++    return () => clearInterval(timer);
++  }, []);
++
++  useEffect(() => {
++    if (!open) return;
++    const onClickOutside = (e) => {
++      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
++    };
++    document.addEventListener("mousedown", onClickOutside);
++    return () => document.removeEventListener("mousedown", onClickOutside);
++  }, [open]);
++
++  const unread = items.filter((n) => !n.read_at).length;
++
++  const handleToggle = () => {
++    setOpen((v) => !v);
++  };
++
++  const handleItemClick = async (n) => {
++    if (!n.read_at) {
++      supabase.rpc("mark_notification_read", { p_id: n.id }).then(() => load());
++    }
++    setOpen(false);
++    if (n.dealer_id) navigate(`/staff/sales/dealer/${n.dealer_id}`);
++  };
++
++  const handleMarkAllRead = async () => {
++    await supabase.rpc("mark_all_notifications_read");
++    load();
++  };
++
++  const bellColor = dark ? "#fff" : "#7B2D8B";
++
++  return (
++    <div ref={boxRef} style={{ position: "relative" }}>
++      <button
++        onClick={handleToggle}
++        style={{
++          position: "relative", background: dark ? "rgba(255,255,255,0.15)" : "#f3e6f6",
++          border: dark ? "1.5px solid rgba(255,255,255,0.4)" : "1.5px solid #eadcec",
++          borderRadius: 999, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center",
++          cursor: "pointer", color: bellColor, fontSize: 15,
++        }}
++        aria-label="Notifications"
++      >
++        🔔
++        {unread > 0 && (
++          <span style={{
++            position: "absolute", top: -3, right: -3, minWidth: 16, height: 16, borderRadius: 999,
++            background: "#d64545", color: "#fff", fontSize: 9.5, fontWeight: 800,
++            display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px", border: "1.5px solid #fff",
++          }}>
++            {unread > 9 ? "9+" : unread}
++          </span>
++        )}
++      </button>
++
++      {open && (
++        <div style={{
++          position: "absolute", top: 40, right: 0, width: 300, maxHeight: 360, overflowY: "auto",
++          background: "#fff", border: "1.5px solid #eadcec", borderRadius: 12, boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
++          zIndex: 50,
++        }}>
++          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: "1px solid #f2f2f2" }}>
++            <div style={{ fontSize: 12.5, fontWeight: 800, color: "#333" }}>Notifications</div>
++            {unread > 0 && (
++              <button onClick={handleMarkAllRead} style={{ background: "none", border: "none", color: "#7B2D8B", fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
++                Mark all read
++              </button>
++            )}
++          </div>
++          {!loaded ? (
++            <div style={{ padding: "20px 12px", textAlign: "center", fontSize: 12, color: "#999" }}>Loading…</div>
++          ) : items.length === 0 ? (
++            <div style={{ padding: "20px 12px", textAlign: "center", fontSize: 12, color: "#999" }}>Nothing yet.</div>
++          ) : (
++            items.map((n) => (
++              <div
++                key={n.id}
++                onClick={() => handleItemClick(n)}
++                style={{
++                  padding: "10px 12px", borderBottom: "1px solid #f6f6f6", cursor: "pointer",
++                  background: n.read_at ? "#fff" : "#f8f0f9",
++                }}
++              >
++                <div style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{n.title}</div>
++                {n.body && <div style={{ fontSize: 11.5, color: "#666", marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>}
++                <div style={{ fontSize: 10, color: "#aaa", marginTop: 3 }}>{formatWhen(n.created_at)}</div>
++              </div>
++            ))
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index a62512f..56a01c6 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -657,12 +657,27 @@ export default function DayCheckIn() {
+                     {checkingDup && (
+                       <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
+                     )}
+-                    {!checkingDup && dupMatches.length > 0 && (
++                    {!checkingDup && dupMatches.filter((m) => m.match_type === "rejected").length > 0 && (
++                      <div style={{ background: "#fdeaea", border: "1.5px solid #eec2c2", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
++                        <div style={{ fontSize: 12, fontWeight: 800, color: "#a53535", marginBottom: 4 }}>
++                          🔁 This might be a previously rejected dealer
++                        </div>
++                        {dupMatches.filter((m) => m.match_type === "rejected").map((m, i) => (
++                          <div key={i} style={{ fontSize: 11.5, color: "#8a4040", marginBottom: 2 }}>
++                            "{m.name}" ({m.matched_number}) — {m.extra}, rejected
++                          </div>
++                        ))}
++                        <div style={{ fontSize: 11, color: "#a53535", marginTop: 4 }}>
++                          Please check before adding again — if the situation has genuinely changed, go ahead.
++                        </div>
++                      </div>
++                    )}
++                    {!checkingDup && dupMatches.filter((m) => m.match_type !== "rejected").length > 0 && (
+                       <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
+                         <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
+                           ⚠️ This number is already on file
+                         </div>
+-                        {dupMatches.map((m, i) => (
++                        {dupMatches.filter((m) => m.match_type !== "rejected").map((m, i) => (
+                           <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
+                             "{m.name}" ({m.matched_number}) — {m.extra}
+                           </div>
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index a33e21c..84a1c23 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -48,6 +48,30 @@ function initials(name) {
+   return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+ }
+ 
++// R3 — ledger access is restricted (owner, hierarchy-above, or an
++// explicit grant); Overview/Ledger/Orders/Insights all show this instead
++// of their real content when the viewer doesn't have it. Visits stays
++// untouched (R2 — check-in is universal).
++function LockedLedgerBanner({ dealer }) {
++  const askName = dealer?.owner_name || "the owner";
++  return (
++    <div style={{
++      display: "flex", gap: 10, alignItems: "flex-start", background: "#f8f0f9",
++      border: "1.5px solid #eadcec", borderRadius: 12, padding: "14px 16px", marginBottom: 16,
++    }}>
++      <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
++      <div>
++        <div style={{ fontSize: 12.5, fontWeight: 800, color: "#5e2270" }}>
++          Overview, Ledger, Orders and Insights are locked
++        </div>
++        <div style={{ fontSize: 11.5, color: "#7B2D8B", marginTop: 4, lineHeight: 1.5 }}>
++          Only {askName} (owner) or someone senior on your team can grant you access to this dealer's numbers. You can still check in and out from the Visits tab.
++        </div>
++      </div>
++    </div>
++  );
++}
++
+ function formatDate(iso) {
+   if (!iso) return "";
+   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+@@ -378,17 +402,21 @@ export default function DealerDetail() {
+       </div>
+ 
+       <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 20px 60px" }}>
++        {tab !== "visits" && dealer.has_ledger_access === false && <LockedLedgerBanner dealer={dealer} />}
++
+         {tab === "overview" && (
+-          <OverviewTab
+-            dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
+-            territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
+-            onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
+-          />
++          dealer.has_ledger_access === false ? null : (
++            <OverviewTab
++              dealer={dealer} outstanding={outstanding} creditLimit={creditLimit} usedPct={usedPct} netRate={netRate}
++              territories={territories} orderStats={orderStats} topProducts={topProducts} ageingRows={ageingRows}
++              onExportStatement={handleExportStatement} onGoToOrders={() => setTab("orders")}
++            />
++          )
+         )}
+ 
+-        {tab === "ledger" && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} />}
++        {tab === "ledger" && dealer.has_ledger_access !== false && <DealerLedgerTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} />}
+ 
+-        {tab === "orders" && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
++        {tab === "orders" && dealer.has_ledger_access !== false && <OrdersTab orders={orders} dealerCode={dealer.dealer_code} />}
+ 
+         {tab === "visits" && (
+           <VisitsTab
+@@ -402,7 +430,7 @@ export default function DealerDetail() {
+           />
+         )}
+ 
+-        {tab === "insights" && <DealerInsightsTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} orders={orders} visits={visits} />}
++        {tab === "insights" && dealer.has_ledger_access !== false && <DealerInsightsTab dealerId={id} dealerCode={dealer.dealer_code} dealer={dealer} orders={orders} visits={visits} />}
+       </div>
+     </div>
+   );
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 52c8505..9aeea73 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -5,6 +5,7 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { staffRoleLabel } from "../../utils/staffRoles";
+ import { featuresForRole } from "../../utils/staffFeatures";
+ import DashboardAiCard from "../../components/staff/DashboardAiCard";
++import NotificationBell from "../../components/staff/NotificationBell";
+ import { getCurrentPosition } from "../../utils/visitMedia";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+@@ -85,11 +86,19 @@ function DealerRow({ dealer, onClick }) {
+         </div>
+         <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
+           {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
++          {dealer.owner_name ? ` · ${dealer.dealer_kind && dealer.dealer_kind !== "profile" ? "added by" : "owner"}: ${dealer.owner_name}` : ""}
+         </div>
+       </div>
+-      <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
+-        ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
+-      </div>
++      {dealer.has_ledger_access === false ? (
++        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, background: "#f3f3f3", borderRadius: 999, padding: "4px 10px" }}>
++          <span style={{ fontSize: 11 }}>🔒</span>
++          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#888" }}>Locked</span>
++        </div>
++      ) : (
++        <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
++          ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
++        </div>
++      )}
+       <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
+     </div>
+   );
+@@ -409,12 +418,15 @@ export default function SalesDashboard() {
+             />
+           </div>
+           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+-            <button
+-              onClick={handleLogout}
+-              style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+-            >
+-              Log out
+-            </button>
++            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++              <NotificationBell dark />
++              <button
++                onClick={handleLogout}
++                style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
++              >
++                Log out
++              </button>
++            </div>
+             <button
+               onClick={() => setAiOpen(true)}
+               style={{
+@@ -558,7 +570,17 @@ export default function SalesDashboard() {
+           <NavTile icon="🗓️" title="Attendance" onClick={() => navigate("/staff/sales/attendance")} />
+         </div>
+ 
+-        <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
++        <div ref={dealersSectionRef} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 12px" }}>
++          <div style={{ fontSize: 15, fontWeight: 800 }}>My Dealers / Parties</div>
++          {(staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive") && (
++            <div
++              onClick={() => navigate("/staff/sales/team-access")}
++              style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
++            >
++              🔐 Team &amp; Access ›
++            </div>
++          )}
++        </div>
+ 
+         <button
+           onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); setDupMatches([]); }}
+@@ -607,12 +629,27 @@ export default function SalesDashboard() {
+             {checkingDup && (
+               <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
+             )}
+-            {!checkingDup && dupMatches.length > 0 && (
++            {!checkingDup && dupMatches.filter((m) => m.match_type === "rejected").length > 0 && (
++              <div style={{ background: "#fdeaea", border: "1.5px solid #eec2c2", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
++                <div style={{ fontSize: 12, fontWeight: 800, color: "#a53535", marginBottom: 4 }}>
++                  🔁 This might be a previously rejected dealer
++                </div>
++                {dupMatches.filter((m) => m.match_type === "rejected").map((m, i) => (
++                  <div key={i} style={{ fontSize: 11.5, color: "#8a4040", marginBottom: 2 }}>
++                    "{m.name}" ({m.matched_number}) — {m.extra}, rejected
++                  </div>
++                ))}
++                <div style={{ fontSize: 11, color: "#a53535", marginTop: 4 }}>
++                  Please check before adding again — if the situation has genuinely changed, go ahead.
++                </div>
++              </div>
++            )}
++            {!checkingDup && dupMatches.filter((m) => m.match_type !== "rejected").length > 0 && (
+               <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
+                 <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
+                   ⚠️ This number is already on file
+                 </div>
+-                {dupMatches.map((m, i) => (
++                {dupMatches.filter((m) => m.match_type !== "rejected").map((m, i) => (
+                   <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
+                     "{m.name}" ({m.matched_number}) — {m.extra}
+                   </div>
+diff --git a/src/screens/staff/TeamAccess.jsx b/src/screens/staff/TeamAccess.jsx
+new file mode 100644
+index 0000000..f238e93
+--- /dev/null
++++ b/src/screens/staff/TeamAccess.jsx
+@@ -0,0 +1,302 @@
++import { useEffect, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { useApp } from "../../context/AppContext";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++
++// Team & Access — Senior Sales Associate + Senior Sales Executive only.
++// Lets a senior grant or revoke another Sales staff member's LEDGER
++// access to a dealer (R4 of Eltop_Dealer_Access_Control_Design_
++// 10Sep2026.md). Doesn't touch who can SEE a dealer or check in there —
++// that's universal for everyone already (R1/R2), this screen is purely
++// about the financial ledger. Server re-validates every grant/revoke
++// (get_my_team_access / grant_dealer_access / revoke_dealer_access are
++// all SECURITY DEFINER and re-check the caller's own tier + access) —
++// this screen only decides what's shown, never what's allowed.
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++const CARD_STYLE = {
++  background: "#fff",
++  border: "1.5px solid #7B2D8B",
++  borderRadius: 14,
++  padding: "16px 18px",
++  marginBottom: 14,
++  boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
++};
++
++function GrantPicker({ dealerId, onDone, onCancel }) {
++  const [staff, setStaff] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [selected, setSelected] = useState([]);
++  const [submitting, setSubmitting] = useState(false);
++  const [error, setError] = useState(null);
++
++  useEffect(() => {
++    supabase.rpc("get_grantable_staff", { p_dealer_id: dealerId }).then(({ data, error }) => {
++      if (!error) setStaff(data || []);
++      setLoading(false);
++    });
++  }, [dealerId]);
++
++  const toggle = (email) => {
++    setSelected((prev) => (prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email]));
++  };
++
++  const handleGrant = async () => {
++    if (selected.length === 0) return;
++    setSubmitting(true);
++    setError(null);
++    try {
++      const { data, error } = await supabase.rpc("grant_dealer_access", {
++        p_dealer_id: dealerId,
++        p_grantee_emails: selected,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setError(error?.message || result?.message || "Couldn't grant access.");
++        setSubmitting(false);
++        return;
++      }
++      // Email half of the notification decision — fire-and-forget per
++      // grantee, best-effort (in-app alert + the grant itself already
++      // succeeded server-side either way).
++      const selectedStaff = staff.filter((s) => selected.includes(s.email));
++      selectedStaff.forEach((s) => {
++        supabase.functions
++          .invoke("send-access-grant-email", {
++            body: {
++              to_email: s.email,
++              to_name: s.name,
++              dealer_name: onDone.dealerName,
++              granted_by_name: onDone.granterName,
++            },
++          })
++          .catch(() => {});
++      });
++      onDone();
++    } catch (err) {
++      setError(err.message || "Couldn't grant access.");
++      setSubmitting(false);
++    }
++  };
++
++  return (
++    <div style={{ background: "#f8f0f9", border: "1.5px solid #eadcec", borderRadius: 10, padding: 14, marginTop: 10 }}>
++      <div style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", marginBottom: 8 }}>
++        Pick one or more people to grant this dealer's ledger to
++      </div>
++      {loading ? (
++        <div style={{ fontSize: 12, color: "#999", padding: "8px 0" }}>Loading…</div>
++      ) : staff.length === 0 ? (
++        <div style={{ fontSize: 12, color: "#999", padding: "8px 0" }}>No one eligible to grant this to right now.</div>
++      ) : (
++        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
++          {staff.map((s) => (
++            <label key={s.email} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#333", cursor: "pointer" }}>
++              <input type="checkbox" checked={selected.includes(s.email)} onChange={() => toggle(s.email)} />
++              {s.name || s.email}
++            </label>
++          ))}
++        </div>
++      )}
++      {error && <div style={{ fontSize: 11.5, color: "#d64545", marginBottom: 8 }}>{error}</div>}
++      <div style={{ display: "flex", gap: 8 }}>
++        <button
++          onClick={handleGrant}
++          disabled={submitting || selected.length === 0}
++          style={{
++            flex: 1, padding: "9px 10px", borderRadius: 8, border: "none", fontSize: 12.5, fontWeight: 800,
++            background: submitting || selected.length === 0 ? "#c9a8d1" : "#7B2D8B", color: "#fff",
++            cursor: submitting || selected.length === 0 ? "default" : "pointer",
++          }}
++        >
++          {submitting ? "Granting…" : `Grant to ${selected.length || ""} ${selected.length === 1 ? "person" : "people"}`.trim()}
++        </button>
++        <button
++          onClick={onCancel}
++          disabled={submitting}
++          style={{ padding: "9px 14px", borderRadius: 8, border: "1.5px solid #eadcec", background: "#fff", color: "#666", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
++        >
++          Cancel
++        </button>
++      </div>
++    </div>
++  );
++}
++
++function DealerAccessCard({ row, granterEmail, granterName, canRevokeAll, onChanged }) {
++  const [showPicker, setShowPicker] = useState(false);
++  const [revokingEmail, setRevokingEmail] = useState(null);
++
++  const handleRevoke = async (email) => {
++    setRevokingEmail(email);
++    try {
++      await supabase.rpc("revoke_dealer_access", { p_dealer_id: row.dealer_id, p_grantee_email: email });
++    } finally {
++      setRevokingEmail(null);
++      onChanged();
++    }
++  };
++
++  return (
++    <div style={CARD_STYLE}>
++      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
++        <div>
++          <div style={{ fontSize: 14, fontWeight: 800 }}>{row.dealer_name}</div>
++          <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>
++            {row.dealer_code || "—"} · owner: {row.is_owner ? "you" : row.owner_name || "—"}
++          </div>
++        </div>
++        <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(row.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
++          ₹{Number(row.outstanding || 0).toLocaleString("en-IN")}
++        </div>
++      </div>
++
++      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#999", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>
++        Who can see this ledger
++      </div>
++
++      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f2f2f2" }}>
++        <div style={{ width: 28, height: 28, borderRadius: 999, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
++          {initials(row.owner_name)}
++        </div>
++        <div style={{ flex: 1, fontSize: 12.5, fontWeight: 700 }}>
++          {row.is_owner ? "You" : row.owner_name || "—"} <span style={{ fontWeight: 600, color: "#999" }}>· owner</span>
++        </div>
++        <div style={{ fontSize: 10, fontWeight: 700, color: "#999" }}>Always on</div>
++      </div>
++
++      {(row.grants || []).map((g) => (
++        <div key={g.email} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f2f2f2" }}>
++          <div style={{ width: 28, height: 28, borderRadius: 999, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
++            {initials(g.name)}
++          </div>
++          <div style={{ flex: 1, fontSize: 12.5, fontWeight: 700 }}>
++            {g.name} <span style={{ fontWeight: 600, color: "#999" }}>· granted by {g.granted_by === granterEmail ? "you" : g.granted_by_name}</span>
++          </div>
++          {(canRevokeAll || g.granted_by === granterEmail) && (
++            <div
++              onClick={() => revokingEmail !== g.email && handleRevoke(g.email)}
++              style={{
++                fontSize: 10.5, fontWeight: 800, color: "#d64545", background: "#fdeaea", borderRadius: 999,
++                padding: "4px 10px", cursor: revokingEmail === g.email ? "default" : "pointer",
++                opacity: revokingEmail === g.email ? 0.6 : 1,
++              }}
++            >
++              {revokingEmail === g.email ? "…" : "Revoke"}
++            </div>
++          )}
++        </div>
++      ))}
++
++      {(!row.grants || row.grants.length === 0) && (
++        <div style={{ fontSize: 12, color: "#999", padding: "4px 0 10px" }}>Only {row.is_owner ? "you" : "the owner"}, right now.</div>
++      )}
++
++      {!showPicker ? (
++        <button
++          onClick={() => setShowPicker(true)}
++          style={{ width: "100%", marginTop: 12, padding: 10, border: "1.5px dashed #7B2D8B", borderRadius: 8, background: "#fff", color: "#7B2D8B", fontSize: 12.5, fontWeight: 800, cursor: "pointer" }}
++        >
++          + Grant access · pick multiple people
++        </button>
++      ) : (
++        <GrantPicker
++          dealerId={row.dealer_id}
++          onDone={Object.assign(() => { setShowPicker(false); onChanged(); }, { dealerName: row.dealer_name, granterName })}
++          onCancel={() => setShowPicker(false)}
++        />
++      )}
++    </div>
++  );
++}
++
++export default function TeamAccess() {
++  const navigate = useNavigate();
++  const { staffProfile, session } = useApp();
++  const myEmail = session?.user?.email || "";
++  const [rows, setRows] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++
++  const canManage = staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive";
++
++  const load = () => {
++    setLoading(true);
++    supabase.rpc("get_my_team_access").then(({ data, error }) => {
++      if (error) setError(error.message);
++      else setRows(data || []);
++      setLoading(false);
++    });
++  };
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoading(false); return; }
++    load();
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  if (!canManage) {
++    return (
++      <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++        <div style={{ padding: "18px 24px" }}>
++          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
++            ← Back
++          </button>
++        </div>
++        <div style={{ textAlign: "center", padding: "60px 24px", color: "#999", fontSize: 13.5 }}>
++          This screen is only for Senior Sales Associate and Senior Sales Executive.
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 20px", color: "#fff" }}>
++        <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 4 }}>
++          ← Dashboard
++        </button>
++        <div style={{ fontSize: 19, fontWeight: 800, marginTop: 6 }}>Team &amp; Access</div>
++        <div style={{ fontSize: 11.5, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
++          {staffProfile?.name} · {staffProfile?.role === "senior_sales_executive" ? "Senior Sales Executive" : "Senior Sales Associate"} — grant or revoke ledger access to a dealer, for anyone on Sales.
++        </div>
++      </div>
++
++      <div style={{ padding: "14px 16px", maxWidth: 640, margin: "0 auto" }}>
++        {loading ? (
++          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++        ) : error ? (
++          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
++        ) : rows.length === 0 ? (
++          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealers with ledger access yet.</div>
++        ) : (
++          rows.map((row) => (
++            <DealerAccessCard
++              key={row.dealer_id}
++              row={row}
++              granterEmail={myEmail}
++              granterName={staffProfile?.name}
++              canRevokeAll={staffProfile?.role === "senior_sales_executive"}
++              onChanged={load}
++            />
++          ))
++        )}
++
++        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 10, padding: "10px 12px", marginTop: 4 }}>
++          <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff", border: "1.5px solid #7B2D8B", color: "#7B2D8B", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
++            i
++          </div>
++          <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
++            {staffProfile?.role === "senior_sales_executive"
++              ? "As Senior Sales Executive you can grant or revoke any Sales dealer's ledger, for anyone on Sales."
++              : "You see this for dealers you can already see the ledger of — and can only grant access to people who report to you."}
++          </div>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/supabase/functions/send-access-grant-email/index.ts b/supabase/functions/send-access-grant-email/index.ts
+new file mode 100644
+index 0000000..824ebbe
+--- /dev/null
++++ b/supabase/functions/send-access-grant-email/index.ts
+@@ -0,0 +1,97 @@
++import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
++
++// send-access-grant-email — the email half of "in app alert plus
++// notification on email" (§5.4 of Eltop_Dealer_Access_Control_Design_
++// 10Sep2026.md). Fired client-side, once per grantee, right after
++// grant_dealer_access() succeeds (that RPC already wrote the in-app
++// staff_notifications row and re-validated the grant server-side — this
++// function only sends the email, it does no authorization of its own).
++// Mirrors the existing send-order-confirmation function's Resend pattern.
++
++const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
++const FROM_EMAIL = "Eltop by Embassy <orders@eltopbyembassy.com>";
++
++interface Payload {
++  to_email: string;
++  to_name?: string;
++  dealer_name: string;
++  granted_by_name: string;
++}
++
++serve(async (req) => {
++  if (req.method === "OPTIONS") {
++    return new Response("ok", {
++      headers: {
++        "Access-Control-Allow-Origin": "*",
++        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
++      },
++    });
++  }
++
++  try {
++    const payload: Payload = await req.json();
++    const { to_email, to_name, dealer_name, granted_by_name } = payload;
++
++    if (!to_email) {
++      return new Response(JSON.stringify({ error: "no to_email" }), { status: 400 });
++    }
++
++    const html = `
++<!DOCTYPE html>
++<html>
++<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
++<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
++  <div style="max-width:520px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
++    <div style="background:#7B2D8B;padding:28px 32px;text-align:center;">
++      <div style="color:#fff;font-size:22px;font-weight:800;letter-spacing:0.5px;">Eltop by Embassy</div>
++      <div style="color:rgba(255,255,255,0.8);font-size:13px;margin-top:4px;">Ledger Access Granted</div>
++    </div>
++    <div style="padding:28px 32px;">
++      <p style="margin:0 0 16px;font-size:15px;color:#222;">Hi${to_name ? ` <strong>${to_name}</strong>` : ""},</p>
++      <div style="background:#f9f5fb;border-left:4px solid #7B2D8B;border-radius:6px;padding:14px 18px;margin-bottom:20px;font-size:14px;color:#333;line-height:1.6;">
++        <strong>${granted_by_name}</strong> has given you ledger access to <strong>${dealer_name}</strong>.
++        You can now see its outstanding balance, orders and full CRM detail in the Eltop Staff app — not just check in there.
++      </div>
++      <div style="text-align:center;margin-bottom:8px;">
++        <a href="https://www.eltopbyembassy.com/staff/sales" style="display:inline-block;background:#7B2D8B;color:#fff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 28px;border-radius:8px;">
++          Open My Dealers →
++        </a>
++      </div>
++      <p style="margin:20px 0 0;font-size:12px;color:#888;">This access stays active until it's revoked — no action needed from you.</p>
++    </div>
++    <div style="background:#f9f9f9;padding:16px 32px;text-align:center;border-top:1px solid #eee;">
++      <div style="font-size:11px;color:#aaa;">© ${new Date().getFullYear()} Eltop by Embassy. All rights reserved.</div>
++    </div>
++  </div>
++</body>
++</html>`;
++
++    const res = await fetch("https://api.resend.com/emails", {
++      method: "POST",
++      headers: {
++        Authorization: `Bearer ${RESEND_API_KEY}`,
++        "Content-Type": "application/json",
++      },
++      body: JSON.stringify({
++        from: FROM_EMAIL,
++        to: [to_email],
++        subject: `You've been given access to ${dealer_name}'s ledger`,
++        html,
++      }),
++    });
++
++    const resBody = await res.json();
++    if (!res.ok) {
++      console.error("Resend error:", resBody);
++      return new Response(JSON.stringify({ error: resBody }), { status: 502 });
++    }
++
++    return new Response(
++      JSON.stringify({ success: true, resend_id: resBody.id }),
++      { headers: { "Content-Type": "application/json" } }
++    );
++  } catch (err) {
++    console.error("Edge function error:", err);
++    return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
++  }
++});
+diff --git a/supabase/migrations/dealer_access_control.sql b/supabase/migrations/dealer_access_control.sql
+new file mode 100644
+index 0000000..98d212d
+--- /dev/null
++++ b/supabase/migrations/dealer_access_control.sql
+@@ -0,0 +1,959 @@
++-- dealer_access_control.sql
++--
++-- Implements the "Dealer Visibility vs Ledger Access Control" design
++-- (see project doc Eltop_Dealer_Access_Control_Design_10Sep2026.md,
++-- finalized 10 Sep 2026). Splits what used to be one bundled gate
++-- (profiles.assigned_sales_rep, cascaded through the Sales hierarchy)
++-- into two independent things:
++--
++--   R1/R2 — visibility + check-in become UNIVERSAL: every active Sales
++--   staff member sees every dealer (real or field-added) and can check
++--   in/out anywhere, regardless of who owns/added it.
++--
++--   R3/R4 — the LEDGER (Overview/Ledger/Orders/Insights — outstanding,
++--   credit limit, discounts, order history) stays restricted to the
++--   owner, whoever's above the owner in the hierarchy (unchanged from
++--   today's cascade), or anyone explicitly granted access. Grant/revoke
++--   power belongs to Senior Sales Associate (scoped to their own
++--   ledger-visible dealers + their own reports) and Senior Sales
++--   Executive (full override, any dealer, any Sales staff member).
++--
++-- Run in Supabase SQL Editor, top to bottom.
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 1. dealer_access_grants — who's been granted ledger access to what
++-- ═══════════════════════════════════════════════════════════════════════
++
++create table if not exists public.dealer_access_grants (
++  id            uuid primary key default gen_random_uuid(),
++  dealer_id     uuid not null references public.profiles(id) on delete cascade,
++  grantee_email text not null references public.staff_profiles(email),
++  granted_by    text not null references public.staff_profiles(email),
++  granted_at    timestamptz not null default now(),
++  revoked_at    timestamptz,        -- soft-delete; keeps a full audit trail
++  revoked_by    text references public.staff_profiles(email),
++  unique (dealer_id, grantee_email)
++);
++
++create index if not exists idx_dealer_access_grants_dealer on public.dealer_access_grants(dealer_id);
++create index if not exists idx_dealer_access_grants_grantee on public.dealer_access_grants(grantee_email);
++
++alter table public.dealer_access_grants enable row level security;
++-- No policies — SECURITY DEFINER functions only, same pattern as dealer_field_adds.
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 2. staff_notifications — lightweight in-app notification feed
++-- ═══════════════════════════════════════════════════════════════════════
++
++create table if not exists public.staff_notifications (
++  id             uuid primary key default gen_random_uuid(),
++  recipient_email text not null references public.staff_profiles(email) on delete cascade,
++  kind           text not null default 'ledger_access_granted',
++  title          text not null,
++  body           text,
++  dealer_id      uuid references public.profiles(id) on delete set null,
++  created_at     timestamptz not null default now(),
++  read_at        timestamptz
++);
++
++create index if not exists idx_staff_notifications_recipient on public.staff_notifications(recipient_email, read_at);
++
++alter table public.staff_notifications enable row level security;
++-- No policies — SECURITY DEFINER functions only.
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 3. _dealer_has_ledger_access() — shared R3 formula, used everywhere
++--    below so this logic lives in exactly one place.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public._dealer_has_ledger_access(
++  p_dealer_id    uuid,
++  p_viewer_email text,
++  p_viewer_role  text
++)
++returns boolean
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select
++    exists (
++      select 1 from public.profiles p
++      where p.id = p_dealer_id
++        and p.deleted_at is null
++        and (
++          p.assigned_sales_rep = p_viewer_email
++          or (p_viewer_role = 'senior_sales_associate' and p.assigned_sales_rep in (
++                select sp.email from public.staff_profiles sp where sp.reports_to = p_viewer_email
++              ))
++          or (p_viewer_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++                select sp.email from public.staff_profiles sp where sp.department = 'Sales'
++              ))
++        )
++    )
++    or exists (
++      select 1 from public.dealer_access_grants g
++      where g.dealer_id = p_dealer_id
++        and g.grantee_email = p_viewer_email
++        and g.revoked_at is null
++    );
++$$;
++
++grant execute on function public._dealer_has_ledger_access(uuid, text, text) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 4. get_my_dealers() — R1: universal directory + has_ledger_access flag
++--    New output columns, so the old signature must be dropped first.
++-- ═══════════════════════════════════════════════════════════════════════
++
++drop function if exists public.get_my_dealers();
++
++create or replace function public.get_my_dealers()
++returns table (
++  id          uuid,
++  name        text,
++  dealer_code text,
++  territory   jsonb,
++  outstanding numeric,           -- null when the viewer has no ledger access (R3) — never sent to the client otherwise
++  dealer_kind text,              -- 'profile' | 'field_pending' | 'field_approved'
++  alias_name  text,
++  has_ledger_access boolean,
++  owner_name  text               -- resolved owner (profile) / added-by (field) name, for display
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select * from (
++      select
++        p.id,
++        coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as name,
++        p.dealer_code,
++        to_jsonb(p.territory) as territory,
++        case when public._dealer_has_ledger_access(p.id, v_email, v_role)
++             then coalesce(led.balance, 0) else null end as outstanding,
++        'profile'::text as dealer_kind,
++        null::text as alias_name,
++        public._dealer_has_ledger_access(p.id, v_email, v_role) as has_ledger_access,
++        coalesce(osp.name, p.assigned_sales_rep) as owner_name
++      from public.profiles p
++      left join public.staff_profiles osp on osp.email = p.assigned_sales_rep
++      left join (
++        select dealer_id,
++          sum(case
++                when type = 'order' or (type = 'journal' and dr_dealer) then amount
++                when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
++                else 0
++              end) as balance
++        from public.dealer_ledger
++        group by dealer_id
++      ) led on led.dealer_id = p.id
++      where p.deleted_at is null
++      -- R1 — universal directory: every active Sales staff member sees
++      -- every real dealer now, regardless of assigned_sales_rep. Ownership
++      -- only decides has_ledger_access below, not whether the row shows up.
++
++      union all
++
++      select
++        dfa.id,
++        dfa.shop_name as name,
++        'NEW'::text as dealer_code,
++        null::jsonb as territory,
++        0::numeric as outstanding,
++        ('field_' || dfa.status)::text as dealer_kind,
++        dfa.alias_name,
++        true as has_ledger_access,  -- field leads have no ledger to gate
++        coalesce(asp.name, dfa.added_by_email) as owner_name
++      from public.dealer_field_adds dfa
++      left join public.staff_profiles asp on asp.email = dfa.added_by_email
++      where dfa.status <> 'rejected'
++      -- Universal here too (R1) — every rep's pending/approved field leads
++      -- now show to every rep, not just whoever added it. Rejected leads
++      -- stay excluded from the list (R1a instead surfaces them as a
++      -- duplicate-phone-match warning at add-time — see
++      -- check_duplicate_dealer_phone below).
++    ) combined
++    order by name;
++end;
++$$;
++
++grant execute on function public.get_my_dealers() to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 5. get_dealer_detail() — universal profile visibility, ledger fields
++--    gated on has_ledger_access. New output columns, drop first.
++-- ═══════════════════════════════════════════════════════════════════════
++
++drop function if exists public.get_dealer_detail(uuid);
++
++create or replace function public.get_dealer_detail(p_dealer_id uuid)
++returns table (
++  id            uuid,
++  name          text,
++  dealer_code   text,
++  phone         text,
++  phone2        text,
++  email         text,
++  address       text,
++  shop_address  text,
++  gstin         text,
++  territory     jsonb,
++  credit_limit  numeric,
++  discount1     numeric,
++  discount2     numeric,
++  outstanding   numeric,
++  has_ledger_access boolean,
++  owner_email   text,
++  owner_name    text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_has_access boolean;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  -- R2 — profile visibility is universal now: any active Sales staff
++  -- member can open any non-deleted dealer's profile page. Only the
++  -- ledger-shaped fields below are gated on has_ledger_access.
++  if not exists (select 1 from public.profiles p where p.id = p_dealer_id and p.deleted_at is null) then
++    return;
++  end if;
++
++  v_has_access := public._dealer_has_ledger_access(p_dealer_id, v_email, v_role);
++
++  return query
++    select
++      p.id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as name,
++      p.dealer_code,
++      p.phone,
++      p.phone2,
++      p.email,
++      coalesce(nullif(p.shop_address, ''), p.address) as address,
++      p.shop_address,
++      p.gstin,
++      to_jsonb(p.territory) as territory,
++      case when v_has_access then p.credit_limit else null end as credit_limit,
++      case when v_has_access then p.discount1 else null end as discount1,
++      case when v_has_access then p.discount2 else null end as discount2,
++      case when v_has_access then coalesce(led.balance, 0) else null end as outstanding,
++      v_has_access as has_ledger_access,
++      p.assigned_sales_rep as owner_email,
++      coalesce(osp.name, p.assigned_sales_rep) as owner_name
++    from public.profiles p
++    left join public.staff_profiles osp on osp.email = p.assigned_sales_rep
++    left join (
++      select dl.dealer_id,
++        sum(case
++              when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
++              when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
++              else 0
++            end) as balance
++      from public.dealer_ledger dl
++      where dl.dealer_id = p_dealer_id
++      group by dl.dealer_id
++    ) led on led.dealer_id = p.id
++    where p.id = p_dealer_id;
++end;
++$$;
++
++grant execute on function public.get_dealer_detail(uuid) to authenticated;
++
++-- get_dealer_orders() — Orders tab is ledger data (R3), gated the same
++-- way. Params/output columns unchanged, so CREATE OR REPLACE is enough.
++
++create or replace function public.get_dealer_orders(p_dealer_id uuid, p_limit int default 20)
++returns table (
++  id         uuid,
++  status     text,
++  total      numeric,
++  created_at timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  if not public._dealer_has_ledger_access(p_dealer_id, v_email, v_role) then
++    return;
++  end if;
++
++  return query
++    select o.id, o.status, o.total, o.created_at
++    from public.orders o
++    where o.dealer_id = p_dealer_id
++    order by o.created_at desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_dealer_orders(uuid, int) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 6. start_dealer_visit() — R2: universal check-in, no ownership gate.
++--    Same signature as before, CREATE OR REPLACE just swaps the body.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.start_dealer_visit(
++  p_dealer_id uuid,
++  p_latitude numeric,
++  p_longitude numeric
++)
++returns table (success boolean, message text, visit_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_is_field boolean := false;
++  v_today date;
++  v_day_ended timestamptz;
++  v_dealer_lat double precision;
++  v_dealer_lng double precision;
++  v_distance double precision;
++  v_open_id uuid;
++  v_open_dealer_id uuid;
++  v_open_field_id uuid;
++  v_new_id uuid;
++begin
++  select sp.email into v_email
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to check in'::text, null::uuid;
++    return;
++  end if;
++
++  v_today := (now() at time zone 'Asia/Kolkata')::date;
++
++  select sds.ended_at into v_day_ended
++  from public.sales_day_starts sds
++  where sds.staff_email = v_email and sds.work_date = v_today;
++
++  if v_day_ended is not null then
++    return query select false, 'your day has ended — start a new day tomorrow'::text, null::uuid;
++    return;
++  end if;
++
++  if not exists (
++    select 1 from public.sales_day_starts sds
++    where sds.staff_email = v_email and sds.work_date = v_today
++  ) then
++    return query select false, 'start your day first'::text, null::uuid;
++    return;
++  end if;
++
++  -- R2 — universal check-in: any active Sales staff member can check in
++  -- at any dealer, real or field-added, regardless of who owns/added it.
++  -- The only requirement is that the dealer actually exists (and, for a
++  -- field lead, hasn't since been rejected).
++  if exists (select 1 from public.profiles p where p.id = p_dealer_id and p.deleted_at is null) then
++    v_is_field := false;
++  elsif exists (select 1 from public.dealer_field_adds dfa where dfa.id = p_dealer_id and dfa.status <> 'rejected') then
++    v_is_field := true;
++  else
++    return query select false, 'dealer not found'::text, null::uuid;
++    return;
++  end if;
++
++  -- Only one open visit per rep at a time.
++  select sv.id, sv.dealer_id, sv.field_dealer_id into v_open_id, v_open_dealer_id, v_open_field_id
++  from public.sales_visits sv
++  where sv.staff_email = v_email and sv.status = 'open'
++  limit 1;
++
++  if v_open_id is not null then
++    if (not v_is_field and v_open_dealer_id = p_dealer_id) or (v_is_field and v_open_field_id = p_dealer_id) then
++      return query select true, 'already checked in'::text, v_open_id;
++      return;
++    else
++      return query select false, 'you are already checked in at another dealer — check out there first'::text, null::uuid;
++      return;
++    end if;
++  end if;
++
++  if v_is_field then
++    select dfa.location_lat, dfa.location_lng into v_dealer_lat, v_dealer_lng
++    from public.dealer_field_adds dfa where dfa.id = p_dealer_id;
++  else
++    select p.location_lat, p.location_lng into v_dealer_lat, v_dealer_lng
++    from public.profiles p where p.id = p_dealer_id;
++  end if;
++
++  if v_dealer_lat is null or v_dealer_lng is null then
++    if not v_is_field then
++      update public.profiles
++      set location_lat = p_latitude, location_lng = p_longitude
++      where id = p_dealer_id;
++    end if;
++  else
++    v_distance := public._haversine_meters(v_dealer_lat, v_dealer_lng, p_latitude::double precision, p_longitude::double precision);
++    if v_distance > 100 then
++      return query select false,
++        format('you are about %s m from this dealer — you must be within 100m to check in', round(v_distance)::int)::text,
++        null::uuid;
++      return;
++    end if;
++  end if;
++
++  insert into public.sales_visits (
++    dealer_id, field_dealer_id, staff_email, status,
++    check_in_at, check_in_lat, check_in_lng,
++    visited_at, latitude, longitude
++  )
++  values (
++    case when v_is_field then null else p_dealer_id end,
++    case when v_is_field then p_dealer_id else null end,
++    v_email, 'open',
++    now(), p_latitude, p_longitude,
++    now(), p_latitude, p_longitude
++  )
++  returning id into v_new_id;
++
++  return query select true, 'checked in'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.start_dealer_visit(uuid, numeric, numeric) to authenticated;
++
++-- get_dealer_visits() — the Visits tab's "recent visits here" list.
++-- Check-in is universal now (R2), so this needs to be too — otherwise a
++-- rep who isn't the owner could check in but then see an empty visit
++-- history on the same dealer, including their own visit they just
++-- logged. Same params/output columns as before, just drops the
++-- ownership gate — CREATE OR REPLACE is enough.
++
++create or replace function public.get_dealer_visits(p_dealer_id uuid, p_limit int default 10)
++returns table (
++  id              uuid,
++  staff_email     text,
++  staff_name      text,
++  notes           text,
++  latitude        numeric,
++  longitude       numeric,
++  visited_at      timestamptz,
++  status          text,
++  check_in_at     timestamptz,
++  check_out_at    timestamptz,
++  duty_on_photo_url text,
++  board_photo_url text,
++  shop_photo_url  text,
++  card_photo_url  text,
++  video_url       text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  if not exists (select 1 from public.profiles p where p.id = p_dealer_id and p.deleted_at is null) then
++    return;
++  end if;
++
++  return query
++    select
++      sv.id, sv.staff_email,
++      coalesce(sp.name, sv.staff_email) as staff_name,
++      sv.notes, sv.latitude, sv.longitude, sv.visited_at,
++      sv.status, sv.check_in_at, sv.check_out_at,
++      sv.duty_on_photo_url, sv.board_photo_url, sv.shop_photo_url, sv.card_photo_url, sv.video_url
++    from public.sales_visits sv
++    left join public.staff_profiles sp on sp.email = sv.staff_email
++    where sv.dealer_id = p_dealer_id
++    order by coalesce(sv.check_in_at, sv.visited_at) desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_dealer_visits(uuid, int) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 7. check_duplicate_dealer_phone() — R1a: distinguish a rejected-lead
++--    match with its own match_type, so the client can show a specifically-
++--    worded "this might be a previously-rejected dealer" caution instead
++--    of folding it into the generic duplicate warning. Output columns
++--    changed, so the old signature must be dropped first.
++-- ═══════════════════════════════════════════════════════════════════════
++
++drop function if exists public.check_duplicate_dealer_phone(text, text);
++
++create or replace function public.check_duplicate_dealer_phone(
++  p_whatsapp  text default null,
++  p_alternate text default null
++)
++returns table (
++  source         text,   -- 'field' | 'profile'
++  id             uuid,
++  name           text,
++  matched_number text,
++  extra          text,   -- who added it / dealer code, for context
++  match_type     text,   -- 'rejected' | 'existing'
++  created_at     timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_w     text := nullif(trim(coalesce(p_whatsapp, '')), '');
++  v_a     text := nullif(trim(coalesce(p_alternate, '')), '');
++begin
++  if not exists (select 1 from public.staff_profiles sp where sp.id = v_uid) then
++    return;
++  end if;
++
++  if v_w is null and v_a is null then
++    return;
++  end if;
++
++  return query
++    select
++      'field'::text,
++      dfa.id,
++      dfa.shop_name,
++      case
++        when dfa.whatsapp_number in (v_w, v_a) then dfa.whatsapp_number
++        else dfa.alternate_number
++      end,
++      'added by ' || coalesce(sp.name, dfa.added_by_email),
++      case when dfa.status = 'rejected' then 'rejected' else 'existing' end,
++      dfa.created_at
++    from public.dealer_field_adds dfa
++    left join public.staff_profiles sp on sp.email = dfa.added_by_email
++    where (v_w is not null and (dfa.whatsapp_number = v_w or dfa.alternate_number = v_w))
++       or (v_a is not null and (dfa.whatsapp_number = v_a or dfa.alternate_number = v_a))
++
++    union all
++
++    select
++      'profile'::text,
++      p.id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name),
++      p.phone,
++      coalesce(p.dealer_code, 'dealer'),
++      'existing'::text,
++      p.created_at
++    from public.profiles p
++    where p.deleted_at is null
++      and p.phone is not null
++      and ((v_w is not null and p.phone = v_w) or (v_a is not null and p.phone = v_a));
++end;
++$$;
++
++grant execute on function public.check_duplicate_dealer_phone(text, text) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 8. get_grantable_staff() — who a Senior can pick from, for a given
++--    dealer's "+ Grant access" multi-select. Server re-validates the
++--    caller's own tier + access every time (R4 — never trust the client).
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.get_grantable_staff(p_dealer_id uuid)
++returns table (email text, name text, role text)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null or v_role not in ('senior_sales_associate', 'senior_sales_executive') then
++    return;
++  end if;
++
++  if not public._dealer_has_ledger_access(p_dealer_id, v_email, v_role) then
++    return;
++  end if;
++
++  if v_role = 'senior_sales_executive' then
++    -- R4 — full override: any active Sales staff member (except self).
++    return query
++      select sp.email, sp.name, sp.role
++      from public.staff_profiles sp
++      where sp.department = 'Sales' and sp.is_active and sp.email <> v_email
++      order by sp.name;
++  else
++    -- R4 — Senior Sales Associate: only staff who report to them.
++    return query
++      select sp.email, sp.name, sp.role
++      from public.staff_profiles sp
++      where sp.reports_to = v_email and sp.is_active
++      order by sp.name;
++  end if;
++end;
++$$;
++
++grant execute on function public.get_grantable_staff(uuid) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 9. grant_dealer_access() — R4, multi-grantee in one call. Every
++--    eligibility check re-runs server-side; the client's list of emails
++--    is never trusted as-is.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.grant_dealer_access(
++  p_dealer_id       uuid,
++  p_grantee_emails  text[]
++)
++returns table (success boolean, message text, granted_count int)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_dealer_name text;
++  v_ge    text;
++  v_eligible int;
++  v_granted int := 0;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, 0; return;
++  end if;
++
++  if v_role not in ('senior_sales_associate', 'senior_sales_executive') then
++    return query select false, 'you do not have permission to grant access'::text, 0; return;
++  end if;
++
++  if not public._dealer_has_ledger_access(p_dealer_id, v_email, v_role) then
++    return query select false, 'you do not have ledger access to this dealer yourself'::text, 0; return;
++  end if;
++
++  if p_grantee_emails is null or array_length(p_grantee_emails, 1) is null then
++    return query select false, 'pick at least one person'::text, 0; return;
++  end if;
++
++  select coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name)
++  into v_dealer_name
++  from public.profiles p where p.id = p_dealer_id;
++
++  foreach v_ge in array p_grantee_emails loop
++    if v_role = 'senior_sales_executive' then
++      select count(*) into v_eligible from public.staff_profiles sp
++        where sp.email = v_ge and sp.department = 'Sales' and sp.is_active and sp.email <> v_email;
++    else
++      select count(*) into v_eligible from public.staff_profiles sp
++        where sp.email = v_ge and sp.reports_to = v_email and sp.is_active;
++    end if;
++
++    if v_eligible = 0 then
++      continue; -- silently skip anyone who isn't actually eligible for this granter
++    end if;
++
++    insert into public.dealer_access_grants (dealer_id, grantee_email, granted_by)
++    values (p_dealer_id, v_ge, v_email)
++    on conflict (dealer_id, grantee_email)
++    do update set granted_by = excluded.granted_by, granted_at = now(), revoked_at = null, revoked_by = null;
++
++    insert into public.staff_notifications (recipient_email, kind, title, body, dealer_id)
++    values (
++      v_ge,
++      'ledger_access_granted',
++      'You''ve been given ledger access',
++      coalesce(v_email, 'Someone') || ' granted you access to ' || coalesce(v_dealer_name, 'a dealer') || '''s ledger.',
++      p_dealer_id
++    );
++
++    v_granted := v_granted + 1;
++  end loop;
++
++  if v_granted = 0 then
++    return query select false, 'none of the selected people are eligible for this grant'::text, 0; return;
++  end if;
++
++  return query select true, format('access granted to %s %s', v_granted, case when v_granted = 1 then 'person' else 'people' end)::text, v_granted;
++end;
++$$;
++
++grant execute on function public.grant_dealer_access(uuid, text[]) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 10. revoke_dealer_access() — R4: only whoever granted it, or anyone
++--     senior enough to have granted it themselves.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.revoke_dealer_access(
++  p_dealer_id     uuid,
++  p_grantee_email text
++)
++returns table (success boolean, message text)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++  v_grant record;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text; return;
++  end if;
++
++  if v_role not in ('senior_sales_associate', 'senior_sales_executive') then
++    return query select false, 'you do not have permission to revoke access'::text; return;
++  end if;
++
++  select * into v_grant from public.dealer_access_grants g
++    where g.dealer_id = p_dealer_id and g.grantee_email = p_grantee_email and g.revoked_at is null;
++
++  if not found then
++    return query select false, 'no active grant found'::text; return;
++  end if;
++
++  if v_role = 'senior_sales_associate' and v_grant.granted_by <> v_email then
++    return query select false, 'you can only revoke access you yourself granted'::text; return;
++  end if;
++
++  update public.dealer_access_grants
++  set revoked_at = now(), revoked_by = v_email
++  where dealer_id = p_dealer_id and grantee_email = p_grantee_email and revoked_at is null;
++
++  return query select true, 'access revoked'::text;
++end;
++$$;
++
++grant execute on function public.revoke_dealer_access(uuid, text) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 11. get_my_team_access() — powers the new Team & Access screen.
++--     Senior tiers only — every dealer the caller currently has ledger
++--     access to (own + team's + anything granted to them), with the
++--     current grantee list for each.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.get_my_team_access()
++returns table (
++  dealer_id     uuid,
++  dealer_name   text,
++  dealer_code   text,
++  outstanding   numeric,
++  owner_email   text,
++  owner_name    text,
++  is_owner      boolean,
++  grants        jsonb
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp where sp.id = v_uid;
++
++  if v_email is null or v_role not in ('senior_sales_associate', 'senior_sales_executive') then
++    return;
++  end if;
++
++  return query
++    select
++      p.id as dealer_id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as dealer_name,
++      p.dealer_code as dealer_code,
++      coalesce(led.balance, 0) as outstanding,
++      p.assigned_sales_rep as owner_email,
++      coalesce(osp.name, p.assigned_sales_rep) as owner_name,
++      (p.assigned_sales_rep = v_email) as is_owner,
++      coalesce((
++        select jsonb_agg(jsonb_build_object(
++          'email', g.grantee_email,
++          'name', coalesce(gsp.name, g.grantee_email),
++          'granted_by', g.granted_by,
++          'granted_by_name', coalesce(bsp.name, g.granted_by),
++          'granted_at', g.granted_at
++        ) order by g.granted_at)
++        from public.dealer_access_grants g
++        left join public.staff_profiles gsp on gsp.email = g.grantee_email
++        left join public.staff_profiles bsp on bsp.email = g.granted_by
++        where g.dealer_id = p.id and g.revoked_at is null
++      ), '[]'::jsonb) as grants
++    from public.profiles p
++    left join public.staff_profiles osp on osp.email = p.assigned_sales_rep
++    left join (
++      select dealer_id,
++        sum(case
++              when type = 'order' or (type = 'journal' and dr_dealer) then amount
++              when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
++              else 0
++            end) as balance
++      from public.dealer_ledger
++      group by dealer_id
++    ) led on led.dealer_id = p.id
++    where p.deleted_at is null
++      and public._dealer_has_ledger_access(p.id, v_email, v_role)
++    order by dealer_name;
++end;
++$$;
++
++grant execute on function public.get_my_team_access() to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 12. Notifications — in-app half of the "in app alert plus notification
++--     on email" decision (§5.4 of the design doc). Email half is a
++--     separate follow-up (needs a new Resend edge function).
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public.get_my_notifications(p_limit int default 30)
++returns table (
++  id          uuid,
++  kind        text,
++  title       text,
++  body        text,
++  dealer_id   uuid,
++  dealer_name text,
++  created_at  timestamptz,
++  read_at     timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select
++      n.id, n.kind, n.title, n.body, n.dealer_id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name),
++      n.created_at, n.read_at
++    from public.staff_notifications n
++    left join public.profiles p on p.id = n.dealer_id
++    where n.recipient_email = v_email
++    order by n.created_at desc
++    limit greatest(p_limit, 1);
++end;
++$$;
++
++grant execute on function public.get_my_notifications(int) to authenticated;
++
++create or replace function public.mark_notification_read(p_id uuid)
++returns table (success boolean)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false; return;
++  end if;
++
++  update public.staff_notifications
++  set read_at = now()
++  where id = p_id and recipient_email = v_email and read_at is null;
++
++  return query select true;
++end;
++$$;
++
++grant execute on function public.mark_notification_read(uuid) to authenticated;
++
++create or replace function public.mark_all_notifications_read()
++returns table (success boolean)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false; return;
++  end if;
++
++  update public.staff_notifications
++  set read_at = now()
++  where recipient_email = v_email and read_at is null;
++
++  return query select true;
++end;
++$$;
++
++grant execute on function public.mark_all_notifications_read() to authenticated;
+-- 
+2.43.0
+

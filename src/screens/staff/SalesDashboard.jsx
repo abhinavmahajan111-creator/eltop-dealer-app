@@ -5,6 +5,7 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { staffRoleLabel } from "../../utils/staffRoles";
 import { featuresForRole } from "../../utils/staffFeatures";
 import DashboardAiCard from "../../components/staff/DashboardAiCard";
+import NotificationBell from "../../components/staff/NotificationBell";
 import { getCurrentPosition } from "../../utils/visitMedia";
 
 // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
@@ -85,11 +86,19 @@ function DealerRow({ dealer, onClick }) {
         </div>
         <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
           {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
+          {dealer.owner_name ? ` · ${dealer.dealer_kind && dealer.dealer_kind !== "profile" ? "added by" : "owner"}: ${dealer.owner_name}` : ""}
         </div>
       </div>
-      <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
-        ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
-      </div>
+      {dealer.has_ledger_access === false ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, background: "#f3f3f3", borderRadius: 999, padding: "4px 10px" }}>
+          <span style={{ fontSize: 11 }}>🔒</span>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#888" }}>Locked</span>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
+          ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
+        </div>
+      )}
       <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
     </div>
   );
@@ -409,12 +418,15 @@ export default function SalesDashboard() {
             />
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-            <button
-              onClick={handleLogout}
-              style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
-            >
-              Log out
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <NotificationBell dark />
+              <button
+                onClick={handleLogout}
+                style={{ background: "rgba(255,255,255,0.15)", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 8, padding: "7px 14px", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer" }}
+              >
+                Log out
+              </button>
+            </div>
             <button
               onClick={() => setAiOpen(true)}
               style={{
@@ -558,7 +570,17 @@ export default function SalesDashboard() {
           <NavTile icon="🗓️" title="Attendance" onClick={() => navigate("/staff/sales/attendance")} />
         </div>
 
-        <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
+        <div ref={dealersSectionRef} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 12px" }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>My Dealers / Parties</div>
+          {(staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive") && (
+            <div
+              onClick={() => navigate("/staff/sales/team-access")}
+              style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
+            >
+              🔐 Team &amp; Access ›
+            </div>
+          )}
+        </div>
 
         <button
           onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); setDupMatches([]); }}
@@ -607,12 +629,27 @@ export default function SalesDashboard() {
             {checkingDup && (
               <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
             )}
-            {!checkingDup && dupMatches.length > 0 && (
+            {!checkingDup && dupMatches.filter((m) => m.match_type === "rejected").length > 0 && (
+              <div style={{ background: "#fdeaea", border: "1.5px solid #eec2c2", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#a53535", marginBottom: 4 }}>
+                  🔁 This might be a previously rejected dealer
+                </div>
+                {dupMatches.filter((m) => m.match_type === "rejected").map((m, i) => (
+                  <div key={i} style={{ fontSize: 11.5, color: "#8a4040", marginBottom: 2 }}>
+                    "{m.name}" ({m.matched_number}) — {m.extra}, rejected
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: "#a53535", marginTop: 4 }}>
+                  Please check before adding again — if the situation has genuinely changed, go ahead.
+                </div>
+              </div>
+            )}
+            {!checkingDup && dupMatches.filter((m) => m.match_type !== "rejected").length > 0 && (
               <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
                   ⚠️ This number is already on file
                 </div>
-                {dupMatches.map((m, i) => (
+                {dupMatches.filter((m) => m.match_type !== "rejected").map((m, i) => (
                   <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
                     "{m.name}" ({m.matched_number}) — {m.extra}
                   </div>

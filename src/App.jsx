@@ -25,6 +25,7 @@ import StaffHome from "./screens/StaffHome";
 import SalesDashboard from "./screens/staff/SalesDashboard";
 import DealerDetail from "./screens/staff/DealerDetail";
 import FieldDealerDetail from "./screens/staff/FieldDealerDetail";
+import TeamAccess from "./screens/staff/TeamAccess";
 import DayCheckIn from "./screens/staff/DayCheckIn";
 import Attendance from "./screens/staff/Attendance";
 import ComingSoon from "./screens/staff/ComingSoon";
@@ -117,6 +118,7 @@ export default function App() {
         <Route path="/staff/sales/attendance" element={<Attendance />} />
         <Route path="/staff/sales/dealer/:id" element={<DealerDetail />} />
         <Route path="/staff/sales/field-dealer/:id" element={<FieldDealerDetail />} />
+        <Route path="/staff/sales/team-access" element={<TeamAccess />} />
         <Route path="/staff/sales/coming-soon/:key" element={<ComingSoon />} />
         <Route path="/staff/after-sales" element={<StaffHome />} />
         <Route path="/staff/dispatch" element={<StaffHome />} />
