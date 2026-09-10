@@ -255,6 +255,7 @@ export default function SalesDashboard() {
   const [newWhatsapp, setNewWhatsapp] = useState("");
   const [newAlternate, setNewAlternate] = useState("");
   const [newAddress, setNewAddress] = useState("");
+  const [newRegistrationType, setNewRegistrationType] = useState("");
   const [addingDealer, setAddingDealer] = useState(false);
   const [addDealerError, setAddDealerError] = useState(null);
   const [dupMatches, setDupMatches] = useState([]);
@@ -314,6 +315,7 @@ export default function SalesDashboard() {
         p_whatsapp_number: newWhatsapp.trim(),
         p_alternate_number: newAlternate.trim() || null,
         p_address: newAddress.trim() || null,
+        p_registration_type: newRegistrationType || null,
         p_latitude: pos.latitude,
         p_longitude: pos.longitude,
       });
@@ -321,7 +323,7 @@ export default function SalesDashboard() {
       if (error || !result?.success) {
         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
       } else {
-        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress(""); setNewRegistrationType("");
         setDupMatches([]);
         setShowAddDealer(false);
         await loadDealers();
@@ -624,8 +626,32 @@ export default function SalesDashboard() {
               value={newAddress}
               onChange={(e) => setNewAddress(e.target.value)}
               placeholder="Address (optional)"
-              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
+              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
             />
+
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>GST registration (optional)</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              {["registered", "unregistered"].map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setNewRegistrationType((v) => (v === opt ? "" : opt))}
+                  style={{
+                    flex: 1, padding: "9px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                    border: newRegistrationType === opt ? "1.5px solid #7B2D8B" : "1.5px solid #eadcec",
+                    background: newRegistrationType === opt ? "#f3e6f6" : "#fff",
+                    color: newRegistrationType === opt ? "#7B2D8B" : "#666",
+                  }}
+                >
+                  {opt === "registered" ? "✅ Registered" : "Unregistered"}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 11, color: "#a56a00", background: "#fff4e0", border: "1px solid #f0c470", borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
+              📍 Location is captured from where you are right now — you should be at the shop's correct location only.
+            </div>
+
             <button
               onClick={handleAddDealer}
               disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}

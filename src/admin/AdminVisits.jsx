@@ -216,7 +216,18 @@ export default function AdminVisits() {
             {fieldDealers.map((fd) => (
               <div key={fd.id} style={{ background: "#fff", border: "1px solid #f2e6c8", borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    {fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}
+                    {fd.registration_type && (
+                      <span style={{
+                        fontSize: 9.5, fontWeight: 800, borderRadius: 999, padding: "2px 7px",
+                        color: fd.registration_type === "registered" ? "#2fa84f" : "#888",
+                        background: fd.registration_type === "registered" ? "#e6f7ec" : "#f0f0f0",
+                      }}>
+                        {fd.registration_type === "registered" ? "✅ Registered" : "Unregistered"}
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
                     {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
                   </div>
