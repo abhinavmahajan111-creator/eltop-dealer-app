@@ -1,0 +1,381 @@
+From 0ae63a361e95a60ce6ff43a241667ae3de9243cc Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 10 Sep 2026 04:44:42 +0000
+Subject: [PATCH] Add alias name to field-added dealers, shown in brackets next
+ to shop name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Reps often know a shop by "owner surname + area" (e.g. "Sharma
+Shahdra", "Verma Bhajanpura") rather than its exact signboard name —
+also exactly what disambiguates two different shops both typed in as
+"Sharma Electric". Adds an optional Alias field to both "+ Add New
+Dealer" forms (Dashboard and Check-In tab), shown as "Shop Name (Alias)"
+wherever a field-added dealer is listed (dealer lists, admin's
+submissions queue), and included in the rep's own dealer search.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminVisits.jsx                     |   2 +-
+ src/screens/staff/DayCheckIn.jsx              |  18 +-
+ src/screens/staff/SalesDashboard.jsx          |  14 +-
+ .../dealer_field_adds_alias_name.sql          | 215 ++++++++++++++++++
+ 4 files changed, 241 insertions(+), 8 deletions(-)
+ create mode 100644 supabase/migrations/dealer_field_adds_alias_name.sql
+
+diff --git a/src/admin/AdminVisits.jsx b/src/admin/AdminVisits.jsx
+index 4fe4e5d..e6e574b 100644
+--- a/src/admin/AdminVisits.jsx
++++ b/src/admin/AdminVisits.jsx
+@@ -216,7 +216,7 @@ export default function AdminVisits() {
+             {fieldDealers.map((fd) => (
+               <div key={fd.id} style={{ background: "#fff", border: "1px solid #f2e6c8", borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                 <div>
+-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}</div>
++                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}</div>
+                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                     {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
+                   </div>
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 03e214b..6712250 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -89,6 +89,7 @@ export default function DayCheckIn() {
+   const [showAddDealer, setShowAddDealer] = useState(false);
+   const [newShopName, setNewShopName] = useState("");
+   const [newOwnerName, setNewOwnerName] = useState("");
++  const [newAlias, setNewAlias] = useState("");
+   const [newWhatsapp, setNewWhatsapp] = useState("");
+   const [newAlternate, setNewAlternate] = useState("");
+   const [newAddress, setNewAddress] = useState("");
+@@ -219,7 +220,9 @@ export default function DayCheckIn() {
+   const filteredDealers = dealers.filter((d) => {
+     if (!search.trim()) return true;
+     const q = search.trim().toLowerCase();
+-    return (d.name || "").toLowerCase().includes(q) || (d.dealer_code || "").toLowerCase().includes(q);
++    return (d.name || "").toLowerCase().includes(q)
++      || (d.dealer_code || "").toLowerCase().includes(q)
++      || (d.alias_name || "").toLowerCase().includes(q);
+   });
+ 
+   const handleStartDay = async () => {
+@@ -313,6 +316,7 @@ export default function DayCheckIn() {
+       const { data, error } = await supabase.rpc("add_field_dealer", {
+         p_shop_name: newShopName.trim(),
+         p_owner_name: newOwnerName.trim() || null,
++        p_alias_name: newAlias.trim() || null,
+         p_whatsapp_number: newWhatsapp.trim(),
+         p_alternate_number: newAlternate.trim() || null,
+         p_address: newAddress.trim() || null,
+@@ -323,7 +327,7 @@ export default function DayCheckIn() {
+       if (error || !result?.success) {
+         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+       } else {
+-        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+         setDupMatches([]);
+         setShowAddDealer(false);
+         await loadDealers();
+@@ -609,6 +613,12 @@ export default function DayCheckIn() {
+                       placeholder="Owner name (optional)"
+                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                     />
++                    <input
++                      value={newAlias}
++                      onChange={(e) => setNewAlias(e.target.value)}
++                      placeholder="Alias — e.g. Sharma Shahdra (optional)"
++                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++                    />
+                     <input
+                       value={newWhatsapp}
+                       onChange={(e) => setNewWhatsapp(e.target.value)}
+@@ -691,8 +701,8 @@ export default function DayCheckIn() {
+                           {initials(d.name)}
+                         </div>
+                         <div style={{ flex: 1, minWidth: 0 }}>
+-                          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+-                            {d.name || "Unnamed"}
++                          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
++                            {d.name || "Unnamed"}{d.alias_name ? ` (${d.alias_name})` : ""}
+                             {d.dealer_kind && d.dealer_kind !== "profile" && (
+                               <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
+                                 🆕 New{d.dealer_kind === "field_pending" ? " · pending" : ""}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index d30542a..ba24fa2 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -75,8 +75,8 @@ function DealerRow({ dealer, onClick }) {
+         {initials(dealer.name)}
+       </div>
+       <div style={{ flex: 1, minWidth: 0 }}>
+-        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+-          {dealer.name || "Unnamed"}
++        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
++          {dealer.name || "Unnamed"}{dealer.alias_name ? ` (${dealer.alias_name})` : ""}
+           {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
+             <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
+               🆕 New
+@@ -251,6 +251,7 @@ export default function SalesDashboard() {
+   const [showAddDealer, setShowAddDealer] = useState(false);
+   const [newShopName, setNewShopName] = useState("");
+   const [newOwnerName, setNewOwnerName] = useState("");
++  const [newAlias, setNewAlias] = useState("");
+   const [newWhatsapp, setNewWhatsapp] = useState("");
+   const [newAlternate, setNewAlternate] = useState("");
+   const [newAddress, setNewAddress] = useState("");
+@@ -309,6 +310,7 @@ export default function SalesDashboard() {
+       const { data, error } = await supabase.rpc("add_field_dealer", {
+         p_shop_name: newShopName.trim(),
+         p_owner_name: newOwnerName.trim() || null,
++        p_alias_name: newAlias.trim() || null,
+         p_whatsapp_number: newWhatsapp.trim(),
+         p_alternate_number: newAlternate.trim() || null,
+         p_address: newAddress.trim() || null,
+@@ -319,7 +321,7 @@ export default function SalesDashboard() {
+       if (error || !result?.success) {
+         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+       } else {
+-        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
+         setDupMatches([]);
+         setShowAddDealer(false);
+         await loadDealers();
+@@ -580,6 +582,12 @@ export default function SalesDashboard() {
+               placeholder="Owner name (optional)"
+               style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+             />
++            <input
++              value={newAlias}
++              onChange={(e) => setNewAlias(e.target.value)}
++              placeholder="Alias — e.g. Sharma Shahdra (optional)"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++            />
+             <input
+               value={newWhatsapp}
+               onChange={(e) => setNewWhatsapp(e.target.value)}
+diff --git a/supabase/migrations/dealer_field_adds_alias_name.sql b/supabase/migrations/dealer_field_adds_alias_name.sql
+new file mode 100644
+index 0000000..abd388d
+--- /dev/null
++++ b/supabase/migrations/dealer_field_adds_alias_name.sql
+@@ -0,0 +1,215 @@
++-- dealer_field_adds_alias_name.sql
++--
++-- Follow-up to dealer_field_adds.sql. Requested 10 Sept 2026: reps often
++-- know a shop by "owner surname + area" (e.g. "Sharma Shahdra", "Verma
++-- Bhajanpura") rather than its exact signboard name, and this is also
++-- exactly what disambiguates two different shops that both got typed in
++-- as "Sharma Electric". Adds an optional Alias field to the field-add
++-- form, shown in brackets next to the shop name wherever a field-added
++-- dealer is listed, and included in the rep's own dealer search.
++--
++-- Run in Supabase SQL Editor.
++
++-- ── 1. New column ─────────────────────────────────────────────────────
++
++alter table public.dealer_field_adds
++  add column if not exists alias_name text;
++
++-- ── 2. add_field_dealer() — new optional p_alias_name param ─────────────
++-- Param list changed, so the old signature must be dropped first.
++
++drop function if exists public.add_field_dealer(text, text, text, text, text, double precision, double precision);
++
++create or replace function public.add_field_dealer(
++  p_shop_name        text,
++  p_owner_name       text,
++  p_alias_name       text,
++  p_whatsapp_number  text,
++  p_alternate_number text,
++  p_address          text,
++  p_latitude         double precision,
++  p_longitude        double precision
++)
++returns table (success boolean, message text, field_dealer_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_new_id uuid;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_shop_name is null or length(trim(p_shop_name)) = 0 then
++    return query select false, 'shop name is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_whatsapp_number is null or length(trim(p_whatsapp_number)) = 0 then
++    return query select false, 'WhatsApp number is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to add a new dealer'::text, null::uuid;
++    return;
++  end if;
++
++  insert into public.dealer_field_adds (
++    shop_name, owner_name, alias_name, whatsapp_number, alternate_number, address,
++    location_lat, location_lng, added_by_email
++  )
++  values (
++    trim(p_shop_name), nullif(trim(coalesce(p_owner_name, '')), ''),
++    nullif(trim(coalesce(p_alias_name, '')), ''),
++    trim(p_whatsapp_number), nullif(trim(coalesce(p_alternate_number, '')), ''),
++    nullif(trim(coalesce(p_address, '')), ''),
++    p_latitude, p_longitude, v_email
++  )
++  returning id into v_new_id;
++
++  return query select true, 'added'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.add_field_dealer(text, text, text, text, text, text, double precision, double precision) to authenticated;
++
++-- ── 3. get_my_dealers() — surface alias_name for field-added rows ───────
++-- New output column, so the old signature must be dropped first.
++
++drop function if exists public.get_my_dealers();
++
++create or replace function public.get_my_dealers()
++returns table (
++  id          uuid,
++  name        text,
++  dealer_code text,
++  territory   jsonb,
++  outstanding numeric,
++  dealer_kind text,  -- 'profile' | 'field_pending' | 'field_approved'
++  alias_name  text
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_role  text;
++begin
++  select sp.email, sp.role into v_email, v_role
++  from public.staff_profiles sp
++  where sp.id = v_uid;
++
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    select * from (
++      select
++        p.id,
++        coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as name,
++        p.dealer_code,
++        to_jsonb(p.territory) as territory,
++        coalesce(led.balance, 0) as outstanding,
++        'profile'::text as dealer_kind,
++        null::text as alias_name
++      from public.profiles p
++      left join (
++        select dealer_id,
++          sum(case
++                when type = 'order' or (type = 'journal' and dr_dealer) then amount
++                when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
++                else 0
++              end) as balance
++        from public.dealer_ledger
++        group by dealer_id
++      ) led on led.dealer_id = p.id
++      where p.deleted_at is null
++        and (
++          (v_role = 'sales_associate' and p.assigned_sales_rep = v_email)
++          or (v_role = 'senior_sales_associate' and (
++                p.assigned_sales_rep = v_email
++                or p.assigned_sales_rep in (
++                  select email from public.staff_profiles where reports_to = v_email
++                )
++              ))
++          or (v_role = 'senior_sales_executive' and p.assigned_sales_rep in (
++                select email from public.staff_profiles where department = 'Sales'
++              ))
++        )
++
++      union all
++
++      select
++        dfa.id,
++        dfa.shop_name as name,
++        'NEW'::text as dealer_code,
++        null::jsonb as territory,
++        0::numeric as outstanding,
++        ('field_' || dfa.status)::text as dealer_kind,
++        dfa.alias_name
++      from public.dealer_field_adds dfa
++      where dfa.added_by_email = v_email and dfa.status <> 'rejected'
++    ) combined
++    order by name;
++end;
++$$;
++
++grant execute on function public.get_my_dealers() to authenticated;
++
++-- ── 4. admin_list_field_dealers() — surface alias_name too ──────────────
++
++drop function if exists public.admin_list_field_dealers(text);
++
++create or replace function public.admin_list_field_dealers(p_status text default 'pending')
++returns table (
++  id                 uuid,
++  shop_name          text,
++  owner_name         text,
++  alias_name         text,
++  whatsapp_number    text,
++  alternate_number   text,
++  address            text,
++  location_lat       double precision,
++  location_lng       double precision,
++  added_by_email     text,
++  added_by_name      text,
++  status             text,
++  reviewed_by        text,
++  reviewed_at        timestamptz,
++  review_note        text,
++  created_at         timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not public.is_admin() then
++    return;
++  end if;
++
++  return query
++    select
++      dfa.id, dfa.shop_name, dfa.owner_name, dfa.alias_name, dfa.whatsapp_number, dfa.alternate_number, dfa.address,
++      dfa.location_lat, dfa.location_lng,
++      dfa.added_by_email, coalesce(sp.name, dfa.added_by_email),
++      dfa.status, dfa.reviewed_by, dfa.reviewed_at, dfa.review_note,
++      dfa.created_at
++    from public.dealer_field_adds dfa
++    left join public.staff_profiles sp on sp.email = dfa.added_by_email
++    where (p_status is null or dfa.status = p_status)
++    order by dfa.created_at desc;
++end;
++$$;
++
++grant execute on function public.admin_list_field_dealers(text) to authenticated;
+-- 
+2.43.0
+

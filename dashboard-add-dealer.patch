@@ -1,0 +1,229 @@
+From 46d0f114c031980dbf76ebd3bbd574f4c12c32f7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 10 Sep 2026 04:36:51 +0000
+Subject: [PATCH] Add "+ Add New Dealer" to the Dashboard, not just the
+ Check-In tab
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+add_field_dealer() has no day-start requirement — only check-in/checkout
+does — so gating the add-dealer form behind DayCheckIn's Check-In tab
+(itself blocked until the day is started) was a UI gap, not a backend
+one. Reps can now log a new lead straight from "My Dealers / Parties"
+on the Dashboard at any time; the Check-In tab keeps its own copy too,
+for adding and immediately checking in while already in that flow.
+Same WhatsApp/Alternate fields and live duplicate-phone check as the
+Check-In version.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/SalesDashboard.jsx | 166 ++++++++++++++++++++++++++-
+ 1 file changed, 160 insertions(+), 6 deletions(-)
+
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 8684dd2..d30542a 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -5,6 +5,7 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+ import { staffRoleLabel } from "../../utils/staffRoles";
+ import { featuresForRole } from "../../utils/staffFeatures";
+ import DashboardAiCard from "../../components/staff/DashboardAiCard";
++import { getCurrentPosition } from "../../utils/visitMedia";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+ // senior_sales_associate, senior_sales_executive). Design approved against
+@@ -242,23 +243,102 @@ export default function SalesDashboard() {
+   // opens the same DashboardAiCard as a modal on tap.
+   const [aiOpen, setAiOpen] = useState(false);
+ 
++  // "+ Add New Dealer" — same field-add capability as the Day/Check-In
++  // screen, but reachable straight from the Dashboard so a rep doesn't
++  // have to start their day first just to log a new lead. add_field_dealer
++  // itself has no day-start requirement (only check-in/checkout does), so
++  // this was purely a UI gap, not a backend one — requested 10 Sept 2026.
++  const [showAddDealer, setShowAddDealer] = useState(false);
++  const [newShopName, setNewShopName] = useState("");
++  const [newOwnerName, setNewOwnerName] = useState("");
++  const [newWhatsapp, setNewWhatsapp] = useState("");
++  const [newAlternate, setNewAlternate] = useState("");
++  const [newAddress, setNewAddress] = useState("");
++  const [addingDealer, setAddingDealer] = useState(false);
++  const [addDealerError, setAddDealerError] = useState(null);
++  const [dupMatches, setDupMatches] = useState([]);
++  const [checkingDup, setCheckingDup] = useState(false);
++  const dupTimerRef = useRef(null);
++
+   useEffect(() => {
+-    if (!isSupabaseConfigured) {
+-      setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
+-      setLoadingAttendance(false);
++    if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
++    const w = newWhatsapp.trim();
++    const a = newAlternate.trim();
++    if (w.length < 6 && a.length < 6) {
++      setDupMatches([]);
+       return;
+     }
+-    let cancelled = false;
+-    supabase.rpc("get_my_dealers").then(({ data, error }) => {
+-      if (cancelled) return;
++    dupTimerRef.current = setTimeout(async () => {
++      setCheckingDup(true);
++      try {
++        const { data, error } = await supabase.rpc("check_duplicate_dealer_phone", {
++          p_whatsapp: w.length >= 6 ? w : null,
++          p_alternate: a.length >= 6 ? a : null,
++        });
++        setDupMatches(error ? [] : data || []);
++      } catch {
++        setDupMatches([]);
++      } finally {
++        setCheckingDup(false);
++      }
++    }, 600);
++    return () => { if (dupTimerRef.current) clearTimeout(dupTimerRef.current); };
++  }, [newWhatsapp, newAlternate]);
++
++  const loadDealers = () => {
++    setLoadingDealers(true);
++    return supabase.rpc("get_my_dealers").then(({ data, error }) => {
+       if (error) {
+         console.error("[SalesDashboard] get_my_dealers failed:", error);
+         setDealerError(error.message);
+       } else {
++        setDealerError(null);
+         setDealers(data || []);
+       }
+       setLoadingDealers(false);
+     });
++  };
++
++  const handleAddDealer = async () => {
++    setAddDealerError(null);
++    if (!newShopName.trim()) { setAddDealerError("Shop name is required."); return; }
++    if (!newWhatsapp.trim()) { setAddDealerError("WhatsApp number is required."); return; }
++    setAddingDealer(true);
++    try {
++      const pos = await getCurrentPosition();
++      const { data, error } = await supabase.rpc("add_field_dealer", {
++        p_shop_name: newShopName.trim(),
++        p_owner_name: newOwnerName.trim() || null,
++        p_whatsapp_number: newWhatsapp.trim(),
++        p_alternate_number: newAlternate.trim() || null,
++        p_address: newAddress.trim() || null,
++        p_latitude: pos.latitude,
++        p_longitude: pos.longitude,
++      });
++      const result = Array.isArray(data) ? data[0] : data;
++      if (error || !result?.success) {
++        setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
++      } else {
++        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setDupMatches([]);
++        setShowAddDealer(false);
++        await loadDealers();
++      }
++    } catch (err) {
++      setAddDealerError(err.message || "Couldn't get your location.");
++    } finally {
++      setAddingDealer(false);
++    }
++  };
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) {
++      setLoadingDealers(false); setLoadingVisits(false); setLoadingOpenVisit(false); setLoadingDayStart(false);
++      setLoadingAttendance(false);
++      return;
++    }
++    let cancelled = false;
++    loadDealers();
+     supabase.rpc("get_my_visits", { p_limit: 10 }).then(({ data, error }) => {
+       if (cancelled) return;
+       if (!error) setVisits(data || []);
+@@ -475,6 +555,80 @@ export default function SalesDashboard() {
+         </div>
+ 
+         <div ref={dealersSectionRef} style={{ fontSize: 15, fontWeight: 800, margin: "4px 0 12px" }}>My Dealers / Parties</div>
++
++        <button
++          onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); setDupMatches([]); }}
++          style={{ width: "100%", padding: 11, marginBottom: 12, border: "1.5px dashed #7B2D8B", borderRadius: 10, background: showAddDealer ? "#f8f0f9" : "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
++        >
++          {showAddDealer ? "✕ Cancel" : "+ Add New Dealer"}
++        </button>
++
++        {showAddDealer && (
++          <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, padding: 16, marginBottom: 14, boxShadow: "0 2px 8px rgba(123,45,139,0.06)" }}>
++            <div style={{ fontSize: 12.5, color: "#888", lineHeight: 1.5, marginBottom: 10 }}>
++              Add a brand-new shop right now — it'll appear in your list below tagged "New". Start your day and check in to log a visit there whenever you're ready.
++            </div>
++            <input
++              value={newShopName}
++              onChange={(e) => setNewShopName(e.target.value)}
++              placeholder="Shop name *"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++            />
++            <input
++              value={newOwnerName}
++              onChange={(e) => setNewOwnerName(e.target.value)}
++              placeholder="Owner name (optional)"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++            />
++            <input
++              value={newWhatsapp}
++              onChange={(e) => setNewWhatsapp(e.target.value)}
++              placeholder="WhatsApp number *"
++              inputMode="tel"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++            />
++            <input
++              value={newAlternate}
++              onChange={(e) => setNewAlternate(e.target.value)}
++              placeholder="Alternate number (optional)"
++              inputMode="tel"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++            />
++            {checkingDup && (
++              <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
++            )}
++            {!checkingDup && dupMatches.length > 0 && (
++              <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
++                <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
++                  ⚠️ This number is already on file
++                </div>
++                {dupMatches.map((m, i) => (
++                  <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
++                    "{m.name}" ({m.matched_number}) — {m.extra}
++                  </div>
++                ))}
++                <div style={{ fontSize: 11, color: "#a56a00", marginTop: 4 }}>
++                  Same shop? Use the existing one instead of adding again. If it's genuinely a different shop, go ahead — this is just a heads-up.
++                </div>
++              </div>
++            )}
++            <input
++              value={newAddress}
++              onChange={(e) => setNewAddress(e.target.value)}
++              placeholder="Address (optional)"
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
++            />
++            <button
++              onClick={handleAddDealer}
++              disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}
++              style={{ width: "100%", padding: 12, border: "none", borderRadius: 10, background: addingDealer ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: addingDealer ? "default" : "pointer" }}
++            >
++              {addingDealer ? "Adding…" : "📍 Add Dealer at My Current Location"}
++            </button>
++            {addDealerError && <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: "#d64545" }}>{addDealerError}</div>}
++          </div>
++        )}
++
+         <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden", marginBottom: 20 }}>
+           {loadingDealers ? (
+             <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+-- 
+2.43.0
+

@@ -1,0 +1,326 @@
+From ad1c272ebdf5e9d3e28b98e307fc77cb5836951b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 10 Sep 2026 04:54:07 +0000
+Subject: [PATCH] Add GST registration toggle + location-accuracy note to
+ field-add form
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Referenced against a competitor field-sales app's Customers table
+(Registration Type column, location pin). Adds an optional
+Registered/Unregistered toggle to both "+ Add New Dealer" forms
+(Dashboard and Check-In tab), surfaced to admin in the submissions
+queue as a badge. Also adds an explicit caution line next to the
+location capture — GPS was already being taken silently from wherever
+the rep is standing when they tap Add; now it's called out so the rep
+is reminded they need to actually be at the shop, not just anywhere.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminVisits.jsx                     |  13 +-
+ src/screens/staff/DayCheckIn.jsx              |  30 +++-
+ src/screens/staff/SalesDashboard.jsx          |  30 +++-
+ ...ealer_field_adds_registration_location.sql | 139 ++++++++++++++++++
+ 4 files changed, 207 insertions(+), 5 deletions(-)
+ create mode 100644 supabase/migrations/dealer_field_adds_registration_location.sql
+
+diff --git a/src/admin/AdminVisits.jsx b/src/admin/AdminVisits.jsx
+index e6e574b..8326d32 100644
+--- a/src/admin/AdminVisits.jsx
++++ b/src/admin/AdminVisits.jsx
+@@ -216,7 +216,18 @@ export default function AdminVisits() {
+             {fieldDealers.map((fd) => (
+               <div key={fd.id} style={{ background: "#fff", border: "1px solid #f2e6c8", borderRadius: 8, padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                 <div>
+-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}</div>
++                  <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
++                    {fd.shop_name}{fd.alias_name ? ` (${fd.alias_name})` : ""}
++                    {fd.registration_type && (
++                      <span style={{
++                        fontSize: 9.5, fontWeight: 800, borderRadius: 999, padding: "2px 7px",
++                        color: fd.registration_type === "registered" ? "#2fa84f" : "#888",
++                        background: fd.registration_type === "registered" ? "#e6f7ec" : "#f0f0f0",
++                      }}>
++                        {fd.registration_type === "registered" ? "✅ Registered" : "Unregistered"}
++                      </span>
++                    )}
++                  </div>
+                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                     {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
+                   </div>
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 6712250..eb7478c 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -93,6 +93,7 @@ export default function DayCheckIn() {
+   const [newWhatsapp, setNewWhatsapp] = useState("");
+   const [newAlternate, setNewAlternate] = useState("");
+   const [newAddress, setNewAddress] = useState("");
++  const [newRegistrationType, setNewRegistrationType] = useState("");
+   const [addingDealer, setAddingDealer] = useState(false);
+   const [addDealerError, setAddDealerError] = useState(null);
+ 
+@@ -320,6 +321,7 @@ export default function DayCheckIn() {
+         p_whatsapp_number: newWhatsapp.trim(),
+         p_alternate_number: newAlternate.trim() || null,
+         p_address: newAddress.trim() || null,
++        p_registration_type: newRegistrationType || null,
+         p_latitude: pos.latitude,
+         p_longitude: pos.longitude,
+       });
+@@ -327,7 +329,7 @@ export default function DayCheckIn() {
+       if (error || !result?.success) {
+         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+       } else {
+-        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress(""); setNewRegistrationType("");
+         setDupMatches([]);
+         setShowAddDealer(false);
+         await loadDealers();
+@@ -655,8 +657,32 @@ export default function DayCheckIn() {
+                       value={newAddress}
+                       onChange={(e) => setNewAddress(e.target.value)}
+                       placeholder="Address (optional)"
+-                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
++                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                     />
++
++                    <div style={{ fontSize: 11.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>GST registration (optional)</div>
++                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
++                      {["registered", "unregistered"].map((opt) => (
++                        <button
++                          key={opt}
++                          type="button"
++                          onClick={() => setNewRegistrationType((v) => (v === opt ? "" : opt))}
++                          style={{
++                            flex: 1, padding: "9px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
++                            border: newRegistrationType === opt ? "1.5px solid #7B2D8B" : "1.5px solid #eadcec",
++                            background: newRegistrationType === opt ? "#f3e6f6" : "#fff",
++                            color: newRegistrationType === opt ? "#7B2D8B" : "#666",
++                          }}
++                        >
++                          {opt === "registered" ? "✅ Registered" : "Unregistered"}
++                        </button>
++                      ))}
++                    </div>
++
++                    <div style={{ fontSize: 11, color: "#a56a00", background: "#fff4e0", border: "1px solid #f0c470", borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
++                      📍 Location is captured from where you are right now — you should be at the shop's correct location only.
++                    </div>
++
+                     <button
+                       onClick={handleAddDealer}
+                       disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index ba24fa2..a7059d1 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -255,6 +255,7 @@ export default function SalesDashboard() {
+   const [newWhatsapp, setNewWhatsapp] = useState("");
+   const [newAlternate, setNewAlternate] = useState("");
+   const [newAddress, setNewAddress] = useState("");
++  const [newRegistrationType, setNewRegistrationType] = useState("");
+   const [addingDealer, setAddingDealer] = useState(false);
+   const [addDealerError, setAddDealerError] = useState(null);
+   const [dupMatches, setDupMatches] = useState([]);
+@@ -314,6 +315,7 @@ export default function SalesDashboard() {
+         p_whatsapp_number: newWhatsapp.trim(),
+         p_alternate_number: newAlternate.trim() || null,
+         p_address: newAddress.trim() || null,
++        p_registration_type: newRegistrationType || null,
+         p_latitude: pos.latitude,
+         p_longitude: pos.longitude,
+       });
+@@ -321,7 +323,7 @@ export default function SalesDashboard() {
+       if (error || !result?.success) {
+         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+       } else {
+-        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setNewShopName(""); setNewOwnerName(""); setNewAlias(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress(""); setNewRegistrationType("");
+         setDupMatches([]);
+         setShowAddDealer(false);
+         await loadDealers();
+@@ -624,8 +626,32 @@ export default function SalesDashboard() {
+               value={newAddress}
+               onChange={(e) => setNewAddress(e.target.value)}
+               placeholder="Address (optional)"
+-              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 10, boxSizing: "border-box" }}
++              style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+             />
++
++            <div style={{ fontSize: 11.5, fontWeight: 700, color: "#555", marginBottom: 6 }}>GST registration (optional)</div>
++            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
++              {["registered", "unregistered"].map((opt) => (
++                <button
++                  key={opt}
++                  type="button"
++                  onClick={() => setNewRegistrationType((v) => (v === opt ? "" : opt))}
++                  style={{
++                    flex: 1, padding: "9px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer",
++                    border: newRegistrationType === opt ? "1.5px solid #7B2D8B" : "1.5px solid #eadcec",
++                    background: newRegistrationType === opt ? "#f3e6f6" : "#fff",
++                    color: newRegistrationType === opt ? "#7B2D8B" : "#666",
++                  }}
++                >
++                  {opt === "registered" ? "✅ Registered" : "Unregistered"}
++                </button>
++              ))}
++            </div>
++
++            <div style={{ fontSize: 11, color: "#a56a00", background: "#fff4e0", border: "1px solid #f0c470", borderRadius: 8, padding: "8px 10px", marginBottom: 10, lineHeight: 1.5 }}>
++              📍 Location is captured from where you are right now — you should be at the shop's correct location only.
++            </div>
++
+             <button
+               onClick={handleAddDealer}
+               disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}
+diff --git a/supabase/migrations/dealer_field_adds_registration_location.sql b/supabase/migrations/dealer_field_adds_registration_location.sql
+new file mode 100644
+index 0000000..d5d0c4f
+--- /dev/null
++++ b/supabase/migrations/dealer_field_adds_registration_location.sql
+@@ -0,0 +1,139 @@
++-- dealer_field_adds_registration_location.sql
++--
++-- Follow-up to dealer_field_adds.sql. Requested 10 Sept 2026 (referencing
++-- a competitor field-sales app's Customers table): capture whether a
++-- newly field-added shop is GST-registered or not, and make the location
++-- capture visible in the add-dealer form with an explicit caution that the
++-- rep must actually be standing at the shop — not just a silent background
++-- GPS grab.
++--
++-- Run in Supabase SQL Editor.
++
++-- ── 1. New column — GST registration status, optional ───────────────────
++
++alter table public.dealer_field_adds
++  add column if not exists registration_type text
++  check (registration_type in ('registered', 'unregistered'));
++
++-- ── 2. add_field_dealer() — new optional p_registration_type param ──────
++-- Param list changed, so the old signature must be dropped first.
++
++drop function if exists public.add_field_dealer(text, text, text, text, text, text, double precision, double precision);
++
++create or replace function public.add_field_dealer(
++  p_shop_name         text,
++  p_owner_name        text,
++  p_alias_name        text,
++  p_whatsapp_number   text,
++  p_alternate_number  text,
++  p_address           text,
++  p_registration_type text,
++  p_latitude          double precision,
++  p_longitude         double precision
++)
++returns table (success boolean, message text, field_dealer_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_new_id uuid;
++  v_reg   text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_shop_name is null or length(trim(p_shop_name)) = 0 then
++    return query select false, 'shop name is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_whatsapp_number is null or length(trim(p_whatsapp_number)) = 0 then
++    return query select false, 'WhatsApp number is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to add a new dealer'::text, null::uuid;
++    return;
++  end if;
++
++  v_reg := nullif(trim(coalesce(p_registration_type, '')), '');
++  if v_reg is not null and v_reg not in ('registered', 'unregistered') then
++    return query select false, 'registration type must be registered or unregistered'::text, null::uuid;
++    return;
++  end if;
++
++  insert into public.dealer_field_adds (
++    shop_name, owner_name, alias_name, whatsapp_number, alternate_number, address,
++    registration_type, location_lat, location_lng, added_by_email
++  )
++  values (
++    trim(p_shop_name), nullif(trim(coalesce(p_owner_name, '')), ''),
++    nullif(trim(coalesce(p_alias_name, '')), ''),
++    trim(p_whatsapp_number), nullif(trim(coalesce(p_alternate_number, '')), ''),
++    nullif(trim(coalesce(p_address, '')), ''),
++    v_reg, p_latitude, p_longitude, v_email
++  )
++  returning id into v_new_id;
++
++  return query select true, 'added'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.add_field_dealer(text, text, text, text, text, text, text, double precision, double precision) to authenticated;
++
++-- ── 3. admin_list_field_dealers() — surface registration_type too ───────
++
++drop function if exists public.admin_list_field_dealers(text);
++
++create or replace function public.admin_list_field_dealers(p_status text default 'pending')
++returns table (
++  id                 uuid,
++  shop_name          text,
++  owner_name         text,
++  alias_name         text,
++  whatsapp_number    text,
++  alternate_number   text,
++  address            text,
++  registration_type  text,
++  location_lat       double precision,
++  location_lng       double precision,
++  added_by_email     text,
++  added_by_name      text,
++  status             text,
++  reviewed_by        text,
++  reviewed_at        timestamptz,
++  review_note        text,
++  created_at         timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not public.is_admin() then
++    return;
++  end if;
++
++  return query
++    select
++      dfa.id, dfa.shop_name, dfa.owner_name, dfa.alias_name, dfa.whatsapp_number, dfa.alternate_number, dfa.address,
++      dfa.registration_type,
++      dfa.location_lat, dfa.location_lng,
++      dfa.added_by_email, coalesce(sp.name, dfa.added_by_email),
++      dfa.status, dfa.reviewed_by, dfa.reviewed_at, dfa.review_note,
++      dfa.created_at
++    from public.dealer_field_adds dfa
++    left join public.staff_profiles sp on sp.email = dfa.added_by_email
++    where (p_status is null or dfa.status = p_status)
++    order by dfa.created_at desc;
++end;
++$$;
++
++grant execute on function public.admin_list_field_dealers(text) to authenticated;
+-- 
+2.43.0
+
