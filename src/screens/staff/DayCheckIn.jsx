@@ -738,16 +738,16 @@ export default function DayCheckIn() {
                         key={d.id}
                         onClick={() => {
                           if (checkingInId) return;
-                          // A dealer someone added straight from the field
-                          // — show its account-like detail page first (what
-                          // was entered, location, past visits) rather than
-                          // checking in the instant it's tapped. The detail
-                          // page's own "Check In Here" button completes the
-                          // check-in from there.
+                          // Every dealer's own profile opens first, tap or
+                          // not, whichever kind it is — a real dealer's full
+                          // CRM (Visits tab has its own Check In button) or
+                          // a field-added dealer's lightweight detail screen
+                          // ("Check In Here" button). No dealer ever gets
+                          // checked in the instant it's tapped in this list.
                           if (d.dealer_kind && d.dealer_kind !== "profile") {
                             navigate(`/staff/sales/field-dealer/${d.id}`);
                           } else {
-                            handleCheckIn(d);
+                            navigate(`/staff/sales/dealer/${d.id}`);
                           }
                         }}
                         style={{
@@ -770,7 +770,7 @@ export default function DayCheckIn() {
                           <div style={{ fontSize: 11, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 800, color: "#7B2D8B" }}>
-                          {checkingInId === d.id ? "Checking in…" : "Check in ›"}
+                          View ›
                         </div>
                       </div>
                     ))
