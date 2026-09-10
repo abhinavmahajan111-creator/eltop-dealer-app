@@ -683,10 +683,10 @@ export default function SalesDashboard() {
                   // A dealer someone added straight from the field isn't a
                   // real onboarded account yet — no ledger/orders exist for
                   // it, so there's no CRM detail page to show. Send them to
-                  // Check In instead, where check-in/checkout already works
-                  // on it right away.
+                  // the lightweight field-dealer detail screen instead,
+                  // which shows what was entered, location, and visits.
                   if (d.dealer_kind && d.dealer_kind !== "profile") {
-                    navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } });
+                    navigate(`/staff/sales/field-dealer/${d.id}`);
                   } else {
                     navigate(`/staff/sales/dealer/${d.id}`);
                   }
@@ -711,7 +711,7 @@ export default function SalesDashboard() {
                 visit={v}
                 onClick={() => {
                   if (v.is_field_dealer) {
-                    navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } });
+                    navigate(`/staff/sales/field-dealer/${v.dealer_id}`);
                   } else {
                     navigate(`/staff/sales/dealer/${v.dealer_id}`);
                   }
