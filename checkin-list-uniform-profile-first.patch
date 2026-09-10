@@ -1,0 +1,68 @@
+From 61191468779cf02bfffbdb519c7b7f218d510f22 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 10 Sep 2026 06:05:23 +0000
+Subject: [PATCH] Check-In tab list: same profile-first flow for every dealer
+ kind
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Real (profile) dealers tapped in the Check-In tab's own list still
+called handleCheckIn() directly — instant check-in, no detail page —
+while field-added dealers had just been fixed to open their detail
+screen first. Inconsistent behavior by dealer kind, flagged live via
+screenshot (tapping "Unnamed", a real dealer, checked in instantly
+while Surjeet correctly opened its detail page first).
+
+Now every dealer in this list, regardless of kind, navigates to its
+own profile first: real dealers to the existing DealerDetail CRM
+(its Visits tab already has its own "Check In" button — nothing new
+needed there), field-added dealers to FieldDealerDetail. Check-in
+itself never happens on the instant a name in this list is tapped.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/DayCheckIn.jsx | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index a11613d..a62512f 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -738,16 +738,16 @@ export default function DayCheckIn() {
+                         key={d.id}
+                         onClick={() => {
+                           if (checkingInId) return;
+-                          // A dealer someone added straight from the field
+-                          // — show its account-like detail page first (what
+-                          // was entered, location, past visits) rather than
+-                          // checking in the instant it's tapped. The detail
+-                          // page's own "Check In Here" button completes the
+-                          // check-in from there.
++                          // Every dealer's own profile opens first, tap or
++                          // not, whichever kind it is — a real dealer's full
++                          // CRM (Visits tab has its own Check In button) or
++                          // a field-added dealer's lightweight detail screen
++                          // ("Check In Here" button). No dealer ever gets
++                          // checked in the instant it's tapped in this list.
+                           if (d.dealer_kind && d.dealer_kind !== "profile") {
+                             navigate(`/staff/sales/field-dealer/${d.id}`);
+                           } else {
+-                            handleCheckIn(d);
++                            navigate(`/staff/sales/dealer/${d.id}`);
+                           }
+                         }}
+                         style={{
+@@ -770,7 +770,7 @@ export default function DayCheckIn() {
+                           <div style={{ fontSize: 11, color: "#999", marginTop: 1 }}>{d.dealer_code || "—"}</div>
+                         </div>
+                         <div style={{ fontSize: 11, fontWeight: 800, color: "#7B2D8B" }}>
+-                          {checkingInId === d.id ? "Checking in…" : "Check in ›"}
++                          View ›
+                         </div>
+                       </div>
+                     ))
+-- 
+2.43.0
+
