@@ -1,0 +1,398 @@
+From 28078f9bdd13f0e3043cee0ccaf2ea3a4447010f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 9 Sep 2026 16:45:15 +0000
+Subject: [PATCH] Split field-add phone into WhatsApp + Alternate, add live
+ duplicate check
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Field-added dealer's phone was a single optional field with zero
+duplicate detection, so reps in a hurry could log the same shop twice
+under different spellings. Now collects a mandatory WhatsApp number
+and an optional Alternate number, and checks both live (debounced) as
+the rep types against every other field-added dealer AND real dealer
+profiles by phone — a non-blocking heads-up banner, never a hard stop
+(the same number can legitimately belong to two different shops).
+
+Adds check_duplicate_dealer_phone() RPC; add_field_dealer() and
+admin_list_field_dealers() updated for the two-number schema.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminVisits.jsx                     |   2 +-
+ src/screens/staff/DayCheckIn.jsx              |  79 ++++++-
+ .../dealer_field_adds_dual_phone.sql          | 210 ++++++++++++++++++
+ 3 files changed, 282 insertions(+), 9 deletions(-)
+ create mode 100644 supabase/migrations/dealer_field_adds_dual_phone.sql
+
+diff --git a/src/admin/AdminVisits.jsx b/src/admin/AdminVisits.jsx
+index 936554b..4fe4e5d 100644
+--- a/src/admin/AdminVisits.jsx
++++ b/src/admin/AdminVisits.jsx
+@@ -218,7 +218,7 @@ export default function AdminVisits() {
+                 <div>
+                   <div style={{ fontSize: 13, fontWeight: 700 }}>{fd.shop_name}</div>
+                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+-                    {[fd.owner_name, fd.phone, fd.address].filter(Boolean).join(" · ") || "No extra details"}
++                    {[fd.owner_name, fd.whatsapp_number, fd.alternate_number, fd.address].filter(Boolean).join(" · ") || "No extra details"}
+                   </div>
+                   <div style={{ fontSize: 10.5, color: "#aaa", marginTop: 2 }}>
+                     Added by {fd.added_by_name || fd.added_by_email} · {fmtDateTime(fd.created_at)}
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 797368f..03e214b 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -89,11 +89,45 @@ export default function DayCheckIn() {
+   const [showAddDealer, setShowAddDealer] = useState(false);
+   const [newShopName, setNewShopName] = useState("");
+   const [newOwnerName, setNewOwnerName] = useState("");
+-  const [newPhone, setNewPhone] = useState("");
++  const [newWhatsapp, setNewWhatsapp] = useState("");
++  const [newAlternate, setNewAlternate] = useState("");
+   const [newAddress, setNewAddress] = useState("");
+   const [addingDealer, setAddingDealer] = useState(false);
+   const [addDealerError, setAddDealerError] = useState(null);
+ 
++  // Duplicate-phone check — as the rep types either number, look it up
++  // live against other field-added dealers and real dealer profiles.
++  // Purely a nudge (never blocks Add) — same phone can legitimately be
++  // shared across shops (e.g. a family business, an office landline).
++  const [dupMatches, setDupMatches] = useState([]);
++  const [checkingDup, setCheckingDup] = useState(false);
++  const dupTimerRef = useRef(null);
++
++  useEffect(() => {
++    if (dupTimerRef.current) clearTimeout(dupTimerRef.current);
++    const w = newWhatsapp.trim();
++    const a = newAlternate.trim();
++    if (w.length < 6 && a.length < 6) {
++      setDupMatches([]);
++      return;
++    }
++    dupTimerRef.current = setTimeout(async () => {
++      setCheckingDup(true);
++      try {
++        const { data, error } = await supabase.rpc("check_duplicate_dealer_phone", {
++          p_whatsapp: w.length >= 6 ? w : null,
++          p_alternate: a.length >= 6 ? a : null,
++        });
++        setDupMatches(error ? [] : data || []);
++      } catch {
++        setDupMatches([]);
++      } finally {
++        setCheckingDup(false);
++      }
++    }, 600);
++    return () => { if (dupTimerRef.current) clearTimeout(dupTimerRef.current); };
++  }, [newWhatsapp, newAlternate]);
++
+   const [boardFile, setBoardFile] = useState(null);
+   const [shopFile, setShopFile] = useState(null);
+   const [cardFile, setCardFile] = useState(null);
+@@ -272,13 +306,15 @@ export default function DayCheckIn() {
+   const handleAddDealer = async () => {
+     setAddDealerError(null);
+     if (!newShopName.trim()) { setAddDealerError("Shop name is required."); return; }
++    if (!newWhatsapp.trim()) { setAddDealerError("WhatsApp number is required."); return; }
+     setAddingDealer(true);
+     try {
+       const pos = await getCurrentPosition();
+       const { data, error } = await supabase.rpc("add_field_dealer", {
+         p_shop_name: newShopName.trim(),
+         p_owner_name: newOwnerName.trim() || null,
+-        p_phone: newPhone.trim() || null,
++        p_whatsapp_number: newWhatsapp.trim(),
++        p_alternate_number: newAlternate.trim() || null,
+         p_address: newAddress.trim() || null,
+         p_latitude: pos.latitude,
+         p_longitude: pos.longitude,
+@@ -287,7 +323,8 @@ export default function DayCheckIn() {
+       if (error || !result?.success) {
+         setAddDealerError(error?.message || result?.message || "Couldn't add this dealer.");
+       } else {
+-        setNewShopName(""); setNewOwnerName(""); setNewPhone(""); setNewAddress("");
++        setNewShopName(""); setNewOwnerName(""); setNewWhatsapp(""); setNewAlternate(""); setNewAddress("");
++        setDupMatches([]);
+         setShowAddDealer(false);
+         await loadDealers();
+       }
+@@ -549,7 +586,7 @@ export default function DayCheckIn() {
+                 <LocationPermissionBanner />
+ 
+                 <button
+-                  onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); }}
++                  onClick={() => { setShowAddDealer((v) => !v); setAddDealerError(null); setDupMatches([]); }}
+                   style={{ width: "100%", padding: 11, marginBottom: 12, border: "1.5px dashed #7B2D8B", borderRadius: 10, background: showAddDealer ? "#f8f0f9" : "#fff", color: "#7B2D8B", fontSize: 13, fontWeight: 800, cursor: "pointer" }}
+                 >
+                   {showAddDealer ? "✕ Cancel" : "+ Add New Dealer"}
+@@ -573,11 +610,37 @@ export default function DayCheckIn() {
+                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                     />
+                     <input
+-                      value={newPhone}
+-                      onChange={(e) => setNewPhone(e.target.value)}
+-                      placeholder="Phone (optional)"
++                      value={newWhatsapp}
++                      onChange={(e) => setNewWhatsapp(e.target.value)}
++                      placeholder="WhatsApp number *"
++                      inputMode="tel"
+                       style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
+                     />
++                    <input
++                      value={newAlternate}
++                      onChange={(e) => setNewAlternate(e.target.value)}
++                      placeholder="Alternate number (optional)"
++                      inputMode="tel"
++                      style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #eadcec", borderRadius: 8, fontSize: 13, marginBottom: 8, boxSizing: "border-box" }}
++                    />
++                    {checkingDup && (
++                      <div style={{ fontSize: 11.5, color: "#999", marginBottom: 8 }}>Checking for existing matches…</div>
++                    )}
++                    {!checkingDup && dupMatches.length > 0 && (
++                      <div style={{ background: "#fff4e0", border: "1.5px solid #f0c470", borderRadius: 8, padding: "9px 11px", marginBottom: 8 }}>
++                        <div style={{ fontSize: 12, fontWeight: 800, color: "#a56a00", marginBottom: 4 }}>
++                          ⚠️ This number is already on file
++                        </div>
++                        {dupMatches.map((m, i) => (
++                          <div key={i} style={{ fontSize: 11.5, color: "#8a5a00", marginBottom: 2 }}>
++                            "{m.name}" ({m.matched_number}) — {m.extra}
++                          </div>
++                        ))}
++                        <div style={{ fontSize: 11, color: "#a56a00", marginTop: 4 }}>
++                          Same shop? Search for it above instead of adding again. If it's genuinely a different shop, go ahead — this is just a heads-up.
++                        </div>
++                      </div>
++                    )}
+                     <input
+                       value={newAddress}
+                       onChange={(e) => setNewAddress(e.target.value)}
+@@ -586,7 +649,7 @@ export default function DayCheckIn() {
+                     />
+                     <button
+                       onClick={handleAddDealer}
+-                      disabled={addingDealer || !newShopName.trim()}
++                      disabled={addingDealer || !newShopName.trim() || !newWhatsapp.trim()}
+                       style={{ width: "100%", padding: 12, border: "none", borderRadius: 10, background: addingDealer ? "#c9a8d1" : "#7B2D8B", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: addingDealer ? "default" : "pointer" }}
+                     >
+                       {addingDealer ? "Adding…" : "📍 Add Dealer at My Current Location"}
+diff --git a/supabase/migrations/dealer_field_adds_dual_phone.sql b/supabase/migrations/dealer_field_adds_dual_phone.sql
+new file mode 100644
+index 0000000..dae81f9
+--- /dev/null
++++ b/supabase/migrations/dealer_field_adds_dual_phone.sql
+@@ -0,0 +1,210 @@
++-- dealer_field_adds_dual_phone.sql
++--
++-- Follow-up to dealer_field_adds.sql. Requested 9 Sept 2026: a field-added
++-- dealer's phone was a single optional field, and there was no duplicate
++-- detection at all — a rep in a hurry could (and does) log the same shop
++-- more than once under slightly different spellings ("Sharma electric" /
++-- "Sharma electricals" / "Sharma enterprises"). Sumaksh's decision:
++--   - Collect TWO numbers: WhatsApp number (mandatory) and an Alternate
++--     number (optional).
++--   - The moment either number matches a number already on file — on
++--     another field-added dealer OR a real onboarded dealer's profile —
++--     surface that as a duplicate suggestion right away (not blocking;
++--     genuinely different shops can share a family/office number).
++--   - This is a phone match only, nothing to do with login — dealer login
++--     is by email OTP (public.profiles has no auth relationship to
++--     phone). profiles.phone is just contact info, same as here.
++--
++-- Run in Supabase SQL Editor.
++
++-- ── 1. Split the old single `phone` column into two ─────────────────────
++
++alter table public.dealer_field_adds
++  rename column phone to whatsapp_number;
++
++alter table public.dealer_field_adds
++  add column if not exists alternate_number text;
++
++-- ── 2. check_duplicate_dealer_phone() — live "does this number already
++--       exist?" lookup, called by the client as the rep types a number.
++--       Checks both dealer_field_adds (any status) and real profiles.
++--       Purely informational — never blocks anything.
++
++create or replace function public.check_duplicate_dealer_phone(
++  p_whatsapp  text default null,
++  p_alternate text default null
++)
++returns table (
++  source         text,   -- 'field' | 'profile'
++  id             uuid,
++  name           text,
++  matched_number text,
++  extra          text,   -- who added it / dealer code, for context
++  created_at     timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_w     text := nullif(trim(coalesce(p_whatsapp, '')), '');
++  v_a     text := nullif(trim(coalesce(p_alternate, '')), '');
++begin
++  -- Any authenticated staff member may check (reps need this live, not
++  -- just admins).
++  if not exists (select 1 from public.staff_profiles sp where sp.id = v_uid) then
++    return;
++  end if;
++
++  if v_w is null and v_a is null then
++    return;
++  end if;
++
++  return query
++    select
++      'field'::text,
++      dfa.id,
++      dfa.shop_name,
++      case
++        when dfa.whatsapp_number in (v_w, v_a) then dfa.whatsapp_number
++        else dfa.alternate_number
++      end,
++      'added by ' || coalesce(sp.name, dfa.added_by_email) ||
++        case when dfa.status = 'rejected' then ' (rejected)' else '' end,
++      dfa.created_at
++    from public.dealer_field_adds dfa
++    left join public.staff_profiles sp on sp.email = dfa.added_by_email
++    where (v_w is not null and (dfa.whatsapp_number = v_w or dfa.alternate_number = v_w))
++       or (v_a is not null and (dfa.whatsapp_number = v_a or dfa.alternate_number = v_a))
++
++    union all
++
++    select
++      'profile'::text,
++      p.id,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name),
++      p.phone,
++      coalesce(p.dealer_code, 'dealer'),
++      p.created_at
++    from public.profiles p
++    where p.deleted_at is null
++      and p.phone is not null
++      and ((v_w is not null and p.phone = v_w) or (v_a is not null and p.phone = v_a));
++end;
++$$;
++
++grant execute on function public.check_duplicate_dealer_phone(text, text) to authenticated;
++
++-- ── 3. add_field_dealer() — dual phone params, WhatsApp mandatory ───────
++-- Param list changed (5 args -> 6 args), so the old signature must be
++-- dropped before recreating.
++
++drop function if exists public.add_field_dealer(text, text, text, text, double precision, double precision);
++
++create or replace function public.add_field_dealer(
++  p_shop_name        text,
++  p_owner_name       text,
++  p_whatsapp_number  text,
++  p_alternate_number text,
++  p_address          text,
++  p_latitude         double precision,
++  p_longitude        double precision
++)
++returns table (success boolean, message text, field_dealer_id uuid)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_new_id uuid;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return query select false, 'not authenticated as staff'::text, null::uuid;
++    return;
++  end if;
++
++  if p_shop_name is null or length(trim(p_shop_name)) = 0 then
++    return query select false, 'shop name is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_whatsapp_number is null or length(trim(p_whatsapp_number)) = 0 then
++    return query select false, 'WhatsApp number is required'::text, null::uuid;
++    return;
++  end if;
++
++  if p_latitude is null or p_longitude is null then
++    return query select false, 'location is required to add a new dealer'::text, null::uuid;
++    return;
++  end if;
++
++  insert into public.dealer_field_adds (
++    shop_name, owner_name, whatsapp_number, alternate_number, address,
++    location_lat, location_lng, added_by_email
++  )
++  values (
++    trim(p_shop_name), nullif(trim(coalesce(p_owner_name, '')), ''),
++    trim(p_whatsapp_number), nullif(trim(coalesce(p_alternate_number, '')), ''),
++    nullif(trim(coalesce(p_address, '')), ''),
++    p_latitude, p_longitude, v_email
++  )
++  returning id into v_new_id;
++
++  return query select true, 'added'::text, v_new_id;
++end;
++$$;
++
++grant execute on function public.add_field_dealer(text, text, text, text, text, double precision, double precision) to authenticated;
++
++-- ── 4. admin_list_field_dealers() — surface both numbers ────────────────
++-- Return columns changed (phone -> whatsapp_number, alternate_number), so
++-- the old signature's return type must be dropped before recreating.
++
++drop function if exists public.admin_list_field_dealers(text);
++
++create or replace function public.admin_list_field_dealers(p_status text default 'pending')
++returns table (
++  id                 uuid,
++  shop_name          text,
++  owner_name         text,
++  whatsapp_number    text,
++  alternate_number   text,
++  address            text,
++  location_lat       double precision,
++  location_lng       double precision,
++  added_by_email     text,
++  added_by_name      text,
++  status             text,
++  reviewed_by        text,
++  reviewed_at        timestamptz,
++  review_note        text,
++  created_at         timestamptz
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not public.is_admin() then
++    return;
++  end if;
++
++  return query
++    select
++      dfa.id, dfa.shop_name, dfa.owner_name, dfa.whatsapp_number, dfa.alternate_number, dfa.address,
++      dfa.location_lat, dfa.location_lng,
++      dfa.added_by_email, coalesce(sp.name, dfa.added_by_email),
++      dfa.status, dfa.reviewed_by, dfa.reviewed_at, dfa.review_note,
++      dfa.created_at
++    from public.dealer_field_adds dfa
++    left join public.staff_profiles sp on sp.email = dfa.added_by_email
++    where (p_status is null or dfa.status = p_status)
++    order by dfa.created_at desc;
++end;
++$$;
++
++grant execute on function public.admin_list_field_dealers(text) to authenticated;
+-- 
+2.43.0
+
