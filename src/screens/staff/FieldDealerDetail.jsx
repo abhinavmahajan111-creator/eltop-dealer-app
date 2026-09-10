@@ -175,11 +175,16 @@ export default function FieldDealerDetail() {
         </div>
 
         <button
-          onClick={() => navigate("/staff/sales/day-checkin", { state: { tab: "checkin" } })}
+          onClick={() => navigate("/staff/sales/day-checkin", {
+            state: { tab: "checkin", autoCheckInDealer: { id: dealer.id, name: dealer.shop_name } },
+          })}
           style={{ width: "100%", padding: 13, border: "none", borderRadius: 10, background: "#7B2D8B", color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer" }}
         >
-          📍 Go to Check In
+          📍 Check In Here
         </button>
+        <div style={{ fontSize: 11, color: "#999", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+          You must be within 100m to check in. If your day isn't started yet, you'll be asked to start it first.
+        </div>
       </div>
     </div>
   );

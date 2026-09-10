@@ -51,9 +51,16 @@ export default function DayCheckIn() {
   // auto-selection below when nothing is passed (direct URL, redirects,
   // the amber "checked in" banner, etc).
   const requestedTab = location.state?.tab === "day" || location.state?.tab === "checkin" ? location.state.tab : null;
+  // FieldDealerDetail's "Check In Here" button lands here with this set —
+  // fires the real check-in for that one dealer automatically once the
+  // Check In tab is ready (day started, nothing else open), so the rep
+  // never has to tap the dealer a second time after already picking it
+  // on the detail screen.
+  const autoCheckInDealerId = location.state?.autoCheckInDealer?.id || null;
 
   const [activeTab, setActiveTab] = useState("day");
   const defaultTabSetRef = useRef(false);
+  const autoCheckInFiredRef = useRef(false);
 
   const [dayStart, setDayStart] = useState(null);
   const [loadingDayStart, setLoadingDayStart] = useState(true);
@@ -393,6 +400,18 @@ export default function DayCheckIn() {
   const dayEnded = !!dayStart?.ended_at;
   const dayStarted = !!dayStart;
 
+  useEffect(() => {
+    if (!autoCheckInDealerId || autoCheckInFiredRef.current) return;
+    // Only fire once everything the normal tap-to-check-in flow depends on
+    // has actually loaded, so this never bypasses the day-start gate or
+    // double-checks-in over an already-open visit — it just automates the
+    // same single tap the dealer list itself would have done.
+    if (loadingDayStart || loadingOpenVisit || loadingDealers) return;
+    if (!dayStarted || dayEnded || openVisit || checkingInId) return;
+    autoCheckInFiredRef.current = true;
+    handleCheckIn({ id: autoCheckInDealerId });
+  }, [autoCheckInDealerId, loadingDayStart, loadingOpenVisit, loadingDealers, dayStarted, dayEnded, openVisit, checkingInId]);
+
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 0", color: "#fff" }}>
@@ -717,7 +736,20 @@ export default function DayCheckIn() {
                     filteredDealers.map((d) => (
                       <div
                         key={d.id}
-                        onClick={() => (checkingInId ? null : handleCheckIn(d))}
+                        onClick={() => {
+                          if (checkingInId) return;
+                          // A dealer someone added straight from the field
+                          // — show its account-like detail page first (what
+                          // was entered, location, past visits) rather than
+                          // checking in the instant it's tapped. The detail
+                          // page's own "Check In Here" button completes the
+                          // check-in from there.
+                          if (d.dealer_kind && d.dealer_kind !== "profile") {
+                            navigate(`/staff/sales/field-dealer/${d.id}`);
+                          } else {
+                            handleCheckIn(d);
+                          }
+                        }}
                         style={{
                           display: "flex", alignItems: "center", gap: 12, padding: "12px 4px", borderBottom: "1px solid #f2e6f4",
                           cursor: checkingInId ? "default" : "pointer", opacity: checkingInId && checkingInId !== d.id ? 0.5 : 1,
