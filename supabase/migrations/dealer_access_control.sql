@@ -613,9 +613,10 @@ security definer
 set search_path = public
 as $$
 declare
-  v_uid   uuid := auth.uid();
-  v_email text;
-  v_role  text;
+  v_uid         uuid := auth.uid();
+  v_email       text;
+  v_role        text;
+  v_owner_email text;
 begin
   select sp.email, sp.role into v_email, v_role
   from public.staff_profiles sp where sp.id = v_uid;
@@ -628,19 +629,27 @@ begin
     return;
   end if;
 
+  -- The dealer's owner already has permanent ("Always on") access — never
+  -- offer them as a grant target too, that would just create a confusing
+  -- duplicate "granted to" row for someone who already owns the ledger.
+  select p.assigned_sales_rep into v_owner_email
+  from public.profiles p where p.id = p_dealer_id;
+
   if v_role = 'senior_sales_executive' then
-    -- R4 — full override: any active Sales staff member (except self).
+    -- R4 — full override: any active Sales staff member (except self and the owner).
     return query
       select sp.email, sp.name, sp.role
       from public.staff_profiles sp
       where sp.department = 'Sales' and sp.is_active and sp.email <> v_email
+        and sp.email is distinct from v_owner_email
       order by sp.name;
   else
-    -- R4 — Senior Sales Associate: only staff who report to them.
+    -- R4 — Senior Sales Associate: only staff who report to them (except the owner).
     return query
       select sp.email, sp.name, sp.role
       from public.staff_profiles sp
       where sp.reports_to = v_email and sp.is_active
+        and sp.email is distinct from v_owner_email
       order by sp.name;
   end if;
 end;
@@ -667,7 +676,8 @@ declare
   v_uid   uuid := auth.uid();
   v_email text;
   v_role  text;
-  v_dealer_name text;
+  v_dealer_name  text;
+  v_owner_email  text;
   v_ge    text;
   v_eligible int;
   v_granted int := 0;
@@ -695,7 +705,17 @@ begin
   into v_dealer_name
   from public.profiles p where p.id = p_dealer_id;
 
+  select p.assigned_sales_rep into v_owner_email
+  from public.profiles p where p.id = p_dealer_id;
+
   foreach v_ge in array p_grantee_emails loop
+    -- The owner already has permanent access — a grant row for them would
+    -- just be a confusing duplicate. Skip silently, same as any other
+    -- not-actually-eligible pick.
+    if v_ge is not distinct from v_owner_email then
+      continue;
+    end if;
+
     if v_role = 'senior_sales_executive' then
       select count(*) into v_eligible from public.staff_profiles sp
         where sp.email = v_ge and sp.department = 'Sales' and sp.is_active and sp.email <> v_email;
@@ -846,15 +866,15 @@ begin
     from public.profiles p
     left join public.staff_profiles osp on osp.email = p.assigned_sales_rep
     left join (
-      select dealer_id,
+      select dl.dealer_id as ledger_dealer_id,
         sum(case
-              when type = 'order' or (type = 'journal' and dr_dealer) then amount
-              when type = 'payment' or type = 'credit_note' or (type = 'journal' and cr_dealer) then -amount
+              when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
+              when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
               else 0
             end) as balance
-      from public.dealer_ledger
-      group by dealer_id
-    ) led on led.dealer_id = p.id
+      from public.dealer_ledger dl
+      group by dl.dealer_id
+    ) led on led.ledger_dealer_id = p.id
     where p.deleted_at is null
       and public._dealer_has_ledger_access(p.id, v_email, v_role)
     order by dealer_name;
