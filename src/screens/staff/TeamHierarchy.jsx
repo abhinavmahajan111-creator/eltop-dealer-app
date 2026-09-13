@@ -21,6 +21,24 @@ function roleLabel(role) {
   return role || "—";
 }
 
+// Seniority rank purely for display — sorting siblings and coloring the
+// role badge so two people with different job roles who happen to report
+// to the same manager don't read as equals in the tree. Has no bearing on
+// who reports to whom (that's still reports_to / depth from the server).
+function roleRank(role) {
+  if (role === "senior_sales_executive") return 3;
+  if (role === "senior_sales_associate") return 2;
+  if (role === "sales_associate") return 1;
+  return 0;
+}
+
+function roleColor(role) {
+  if (role === "senior_sales_executive") return "#7B2D8B";
+  if (role === "senior_sales_associate") return "#2f6fa8";
+  if (role === "sales_associate") return "#c98a1a";
+  return "#999";
+}
+
 function toISO(d) {
   return d.toISOString().slice(0, 10);
 }
@@ -69,6 +87,15 @@ function buildTree(rows) {
     const parent = byEmail[r.reports_to];
     if (parent) parent.children.push(byEmail[r.email]);
   });
+  // Same reports_to doesn't mean same seniority — sort siblings by job-role
+  // rank (senior roles first) so the tree reads by position, not just by
+  // who happens to report to whom.
+  const sortChildren = (node) => {
+    if (!node) return;
+    node.children.sort((a, b) => roleRank(b.role) - roleRank(a.role) || (a.name || "").localeCompare(b.name || ""));
+    node.children.forEach(sortChildren);
+  };
+  sortChildren(root);
   return root;
 }
 
@@ -83,8 +110,8 @@ function TreeNode({ node, isRoot, onSelect, depth }) {
       )}
       <div
         style={{
-          width: 138, border: "1.5px solid #eadcec", borderRadius: 10, overflow: "hidden",
-          background: "#fff", flexShrink: 0,
+          width: 138, border: "1.5px solid #eadcec", borderLeft: `3px solid ${roleColor(node.role)}`,
+          borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0,
         }}
       >
         <div
@@ -114,7 +141,8 @@ function TreeNode({ node, isRoot, onSelect, depth }) {
             {node.name || node.email}{isRoot ? " (you)" : ""}
           </div>
         </div>
-        <div style={{ fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: roleColor(node.role), flexShrink: 0 }} />
           {roleLabel(node.role)}
         </div>
         {hasKids && (
