@@ -164,7 +164,12 @@ function GrantPicker({ dealerId, onDone, onCancel }) {
                 background: selected.includes(s.email) ? "#eee0f2" : "transparent",
               }}
             >
-              <input type="checkbox" checked={selected.includes(s.email)} onChange={() => toggle(s.email)} style={{ flexShrink: 0 }} />
+              <input
+                type="checkbox"
+                checked={selected.includes(s.email)}
+                onChange={() => toggle(s.email)}
+                style={{ flexShrink: 0, width: 16, height: 16, padding: 0, margin: 0, border: "1.5px solid #ccc", borderRadius: 4 }}
+              />
               <div style={AVATAR_STYLE}>{initials(s.name || s.email)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
