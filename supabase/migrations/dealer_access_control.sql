@@ -666,6 +666,13 @@ begin
       from public.staff_profiles sp
       where sp.department = 'Sales' and sp.is_active and sp.email <> v_email
         and sp.email is distinct from v_owner_email
+        -- Already has an active (non-revoked) grant on this dealer — don't
+        -- offer them again; they must be revoked first before they can be
+        -- re-granted.
+        and not exists (
+          select 1 from public.dealer_access_grants g
+          where g.dealer_id = p_dealer_id and g.grantee_email = sp.email and g.revoked_at is null
+        )
       order by sp.name;
   else
     -- R4 — Senior Sales Associate: only staff who report to them (except the owner).
@@ -674,6 +681,10 @@ begin
       from public.staff_profiles sp
       where sp.reports_to = v_email and sp.is_active
         and sp.email is distinct from v_owner_email
+        and not exists (
+          select 1 from public.dealer_access_grants g
+          where g.dealer_id = p_dealer_id and g.grantee_email = sp.email and g.revoked_at is null
+        )
       order by sp.name;
   end if;
 end;
@@ -737,6 +748,17 @@ begin
     -- just be a confusing duplicate. Skip silently, same as any other
     -- not-actually-eligible pick.
     if v_ge is not distinct from v_owner_email then
+      continue;
+    end if;
+
+    -- Defense in depth: the picker (get_grantable_staff) already hides
+    -- anyone with an active grant, but re-check here too so a stale picker
+    -- list (or a repeated/double click) can never create a duplicate
+    -- "granted" history entry for someone who already has active access.
+    if exists (
+      select 1 from public.dealer_access_grants g
+      where g.dealer_id = p_dealer_id and g.grantee_email = v_ge and g.revoked_at is null
+    ) then
       continue;
     end if;
 
