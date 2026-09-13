@@ -1,0 +1,883 @@
+From 3fafc5195f9896e8d26c889efc326d08e3ac4a7d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 05:57:21 +0000
+Subject: [PATCH] Add universal Team hierarchy tab to Team & Access
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Redesigns Team & Access into two tabs per Sumaksh's feedback: "My team"
+and "Dealer access". "My team" is new and universal — unlike grant/
+revoke (which stays restricted to Senior Sales Associate/Senior Sales
+Executive), any active staff member can see a collapsible org-chart of
+their own downline (direct + indirect reports_to chain) and drill into
+a profile for anyone in it: their dealers (owner + granted-access
+combined), total dues across those dealers, order count, and item-wise
+sales, all for a chosen period (this month/last month/this quarter).
+Targets/performance intentionally left out of this pass per Sumaksh's
+call to skip that for now.
+
+New SECURITY DEFINER RPCs, all gated by a new _is_in_my_downline()
+check so nobody can see sideways or upward — only their own subtree:
+get_my_team_subtree (the tree itself, no role gate), get_team_member_
+summary (dues total + dealer count), get_team_member_dealers (owner +
+granted list with per-dealer outstanding), get_team_member_orders_
+count, get_team_member_item_sales (qty + % share for a date range).
+Dues/outstanding reuses the same dealer_ledger balance formula already
+used everywhere else in this file; item-wise sales groups order_items
+by its existing name snapshot column, no new join needed.
+
+The "Team & Access" entry point on the Sales Dashboard was gated to
+senior roles only — removed that gate since My team is now for everyone.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/SalesDashboard.jsx          |  14 +-
+ src/screens/staff/TeamAccess.jsx              | 135 +++++---
+ src/screens/staff/TeamHierarchy.jsx           | 321 ++++++++++++++++++
+ supabase/migrations/dealer_access_control.sql | 296 ++++++++++++++++
+ 4 files changed, 704 insertions(+), 62 deletions(-)
+ create mode 100644 src/screens/staff/TeamHierarchy.jsx
+
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 9aeea73..f27d8eb 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -572,14 +572,12 @@ export default function SalesDashboard() {
+ 
+         <div ref={dealersSectionRef} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 12px" }}>
+           <div style={{ fontSize: 15, fontWeight: 800 }}>My Dealers / Parties</div>
+-          {(staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive") && (
+-            <div
+-              onClick={() => navigate("/staff/sales/team-access")}
+-              style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
+-            >
+-              🔐 Team &amp; Access ›
+-            </div>
+-          )}
++          <div
++            onClick={() => navigate("/staff/sales/team-access")}
++            style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
++          >
++            🔐 Team &amp; Access ›
++          </div>
+         </div>
+ 
+         <button
+diff --git a/src/screens/staff/TeamAccess.jsx b/src/screens/staff/TeamAccess.jsx
+index 7b1598f..a2c4047 100644
+--- a/src/screens/staff/TeamAccess.jsx
++++ b/src/screens/staff/TeamAccess.jsx
+@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
+ import { useNavigate } from "react-router-dom";
+ import { useApp } from "../../context/AppContext";
+ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import TeamHierarchy from "./TeamHierarchy";
+ 
+ // Team & Access — Senior Sales Associate + Senior Sales Executive only.
+ // Lets a senior grant or revoke another Sales staff member's LEDGER
+@@ -363,17 +364,27 @@ function DealerAccessCard({ row, number, granterEmail, granterName, canRevokeAll
+   );
+ }
+ 
+-export default function TeamAccess() {
+-  const navigate = useNavigate();
+-  const { staffProfile, session } = useApp();
+-  const myEmail = session?.user?.email || "";
++function TabButton({ active, onClick, children }) {
++  return (
++    <button
++      onClick={onClick}
++      style={{
++        flex: 1, padding: "12px 8px", border: "none", background: active ? "#fff" : "#f3e6f6",
++        color: active ? "#7B2D8B" : "#8a5a92", fontSize: 13, fontWeight: 800, cursor: "pointer",
++        borderBottom: active ? "2.5px solid #7B2D8B" : "2.5px solid transparent",
++      }}
++    >
++      {children}
++    </button>
++  );
++}
++
++function DealerAccessTab({ staffProfile, myEmail }) {
+   const [rows, setRows] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
+   const [dealerQuery, setDealerQuery] = useState("");
+ 
+-  const canManage = staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive";
+-
+   const load = () => {
+     setLoading(true);
+     supabase.rpc("get_my_team_access").then(({ data, error }) => {
+@@ -397,20 +408,56 @@ export default function TeamAccess() {
+     );
+   }, [rows, dealerQuery]);
+ 
+-  if (!canManage) {
+-    return (
+-      <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+-        <div style={{ padding: "18px 24px" }}>
+-          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
+-            ← Back
+-          </button>
++  return (
++    <>
++      {!loading && !error && rows.length > 0 && (
++        <div style={{ marginBottom: 12 }}>
++          <SearchBox value={dealerQuery} onChange={setDealerQuery} placeholder="Search dealer by name or code" />
++        </div>
++      )}
++
++      {loading ? (
++        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++      ) : error ? (
++        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
++      ) : rows.length === 0 ? (
++        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealers with ledger access yet.</div>
++      ) : filteredRows.length === 0 ? (
++        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealer matches "{dealerQuery}".</div>
++      ) : (
++        filteredRows.map((row, i) => (
++          <DealerAccessCard
++            key={row.dealer_id}
++            row={row}
++            number={i + 1}
++            granterEmail={myEmail}
++            granterName={staffProfile?.name}
++            canRevokeAll={staffProfile?.role === "senior_sales_executive"}
++            onChanged={load}
++          />
++        ))
++      )}
++
++      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 10, padding: "10px 12px", marginTop: 4 }}>
++        <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff", border: "1.5px solid #7B2D8B", color: "#7B2D8B", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
++          i
+         </div>
+-        <div style={{ textAlign: "center", padding: "60px 24px", color: "#999", fontSize: 13.5 }}>
+-          This screen is only for Senior Sales Associate and Senior Sales Executive.
++        <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
++          {staffProfile?.role === "senior_sales_executive"
++            ? "As Senior Sales Executive you can grant or revoke any Sales dealer's ledger, for anyone on Sales."
++            : "You see this for dealers you can already see the ledger of — and can only grant access to people who report to you."}
+         </div>
+       </div>
+-    );
+-  }
++    </>
++  );
++}
++
++export default function TeamAccess() {
++  const navigate = useNavigate();
++  const { staffProfile, session } = useApp();
++  const myEmail = session?.user?.email || "";
++  const canManage = staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive";
++  const [tab, setTab] = useState("team");
+ 
+   return (
+     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+@@ -420,50 +467,30 @@ export default function TeamAccess() {
+         </button>
+         <div style={{ fontSize: 19, fontWeight: 800, marginTop: 6 }}>Team &amp; Access</div>
+         <div style={{ fontSize: 11.5, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
+-          {staffProfile?.name} · {staffProfile?.role === "senior_sales_executive" ? "Senior Sales Executive" : "Senior Sales Associate"} — grant or revoke ledger access to a dealer, for anyone on Sales.
++          {staffProfile?.name} · {roleLabelFor(staffProfile?.role)}
+         </div>
+       </div>
+ 
+-      <div style={{ padding: "14px 16px", maxWidth: 640, margin: "0 auto" }}>
+-        {!loading && !error && rows.length > 0 && (
+-          <div style={{ marginBottom: 12 }}>
+-            <SearchBox value={dealerQuery} onChange={setDealerQuery} placeholder="Search dealer by name or code" />
+-          </div>
+-        )}
++      {canManage && (
++        <div style={{ display: "flex", background: "#f3e6f6" }}>
++          <TabButton active={tab === "team"} onClick={() => setTab("team")}>My team</TabButton>
++          <TabButton active={tab === "dealer"} onClick={() => setTab("dealer")}>Dealer access</TabButton>
++        </div>
++      )}
+ 
+-        {loading ? (
+-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+-        ) : error ? (
+-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
+-        ) : rows.length === 0 ? (
+-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealers with ledger access yet.</div>
+-        ) : filteredRows.length === 0 ? (
+-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealer matches "{dealerQuery}".</div>
++      <div style={{ padding: "14px 16px", maxWidth: 640, margin: "0 auto" }}>
++        {tab === "team" || !canManage ? (
++          <TeamHierarchy />
+         ) : (
+-          filteredRows.map((row, i) => (
+-            <DealerAccessCard
+-              key={row.dealer_id}
+-              row={row}
+-              number={i + 1}
+-              granterEmail={myEmail}
+-              granterName={staffProfile?.name}
+-              canRevokeAll={staffProfile?.role === "senior_sales_executive"}
+-              onChanged={load}
+-            />
+-          ))
++          <DealerAccessTab staffProfile={staffProfile} myEmail={myEmail} />
+         )}
+-
+-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 10, padding: "10px 12px", marginTop: 4 }}>
+-          <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff", border: "1.5px solid #7B2D8B", color: "#7B2D8B", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+-            i
+-          </div>
+-          <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
+-            {staffProfile?.role === "senior_sales_executive"
+-              ? "As Senior Sales Executive you can grant or revoke any Sales dealer's ledger, for anyone on Sales."
+-              : "You see this for dealers you can already see the ledger of — and can only grant access to people who report to you."}
+-          </div>
+-        </div>
+       </div>
+     </div>
+   );
+ }
++
++function roleLabelFor(role) {
++  if (role === "senior_sales_executive") return "Senior Sales Executive — see your team and manage ledger access.";
++  if (role === "senior_sales_associate") return "Senior Sales Associate — see your team and manage ledger access.";
++  return "See who reports to you and their dealers, dues, and sales.";
++}
+diff --git a/src/screens/staff/TeamHierarchy.jsx b/src/screens/staff/TeamHierarchy.jsx
+new file mode 100644
+index 0000000..8ff2afc
+--- /dev/null
++++ b/src/screens/staff/TeamHierarchy.jsx
+@@ -0,0 +1,321 @@
++import { useEffect, useMemo, useState } from "react";
++import { supabase } from "../../lib/supabase";
++
++// "My team" tab — universal, unlike the Dealer Access tab next to it.
++// Any active staff member can see whoever reports to them (directly or
++// indirectly) as a collapsible org-chart tree, and drill into a profile
++// for anyone in that downline: their dealers (owner + granted access),
++// total dues across those dealers, and item-wise sales for a chosen
++// period. Server enforces the "only your own downline" rule on every
++// call via _is_in_my_downline() — this screen only decides what's shown.
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++function roleLabel(role) {
++  if (role === "senior_sales_executive") return "Senior Sales Executive";
++  if (role === "senior_sales_associate") return "Senior Sales Associate";
++  if (role === "sales_associate") return "Sales Associate";
++  return role || "—";
++}
++
++function toISO(d) {
++  return d.toISOString().slice(0, 10);
++}
++
++const PERIODS = [
++  {
++    key: "this_month",
++    label: "This month",
++    range: () => {
++      const now = new Date();
++      const start = new Date(now.getFullYear(), now.getMonth(), 1);
++      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
++      return { start: toISO(start), end: toISO(end) };
++    },
++  },
++  {
++    key: "last_month",
++    label: "Last month",
++    range: () => {
++      const now = new Date();
++      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
++      const end = new Date(now.getFullYear(), now.getMonth(), 0);
++      return { start: toISO(start), end: toISO(end) };
++    },
++  },
++  {
++    key: "this_quarter",
++    label: "This quarter",
++    range: () => {
++      const now = new Date();
++      const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
++      const start = new Date(now.getFullYear(), qStartMonth, 1);
++      const end = new Date(now.getFullYear(), qStartMonth + 3, 0);
++      return { start: toISO(start), end: toISO(end) };
++    },
++  },
++];
++
++function buildTree(rows) {
++  if (!rows || rows.length === 0) return null;
++  const byEmail = {};
++  rows.forEach((r) => { byEmail[r.email] = { ...r, children: [] }; });
++  let root = null;
++  rows.forEach((r) => {
++    if (r.depth === 0) { root = byEmail[r.email]; return; }
++    const parent = byEmail[r.reports_to];
++    if (parent) parent.children.push(byEmail[r.email]);
++  });
++  return root;
++}
++
++function TreeNode({ node, isRoot, onSelect, depth }) {
++  const [expanded, setExpanded] = useState(true);
++  const hasKids = node.children && node.children.length > 0;
++
++  return (
++    <li style={{ listStyle: "none", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", padding: depth === 0 ? 0 : "24px 10px 0 10px" }}>
++      {depth > 0 && (
++        <span style={{ position: "absolute", top: 0, left: "50%", width: 0, height: 24, borderLeft: "1.5px solid #e3cdea" }} />
++      )}
++      <div
++        style={{
++          width: 138, border: "1.5px solid #eadcec", borderRadius: 10, overflow: "hidden",
++          background: "#fff", flexShrink: 0,
++        }}
++      >
++        <div
++          style={{
++            background: isRoot ? "#7B2D8B" : "#f8f0f9", padding: "8px 6px",
++            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
++          }}
++        >
++          <div
++            style={{
++              width: 28, height: 28, borderRadius: 999,
++              background: isRoot ? "rgba(255,255,255,.25)" : "#fff",
++              color: isRoot ? "#fff" : "#7B2D8B",
++              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
++            }}
++          >
++            {initials(node.name || node.email)}
++          </div>
++          <div
++            onClick={isRoot ? undefined : () => onSelect(node.email, node.name)}
++            style={{
++              fontSize: 12, fontWeight: 800, textAlign: "center", lineHeight: 1.25,
++              color: isRoot ? "#fff" : "#7B2D8B", cursor: isRoot ? "default" : "pointer",
++              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
++            }}
++          >
++            {node.name || node.email}{isRoot ? " (you)" : ""}
++          </div>
++        </div>
++        <div style={{ fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
++          {roleLabel(node.role)}
++        </div>
++        {hasKids && (
++          <div
++            onClick={() => setExpanded((v) => !v)}
++            style={{ textAlign: "center", fontSize: 10, color: "#999", padding: "3px", borderTop: "1px solid #f2f2f2", cursor: "pointer" }}
++          >
++            {expanded ? "▲" : `▼ ${node.children.length}`}
++          </div>
++        )}
++      </div>
++
++      {hasKids && expanded && (
++        <ul style={{ display: "flex", padding: 0, margin: 0, position: "relative", paddingTop: 24 }}>
++          {node.children.length > 1 && (
++            <span
++              style={{
++                position: "absolute", top: 0, height: 0,
++                left: `${100 / (node.children.length * 2)}%`,
++                right: `${100 / (node.children.length * 2)}%`,
++                borderTop: "1.5px solid #e3cdea",
++              }}
++            />
++          )}
++          {node.children.map((c) => (
++            <TreeNode key={c.email} node={c} onSelect={onSelect} depth={depth + 1} />
++          ))}
++        </ul>
++      )}
++    </li>
++  );
++}
++
++function TeamMemberProfile({ email, name, onBack }) {
++  const [periodKey, setPeriodKey] = useState("this_month");
++  const [summary, setSummary] = useState(null);
++  const [dealers, setDealers] = useState([]);
++  const [items, setItems] = useState([]);
++  const [ordersCount, setOrdersCount] = useState(0);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++
++  const period = useMemo(() => PERIODS.find((p) => p.key === periodKey) || PERIODS[0], [periodKey]);
++
++  useEffect(() => {
++    let cancelled = false;
++    setLoading(true);
++    setError(null);
++    const { start, end } = period.range();
++    Promise.all([
++      supabase.rpc("get_team_member_summary", { p_email: email }),
++      supabase.rpc("get_team_member_dealers", { p_email: email }),
++      supabase.rpc("get_team_member_orders_count", { p_email: email, p_start: start, p_end: end }),
++      supabase.rpc("get_team_member_item_sales", { p_email: email, p_start: start, p_end: end }),
++    ]).then(([s, d, oc, it]) => {
++      if (cancelled) return;
++      if (s.error || d.error) {
++        setError((s.error || d.error).message);
++        setLoading(false);
++        return;
++      }
++      setSummary(Array.isArray(s.data) ? s.data[0] : s.data);
++      setDealers(d.data || []);
++      setOrdersCount(typeof oc.data === "number" ? oc.data : 0);
++      setItems(it.data || []);
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, [email, period]);
++
++  const totalQty = items.reduce((s, it) => s + Number(it.qty || 0), 0);
++
++  return (
++    <div>
++      <button onClick={onBack} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>
++        ← My team
++      </button>
++
++      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
++        <div style={{ width: 36, height: 36, borderRadius: 999, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800 }}>
++          {initials(name)}
++        </div>
++        <div>
++          <div style={{ fontSize: 16, fontWeight: 800 }}>{name}</div>
++          <div style={{ fontSize: 11.5, color: "#999" }}>{summary ? roleLabel(summary.target_role) : "—"} · reports up to you</div>
++        </div>
++      </div>
++
++      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
++        <div style={{ fontSize: 11.5, color: "#999" }}>Period</div>
++        <select
++          className="admin-select"
++          value={periodKey}
++          onChange={(e) => setPeriodKey(e.target.value)}
++          style={{ padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec", fontSize: 12.5 }}
++        >
++          {PERIODS.map((p) => (
++            <option key={p.key} value={p.key}>{p.label}</option>
++          ))}
++        </select>
++      </div>
++
++      {loading ? (
++        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++      ) : error ? (
++        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
++      ) : (
++        <>
++          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
++            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
++              <div style={{ fontSize: 10.5, color: "#999" }}>Dues to collect</div>
++              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: Number(summary?.dues_total) > 0 ? "#d64545" : "#2fa84f" }}>
++                ₹{Number(summary?.dues_total || 0).toLocaleString("en-IN")}
++              </div>
++            </div>
++            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
++              <div style={{ fontSize: 10.5, color: "#999" }}>Dealers</div>
++              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{summary?.dealer_count ?? 0}</div>
++            </div>
++            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
++              <div style={{ fontSize: 10.5, color: "#999" }}>Orders</div>
++              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{ordersCount}</div>
++            </div>
++          </div>
++
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Dealers</div>
++          {dealers.length === 0 ? (
++            <div style={{ fontSize: 12, color: "#999", marginBottom: 16 }}>No dealers yet.</div>
++          ) : (
++            <div style={{ marginBottom: 16 }}>
++              {dealers.map((d) => (
++                <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: "1px solid #f2f2f2" }}>
++                  <div>
++                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
++                    <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
++                  </div>
++                  <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
++                    ₹{Number(d.outstanding || 0).toLocaleString("en-IN")} due
++                  </div>
++                </div>
++              ))}
++            </div>
++          )}
++
++          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Item-wise sales this period</div>
++          {items.length === 0 ? (
++            <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
++          ) : (
++            items.map((it) => (
++              <div key={it.item_name} style={{ marginBottom: 10 }}>
++                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
++                  <span>{it.item_name}</span>
++                  <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
++                </div>
++                <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
++                  <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
++                </div>
++              </div>
++            ))
++          )}
++          {totalQty === 0 && items.length > 0 && null}
++        </>
++      )}
++    </div>
++  );
++}
++
++export default function TeamHierarchy() {
++  const [tree, setTree] = useState(null);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++  const [selected, setSelected] = useState(null); // { email, name }
++
++  useEffect(() => {
++    supabase.rpc("get_my_team_subtree").then(({ data, error }) => {
++      if (error) { setError(error.message); setLoading(false); return; }
++      setTree(buildTree(data || []));
++      setLoading(false);
++    });
++  }, []);
++
++  if (loading) return <div style={{ padding: "24px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>;
++  if (error) return <div style={{ padding: "24px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>;
++  if (!tree) return <div style={{ padding: "24px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Couldn't find your staff profile.</div>;
++
++  if (selected) {
++    return <TeamMemberProfile email={selected.email} name={selected.name} onBack={() => setSelected(null)} />;
++  }
++
++  return (
++    <div>
++      <div style={{ fontSize: 11.5, color: "#999", marginBottom: 14 }}>
++        {tree.children.length === 0
++          ? "No one reports to you yet."
++          : "Tap the arrow to expand a branch, tap a name to open their profile"}
++      </div>
++      <div style={{ overflowX: "auto", paddingBottom: 6 }}>
++        <ul style={{ display: "flex", justifyContent: "center", padding: 0, margin: 0, minWidth: 160 }}>
++          <TreeNode node={tree} isRoot onSelect={(email, name) => setSelected({ email, name })} depth={0} />
++        </ul>
++      </div>
++    </div>
++  );
++}
+diff --git a/supabase/migrations/dealer_access_control.sql b/supabase/migrations/dealer_access_control.sql
+index 4bbbdd3..5a9991e 100644
+--- a/supabase/migrations/dealer_access_control.sql
++++ b/supabase/migrations/dealer_access_control.sql
+@@ -1084,3 +1084,299 @@ end;
+ $$;
+ 
+ grant execute on function public.get_dealer_access_history(uuid) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 16. Team hierarchy (13 Sep 2026) — "My team" tab on Team & Access.
++--     Unlike everything above (grant/revoke, which stays restricted to
++--     Senior Sales Associate / Senior Sales Executive), VIEWING your own
++--     reporting chain is universal: any active staff member can see
++--     whoever reports to them, directly or indirectly, and drill into a
++--     profile (their dealers, dues, item-wise sales) for anyone in that
++--     downline. Nobody can see sideways or upward — only their own
++--     subtree, enforced server-side by _is_in_my_downline() on every call.
++-- ═══════════════════════════════════════════════════════════════════════
++
++create or replace function public._is_in_my_downline(p_target_email text, p_viewer_email text)
++returns boolean
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  with recursive downline as (
++    select sp.email, 0 as depth
++    from public.staff_profiles sp
++    where sp.email = p_viewer_email
++
++    union all
++
++    select sp.email, d.depth + 1
++    from public.staff_profiles sp
++    join downline d on sp.reports_to = d.email
++    where d.depth < 10
++  )
++  select exists (select 1 from downline where email = p_target_email);
++$$;
++
++grant execute on function public._is_in_my_downline(text, text) to authenticated;
++
++-- Everyone's own subtree, self included at depth 0 — the tree the "My
++-- team" tab renders. No role gate: a plain Sales Associate with nobody
++-- under them just gets back a single root row.
++create or replace function public.get_my_team_subtree()
++returns table (
++  email      text,
++  name       text,
++  role       text,
++  reports_to text,
++  depth      int
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null then
++    return;
++  end if;
++
++  return query
++    with recursive downline as (
++      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth
++      from public.staff_profiles sp
++      where sp.email = v_email
++
++      union all
++
++      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1
++      from public.staff_profiles sp
++      join downline d on sp.reports_to = d.email
++      where sp.is_active and d.depth < 10
++    )
++    select * from downline
++    order by depth, name;
++end;
++$$;
++
++grant execute on function public.get_my_team_subtree() to authenticated;
++
++-- Header stats for one person's profile: name/role, total dues across
++-- every dealer they can reach (owner + granted access, same set the
++-- "Dealers" list below shows), and how many such dealers there are.
++-- p_email must be the caller themself or someone in the caller's own
++-- downline (_is_in_my_downline) — otherwise this returns no rows.
++create or replace function public.get_team_member_summary(p_email text)
++returns table (
++  target_name text,
++  target_role text,
++  dues_total  numeric,
++  dealer_count int
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
++    return;
++  end if;
++
++  return query
++    with my_dealers as (
++      select p.id
++      from public.profiles p
++      where p.deleted_at is null
++        and (
++          p.assigned_sales_rep = p_email
++          or exists (
++            select 1 from public.dealer_access_grants g
++            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
++          )
++        )
++    ),
++    bal as (
++      select dl.dealer_id,
++        sum(case
++          when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
++          when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
++          else 0
++        end) as balance
++      from public.dealer_ledger dl
++      where dl.dealer_id in (select id from my_dealers)
++      group by dl.dealer_id
++    )
++    select
++      sp.name,
++      sp.role,
++      coalesce((select sum(balance) from bal), 0),
++      (select count(*) from my_dealers)::int
++    from public.staff_profiles sp
++    where sp.email = p_email;
++end;
++$$;
++
++grant execute on function public.get_team_member_summary(text) to authenticated;
++
++-- The dealer list itself — owner dealers and granted-access dealers
++-- together, tagged so the UI can show which is which, each with its
++-- own outstanding balance (same dealer_ledger formula used everywhere
++-- else in this file).
++create or replace function public.get_team_member_dealers(p_email text)
++returns table (
++  dealer_id    uuid,
++  dealer_code  text,
++  display_name text,
++  tag          text,
++  outstanding  numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
++    return;
++  end if;
++
++  return query
++    with my_dealers as (
++      select p.id, p.dealer_code,
++        coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as display_name,
++        case when p.assigned_sales_rep = p_email then 'owner' else 'granted' end as tag
++      from public.profiles p
++      where p.deleted_at is null
++        and (
++          p.assigned_sales_rep = p_email
++          or exists (
++            select 1 from public.dealer_access_grants g
++            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
++          )
++        )
++    )
++    select
++      md.id,
++      md.dealer_code,
++      md.display_name,
++      md.tag,
++      coalesce((
++        select sum(case
++          when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
++          when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
++          else 0
++        end)
++        from public.dealer_ledger dl where dl.dealer_id = md.id
++      ), 0) as outstanding
++    from my_dealers md
++    order by md.display_name;
++end;
++$$;
++
++grant execute on function public.get_team_member_dealers(text) to authenticated;
++
++-- Orders count for the period, across the same owner+granted dealer set.
++create or replace function public.get_team_member_orders_count(p_email text, p_start date, p_end date)
++returns int
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++  v_count int;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
++    return 0;
++  end if;
++
++  select count(*) into v_count
++  from public.orders o
++  where o.created_at::date between p_start and p_end
++    and o.dealer_id in (
++      select p.id from public.profiles p
++      where p.deleted_at is null
++        and (
++          p.assigned_sales_rep = p_email
++          or exists (
++            select 1 from public.dealer_access_grants g
++            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
++          )
++        )
++    );
++
++  return coalesce(v_count, 0);
++end;
++$$;
++
++grant execute on function public.get_team_member_orders_count(text, date, date) to authenticated;
++
++-- Item-wise sales for the period — quantity and % share of this
++-- person's total units sold in that window, across the same dealer set.
++create or replace function public.get_team_member_item_sales(p_email text, p_start date, p_end date)
++returns table (
++  item_name text,
++  qty       bigint,
++  pct       numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
++    return;
++  end if;
++
++  return query
++    with my_dealers as (
++      select p.id
++      from public.profiles p
++      where p.deleted_at is null
++        and (
++          p.assigned_sales_rep = p_email
++          or exists (
++            select 1 from public.dealer_access_grants g
++            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
++          )
++        )
++    ),
++    items as (
++      select oi.name, oi.qty
++      from public.order_items oi
++      join public.orders o on o.id = oi.order_id
++      where o.dealer_id in (select id from my_dealers)
++        and o.created_at::date between p_start and p_end
++    ),
++    totals as (
++      select coalesce(sum(qty), 0) as total_qty from items
++    )
++    select
++      i.name,
++      sum(i.qty)::bigint as qty,
++      case when t.total_qty = 0 then 0
++        else round(100.0 * sum(i.qty) / t.total_qty, 1)
++      end as pct
++    from items i, totals t
++    group by i.name, t.total_qty
++    order by qty desc;
++end;
++$$;
++
++grant execute on function public.get_team_member_item_sales(text, date, date) to authenticated;
+-- 
+2.43.0
+

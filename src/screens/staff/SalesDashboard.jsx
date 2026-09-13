@@ -6,7 +6,9 @@ import { staffRoleLabel } from "../../utils/staffRoles";
 import { featuresForRole } from "../../utils/staffFeatures";
 import DashboardAiCard from "../../components/staff/DashboardAiCard";
 import NotificationBell from "../../components/staff/NotificationBell";
+import StaffAvatar from "../../components/staff/StaffAvatar";
 import { getCurrentPosition } from "../../utils/visitMedia";
+import { uploadStaffPhoto } from "../../utils/staffPhoto";
 
 // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
 // senior_sales_associate, senior_sales_executive). Design approved against
@@ -221,9 +223,28 @@ function RingStat({ title, value, total, sub, onClick }) {
 
 export default function SalesDashboard() {
   const navigate = useNavigate();
-  const { staffProfile, signOut } = useApp();
+  const { staffProfile, session, signOut, updateStaffPhotoUrl } = useApp();
   const dealersSectionRef = useRef(null);
   const visitsSectionRef = useRef(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+
+  const handlePhotoUpload = async (file) => {
+    const email = session?.user?.email;
+    if (!email) return;
+    setPhotoError("");
+    setPhotoUploading(true);
+    try {
+      const url = await uploadStaffPhoto(email, file);
+      const { error } = await supabase.rpc("update_my_photo", { p_photo_url: url });
+      if (error) throw error;
+      updateStaffPhotoUrl(url);
+    } catch (err) {
+      setPhotoError(err.message || "Couldn't update your photo.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
 
   const [dealers, setDealers] = useState([]);
   const [loadingDealers, setLoadingDealers] = useState(true);
@@ -440,13 +461,15 @@ export default function SalesDashboard() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 22 }}>
-          <div style={{
-            width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
-            border: "2px solid rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 22, fontWeight: 800, color: "#fff", flexShrink: 0,
-          }}>
-            {initials(staffProfile?.name)}
-          </div>
+          <StaffAvatar
+            photoUrl={staffProfile?.photo_url}
+            name={staffProfile?.name}
+            size={60}
+            dark
+            editable
+            uploading={photoUploading}
+            onUpload={handlePhotoUpload}
+          />
           <div>
             <div style={{ fontSize: 22, fontWeight: 800 }}>
               {staffProfile?.name ? `Welcome, ${staffProfile.name}` : "Welcome"}
@@ -454,6 +477,9 @@ export default function SalesDashboard() {
             <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
               {roleLabel}
             </div>
+            {photoError && (
+              <div style={{ fontSize: 11, color: "#ffd9d9", marginTop: 4 }}>{photoError}</div>
+            )}
           </div>
         </div>
 

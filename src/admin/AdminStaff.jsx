@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { STAFF_ROLE_META, staffRoleLabel } from "../utils/staffRoles";
+import { uploadStaffPhoto } from "../utils/staffPhoto";
+import StaffAvatar from "../components/staff/StaffAvatar";
 
 const ROLE_OPTIONS = Object.keys(STAFF_ROLE_META);
 
@@ -19,13 +21,34 @@ export default function AdminStaff() {
   const [editSaving, setEditSaving]     = useState(false);
   const [editError, setEditError]       = useState("");
 
+  const [photoUploadingEmail, setPhotoUploadingEmail] = useState(null);
+  const [photoError, setPhotoError]     = useState("");
+
+  // Admin can change ANY staff member's photo — no downline restriction
+  // like the staff self-service upload has, matching every other field
+  // in this table already being admin-editable.
+  const handlePhotoChange = async (email, file) => {
+    setPhotoError("");
+    setPhotoUploadingEmail(email);
+    try {
+      const url = await uploadStaffPhoto(email, file);
+      const { error } = await supabase.from("staff_profiles").update({ photo_url: url }).eq("email", email);
+      if (error) throw error;
+      load();
+    } catch (err) {
+      setPhotoError(err.message || "Couldn't update photo.");
+    } finally {
+      setPhotoUploadingEmail(null);
+    }
+  };
+
   const load = async () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
     setFetchError("");
     const { data, error } = await supabase
       .from("staff_profiles")
-      .select("email, id, name, role, department, reports_to, is_active, created_at")
+      .select("email, id, name, role, department, reports_to, is_active, created_at, photo_url")
       .order("created_at", { ascending: false });
     if (error) {
       setFetchError(error.message || "Failed to load staff.");
@@ -188,6 +211,12 @@ export default function AdminStaff() {
         </div>
       )}
 
+      {photoError && (
+        <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#be123c", fontSize: 13 }}>
+          ⚠️ Photo update failed: {photoError}
+        </div>
+      )}
+
       {loading ? (
         <div className="admin-loading">Loading&hellip;</div>
       ) : rows.length === 0 ? (
@@ -215,13 +244,23 @@ export default function AdminStaff() {
                     <tr key={r.email} style={{ background: "#fafaff" }}>
                       <td>{r.email}</td>
                       <td>
-                        <input
-                          type="text"
-                          value={editForm.name}
-                          onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
-                          placeholder="Optional"
-                          style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13, width: 130 }}
-                        />
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <StaffAvatar
+                            photoUrl={r.photo_url}
+                            name={r.name}
+                            size={32}
+                            editable
+                            uploading={photoUploadingEmail === r.email}
+                            onUpload={(file) => handlePhotoChange(r.email, file)}
+                          />
+                          <input
+                            type="text"
+                            value={editForm.name}
+                            onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                            placeholder="Optional"
+                            style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13, width: 110 }}
+                          />
+                        </div>
                       </td>
                       <td>
                         <select
@@ -269,7 +308,12 @@ export default function AdminStaff() {
                 return (
                   <tr key={r.email}>
                     <td>{r.email}</td>
-                    <td>{r.name || "—"}</td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <StaffAvatar photoUrl={r.photo_url} name={r.name} size={28} />
+                        <span>{r.name || "—"}</span>
+                      </div>
+                    </td>
                     <td>{staffRoleLabel(r.role)}</td>
                     <td>{r.department}</td>
                     <td>{r.reports_to || "—"}</td>

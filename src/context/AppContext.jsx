@@ -237,7 +237,7 @@ export function AppProvider({ children }) {
     }
     supabase
       .from('staff_profiles')
-      .select('role, department, name, is_active')
+      .select('role, department, name, is_active, photo_url')
       .eq('id', session.user.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -247,6 +247,13 @@ export function AppProvider({ children }) {
         setStaffChecked(true);
       });
   }, [session]);
+
+  // Optimistic local update after a self-photo upload — the caller already
+  // has the new public URL back from storage, so there's no need to
+  // re-fetch the whole staff_profiles row just to pick up one column.
+  const updateStaffPhotoUrl = useCallback((url) => {
+    setStaffProfile((prev) => (prev ? { ...prev, photo_url: url } : prev));
+  }, []);
 
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured) await supabase.auth.signOut();
@@ -544,6 +551,7 @@ export function AppProvider({ children }) {
     isStaff,
     staffProfile,
     staffChecked,
+    updateStaffPhotoUrl,
     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
     dealer: profile,
     products,

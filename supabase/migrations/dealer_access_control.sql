@@ -1123,13 +1123,18 @@ grant execute on function public._is_in_my_downline(text, text) to authenticated
 -- Everyone's own subtree, self included at depth 0 — the tree the "My
 -- team" tab renders. No role gate: a plain Sales Associate with nobody
 -- under them just gets back a single root row.
+-- Return type changed (added photo_url) — drop first, Postgres won't
+-- let create-or-replace change a function's output columns in place.
+drop function if exists public.get_my_team_subtree();
+
 create or replace function public.get_my_team_subtree()
 returns table (
   email      text,
   name       text,
   role       text,
   reports_to text,
-  depth      int
+  depth      int,
+  photo_url  text
 )
 language plpgsql
 security definer
@@ -1146,13 +1151,13 @@ begin
 
   return query
     with recursive downline as (
-      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth
+      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth, sp.photo_url
       from public.staff_profiles sp
       where sp.email = v_email
 
       union all
 
-      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1
+      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1, sp.photo_url
       from public.staff_profiles sp
       join downline d on sp.reports_to = d.email
       where sp.is_active and d.depth < 10
@@ -1164,17 +1169,22 @@ $$;
 
 grant execute on function public.get_my_team_subtree() to authenticated;
 
--- Header stats for one person's profile: name/role, total dues across
--- every dealer they can reach (owner + granted access, same set the
--- "Dealers" list below shows), and how many such dealers there are.
+-- Header stats for one person's profile: name/role/photo, total dues
+-- across every dealer they can reach (owner + granted access, same set
+-- the "Dealers" list below shows), and how many such dealers there are.
 -- p_email must be the caller themself or someone in the caller's own
 -- downline (_is_in_my_downline) — otherwise this returns no rows.
+-- Return type changed (added target_photo_url) — drop first, same reason
+-- as get_my_team_subtree above.
+drop function if exists public.get_team_member_summary(text);
+
 create or replace function public.get_team_member_summary(p_email text)
 returns table (
   target_name text,
   target_role text,
   dues_total  numeric,
-  dealer_count int
+  dealer_count int,
+  target_photo_url text
 )
 language plpgsql
 security definer
@@ -1217,7 +1227,8 @@ begin
       sp.name,
       sp.role,
       coalesce((select sum(balance) from bal), 0),
-      (select count(*) from my_dealers)::int
+      (select count(*) from my_dealers)::int,
+      sp.photo_url
     from public.staff_profiles sp
     where sp.email = p_email;
 end;
@@ -1380,3 +1391,129 @@ end;
 $$;
 
 grant execute on function public.get_team_member_item_sales(text, date, date) to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 17. Staff photos + team member order list (13 Sep 2026)
+--     A staff photo column, a bucket for it, a self-service "change my
+--     own photo" RPC (admin changes anyone's via a direct table update —
+--     already allowed by the existing "Admins can update any staff
+--     profile" policy), and the order list the "My team" profile's new
+--     Orders drill-down page needs (get_team_member_orders_count already
+--     gave a number; this gives the actual rows).
+-- ═══════════════════════════════════════════════════════════════════════
+
+alter table public.staff_profiles add column if not exists photo_url text;
+
+-- Bucket for staff profile photos. Public read (same as dealer-media and
+-- visit-media — these are internal-app photos, not sensitive documents),
+-- write restricted to the staff member's own folder (named by their email,
+-- the same stable identifier used throughout this file) or an admin.
+insert into storage.buckets (id, name, public)
+  values ('staff-media', 'staff-media', true)
+  on conflict (id) do nothing;
+
+drop policy if exists "Public can view staff media" on storage.objects;
+create policy "Public can view staff media"
+  on storage.objects for select
+  using (bucket_id = 'staff-media');
+
+drop policy if exists "Staff can upload own photo or admin any" on storage.objects;
+create policy "Staff can upload own photo or admin any"
+  on storage.objects for insert
+  to authenticated
+  with check (
+    bucket_id = 'staff-media'
+    and (
+      public.is_admin()
+      or (storage.foldername(name))[1] = (select sp.email from public.staff_profiles sp where sp.id = auth.uid())
+    )
+  );
+
+drop policy if exists "Staff can replace own photo or admin any" on storage.objects;
+create policy "Staff can replace own photo or admin any"
+  on storage.objects for update
+  to authenticated
+  using (
+    bucket_id = 'staff-media'
+    and (
+      public.is_admin()
+      or (storage.foldername(name))[1] = (select sp.email from public.staff_profiles sp where sp.id = auth.uid())
+    )
+  );
+
+-- Self-service photo change. Deliberately an RPC rather than a blanket
+-- "staff can update their own row" RLS policy — that would let anyone
+-- self-edit their own role/reports_to too, since RLS in this app is
+-- row-level, not column-level. This only ever touches photo_url, and only
+-- for the caller's own row (auth.uid() re-derived server-side, never the
+-- client's say-so).
+create or replace function public.update_my_photo(p_photo_url text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  update public.staff_profiles
+  set photo_url = p_photo_url
+  where id = v_uid;
+end;
+$$;
+
+grant execute on function public.update_my_photo(text) to authenticated;
+
+-- Order rows (not just the count) for the Orders drill-down page — same
+-- owner+granted dealer set and downline guard as every other function in
+-- this section.
+create or replace function public.get_team_member_orders(p_email text, p_start date, p_end date)
+returns table (
+  order_id    uuid,
+  dealer_code text,
+  dealer_name text,
+  created_at  timestamptz,
+  status      text,
+  total       numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
+    return;
+  end if;
+
+  return query
+    select
+      o.id,
+      p.dealer_code,
+      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name),
+      o.created_at,
+      o.status,
+      o.total
+    from public.orders o
+    join public.profiles p on p.id = o.dealer_id
+    where o.created_at::date between p_start and p_end
+      and o.dealer_id in (
+        select p2.id
+        from public.profiles p2
+        where p2.deleted_at is null
+          and (
+            p2.assigned_sales_rep = p_email
+            or exists (
+              select 1 from public.dealer_access_grants g
+              where g.dealer_id = p2.id and g.grantee_email = p_email and g.revoked_at is null
+            )
+          )
+      )
+    order by o.created_at desc;
+end;
+$$;
+
+grant execute on function public.get_team_member_orders(text, date, date) to authenticated;

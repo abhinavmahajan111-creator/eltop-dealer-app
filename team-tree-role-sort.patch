@@ -1,0 +1,90 @@
+From b65b24b9105aaf616b24fb931a857fae2b89bf80 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 12:30:48 +0000
+Subject: [PATCH] Sort team tree siblings by job-role rank and add role color
+ badge
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Same reports_to doesn't mean same seniority — a Sales Associate and two
+Senior Sales Associates who all report to the same Senior Sales Executive
+were rendering as visually identical siblings. Sort each node's children
+by role rank (senior first) and add a small colored dot + left-border
+stripe per card so seniority reads at a glance even among siblings.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/TeamHierarchy.jsx | 34 ++++++++++++++++++++++++++---
+ 1 file changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/src/screens/staff/TeamHierarchy.jsx b/src/screens/staff/TeamHierarchy.jsx
+index 8ff2afc..96b1fb9 100644
+--- a/src/screens/staff/TeamHierarchy.jsx
++++ b/src/screens/staff/TeamHierarchy.jsx
+@@ -21,6 +21,24 @@ function roleLabel(role) {
+   return role || "—";
+ }
+ 
++// Seniority rank purely for display — sorting siblings and coloring the
++// role badge so two people with different job roles who happen to report
++// to the same manager don't read as equals in the tree. Has no bearing on
++// who reports to whom (that's still reports_to / depth from the server).
++function roleRank(role) {
++  if (role === "senior_sales_executive") return 3;
++  if (role === "senior_sales_associate") return 2;
++  if (role === "sales_associate") return 1;
++  return 0;
++}
++
++function roleColor(role) {
++  if (role === "senior_sales_executive") return "#7B2D8B";
++  if (role === "senior_sales_associate") return "#2f6fa8";
++  if (role === "sales_associate") return "#c98a1a";
++  return "#999";
++}
++
+ function toISO(d) {
+   return d.toISOString().slice(0, 10);
+ }
+@@ -69,6 +87,15 @@ function buildTree(rows) {
+     const parent = byEmail[r.reports_to];
+     if (parent) parent.children.push(byEmail[r.email]);
+   });
++  // Same reports_to doesn't mean same seniority — sort siblings by job-role
++  // rank (senior roles first) so the tree reads by position, not just by
++  // who happens to report to whom.
++  const sortChildren = (node) => {
++    if (!node) return;
++    node.children.sort((a, b) => roleRank(b.role) - roleRank(a.role) || (a.name || "").localeCompare(b.name || ""));
++    node.children.forEach(sortChildren);
++  };
++  sortChildren(root);
+   return root;
+ }
+ 
+@@ -83,8 +110,8 @@ function TreeNode({ node, isRoot, onSelect, depth }) {
+       )}
+       <div
+         style={{
+-          width: 138, border: "1.5px solid #eadcec", borderRadius: 10, overflow: "hidden",
+-          background: "#fff", flexShrink: 0,
++          width: 138, border: "1.5px solid #eadcec", borderLeft: `3px solid ${roleColor(node.role)}`,
++          borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0,
+         }}
+       >
+         <div
+@@ -114,7 +141,8 @@ function TreeNode({ node, isRoot, onSelect, depth }) {
+             {node.name || node.email}{isRoot ? " (you)" : ""}
+           </div>
+         </div>
+-        <div style={{ fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
++        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
++          <span style={{ width: 6, height: 6, borderRadius: 999, background: roleColor(node.role), flexShrink: 0 }} />
+           {roleLabel(node.role)}
+         </div>
+         {hasKids && (
+-- 
+2.43.0
+

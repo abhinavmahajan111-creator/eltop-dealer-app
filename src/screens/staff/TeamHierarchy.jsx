@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { exportRowsToExcel, exportTableToPdf, fmtCurrency } from "../../lib/dealerCrmUtils";
+import StaffAvatar from "../../components/staff/StaffAvatar";
+import StaffPhotoViewer from "../../components/staff/StaffPhotoViewer";
 
 // "My team" tab — universal, unlike the Dealer Access tab next to it.
 // Any active staff member can see whoever reports to them (directly or
 // indirectly) as a collapsible org-chart tree, and drill into a profile
-// for anyone in that downline: their dealers (owner + granted access),
-// total dues across those dealers, and item-wise sales for a chosen
-// period. Server enforces the "only your own downline" rule on every
-// call via _is_in_my_downline() — this screen only decides what's shown.
-
-function initials(name) {
-  if (!name) return "?";
-  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-}
+// for anyone in that downline: their photo, dealers (owner + granted
+// access) with a Dues drill-down, Orders for the period, and item-wise
+// sales — each with its own PDF/Excel export. Server enforces the "only
+// your own downline" rule on every call via _is_in_my_downline() — this
+// screen only decides what's shown.
 
 function roleLabel(role) {
   if (role === "senior_sales_executive") return "Senior Sales Executive";
@@ -52,6 +51,19 @@ function toISO(d) {
   return d.toISOString().slice(0, 10);
 }
 
+function fmtDateShort(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function exportFilenameFor(name, label, ext) {
+  const slug = (name || "staff").trim().replace(/\s+/g, "_");
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `Eltop_${slug}_${label.replace(/\s+/g, "_")}_${dd}${mm}${d.getFullYear()}.${ext}`;
+}
+
 const PERIODS = [
   {
     key: "this_month",
@@ -85,6 +97,14 @@ const PERIODS = [
     },
   },
 ];
+
+const PERIOD_CHIPS = [...PERIODS.map((p) => ({ key: p.key, label: p.label })), { key: "custom", label: "Custom" }];
+
+function periodRangeFor(periodKey, customFrom, customTo) {
+  if (periodKey === "custom") return { start: customFrom || null, end: customTo || null };
+  const p = PERIODS.find((x) => x.key === periodKey) || PERIODS[0];
+  return p.range();
+}
 
 function buildTree(rows) {
   if (!rows || rows.length === 0) return null;
@@ -173,6 +193,7 @@ function computeLayout(root, expandedMap) {
       email: node.email,
       name: node.name,
       role: node.role,
+      photoUrl: node.photo_url,
       x, y, row,
       childCount: (node.children || []).length,
       expanded: isExpanded(node.email),
@@ -237,7 +258,7 @@ function TeamTree({ tree, onSelect }) {
               key={node.email}
               style={{
                 position: "absolute", left: node.x - CARD_W / 2, top: node.y, width: CARD_W,
-                border: isRoot ? "1.5px solid #eadcec" : "1.5px solid #eadcec",
+                border: "1.5px solid #eadcec",
                 borderLeft: `3px solid ${roleColor(node.role)}`,
                 borderRadius: 10, overflow: "hidden", background: "#fff",
               }}
@@ -248,16 +269,7 @@ function TeamTree({ tree, onSelect }) {
                   display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                 }}
               >
-                <div
-                  style={{
-                    width: 28, height: 28, borderRadius: 999,
-                    background: isRoot ? "rgba(255,255,255,.25)" : "#fff",
-                    color: isRoot ? "#fff" : "#7B2D8B",
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
-                  }}
-                >
-                  {initials(node.name || node.email)}
-                </div>
+                <StaffAvatar photoUrl={node.photoUrl} name={node.name || node.email} size={28} dark={isRoot} />
                 <div
                   onClick={isRoot ? undefined : () => onSelect(node.email, node.name)}
                   style={{
@@ -289,28 +301,126 @@ function TeamTree({ tree, onSelect }) {
   );
 }
 
+const EXPORT_BTN = { display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1.5px solid #eadcec", borderRadius: 8, padding: "6px 10px", cursor: "pointer" };
+const MINI_EXPORT_BTN = { fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1px solid #eadcec", borderRadius: 6, padding: "3px 7px", cursor: "pointer" };
+
+function StatTile({ label, value, valueColor, onClick }) {
+  return (
+    <div onClick={onClick} style={{ background: "#f8f0f9", borderRadius: 10, padding: 10, cursor: onClick ? "pointer" : "default" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 10.5, color: "#999" }}>{label}</div>
+        {onClick && <span style={{ fontSize: 12, color: "#c9a8d4" }}>›</span>}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: valueColor || "#1a1a1a" }}>{value}</div>
+    </div>
+  );
+}
+
+function ComingSoonTile({ label }) {
+  return (
+    <div style={{ background: "#f2f2f2", border: "1px dashed #d8d8d8", borderRadius: 10, padding: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ fontSize: 10.5, color: "#aaa" }}>{label}</div>
+        <span style={{ fontSize: 11 }}>🔒</span>
+      </div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, marginTop: 6, color: "#bbb" }}>Coming soon</div>
+    </div>
+  );
+}
+
+function DetailHeader({ title, periodLabel, onExportPdf, onExportExcel }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 8 }}>
+      <div>
+        <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
+        {periodLabel && <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{periodLabel}</div>}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <button onClick={onExportPdf} style={EXPORT_BTN}>📄 PDF</button>
+        <button onClick={onExportExcel} style={EXPORT_BTN}>📊 Excel</button>
+      </div>
+    </div>
+  );
+}
+
+function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel }) {
+  return (
+    <div>
+      <DetailHeader title={title} periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
+      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: rows.length ? "4px 12px" : 12 }}>
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#999" }}>No dealers yet.</div>
+        ) : (
+          rows.map((d) => (
+            <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
+                <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
+              </div>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
+                {fmtCurrency(d.outstanding)} due
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrdersDetail({ orders, periodLabel, onExportPdf, onExportExcel }) {
+  return (
+    <div>
+      <DetailHeader title="Orders" periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
+      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: orders.length ? "4px 12px" : 12 }}>
+        {orders.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#999" }}>No orders this period.</div>
+        ) : (
+          orders.map((o) => (
+            <div key={o.order_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{o.dealer_code} · {o.dealer_name}</div>
+                <div style={{ fontSize: 10.5, color: "#999" }}>{fmtDateShort(o.created_at)} · {o.status}</div>
+              </div>
+              <div style={{ fontSize: 12.5, fontWeight: 800 }}>{fmtCurrency(o.total)}</div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TeamMemberProfile({ email, name, onBack }) {
   const [periodKey, setPeriodKey] = useState("this_month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [summary, setSummary] = useState(null);
   const [dealers, setDealers] = useState([]);
   const [items, setItems] = useState([]);
   const [ordersCount, setOrdersCount] = useState(0);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [subView, setSubView] = useState(null); // null | "dues" | "dealers" | "orders"
+  const [salesOpen, setSalesOpen] = useState(true);
+  const [photoOpen, setPhotoOpen] = useState(false);
 
-  const period = useMemo(() => PERIODS.find((p) => p.key === periodKey) || PERIODS[0], [periodKey]);
+  const range = useMemo(() => periodRangeFor(periodKey, customFrom, customTo), [periodKey, customFrom, customTo]);
+  const rangeReady = Boolean(range.start && range.end);
 
   useEffect(() => {
+    if (!rangeReady) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const { start, end } = period.range();
     Promise.all([
       supabase.rpc("get_team_member_summary", { p_email: email }),
       supabase.rpc("get_team_member_dealers", { p_email: email }),
-      supabase.rpc("get_team_member_orders_count", { p_email: email, p_start: start, p_end: end }),
-      supabase.rpc("get_team_member_item_sales", { p_email: email, p_start: start, p_end: end }),
-    ]).then(([s, d, oc, it]) => {
+      supabase.rpc("get_team_member_orders_count", { p_email: email, p_start: range.start, p_end: range.end }),
+      supabase.rpc("get_team_member_item_sales", { p_email: email, p_start: range.start, p_end: range.end }),
+      supabase.rpc("get_team_member_orders", { p_email: email, p_start: range.start, p_end: range.end }),
+    ]).then(([s, d, oc, it, ord]) => {
       if (cancelled) return;
       if (s.error || d.error) {
         setError((s.error || d.error).message);
@@ -321,103 +431,236 @@ function TeamMemberProfile({ email, name, onBack }) {
       setDealers(d.data || []);
       setOrdersCount(typeof oc.data === "number" ? oc.data : 0);
       setItems(it.data || []);
+      setOrders(ord.data || []);
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [email, period]);
+  }, [email, range.start, range.end, rangeReady]);
 
-  const totalQty = items.reduce((s, it) => s + Number(it.qty || 0), 0);
+  const dealersSorted = useMemo(
+    () => [...dealers].sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "")),
+    [dealers]
+  );
+  const duesSorted = useMemo(
+    () => [...dealers].sort((a, b) => Number(b.outstanding || 0) - Number(a.outstanding || 0)),
+    [dealers]
+  );
+
+  const periodLabel = periodKey === "custom"
+    ? (rangeReady ? `${fmtDateShort(range.start)} – ${fmtDateShort(range.end)}` : "Pick a range")
+    : `Period: ${PERIODS.find((p) => p.key === periodKey)?.label}`;
+
+  const exportDealersPdf = (rows, titleLabel) => {
+    exportTableToPdf({
+      filename: exportFilenameFor(name, titleLabel, "pdf"),
+      title: `${titleLabel} — ${name}`,
+      subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
+      columns: [
+        { header: "Dealer code", key: "dealer_code" },
+        { header: "Name", key: "display_name" },
+        { header: "Type", key: "tag" },
+        { header: "Outstanding", key: "outstanding", format: (v) => fmtCurrency(v) },
+      ],
+      rows,
+    });
+  };
+  const exportDealersExcel = (rows, titleLabel) => {
+    exportRowsToExcel({
+      filename: exportFilenameFor(name, titleLabel, "xlsx"),
+      sheetName: titleLabel.slice(0, 31),
+      rows: rows.map((d) => ({
+        "Dealer code": d.dealer_code,
+        Name: d.display_name,
+        Type: d.tag === "owner" ? "Owner" : "Granted access",
+        Outstanding: Number(d.outstanding || 0),
+      })),
+    });
+  };
+
+  const exportOrders = (format) => {
+    if (format === "pdf") {
+      exportTableToPdf({
+        filename: exportFilenameFor(name, "Orders", "pdf"),
+        title: `Orders — ${name}`,
+        subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
+        columns: [
+          { header: "Date", key: "created_at", format: (v) => fmtDateShort(v) },
+          { header: "Dealer", key: "dealer_name" },
+          { header: "Status", key: "status" },
+          { header: "Total", key: "total", format: (v) => fmtCurrency(v) },
+        ],
+        rows: orders,
+      });
+    } else {
+      exportRowsToExcel({
+        filename: exportFilenameFor(name, "Orders", "xlsx"),
+        sheetName: "Orders",
+        rows: orders.map((o) => ({
+          Date: fmtDateShort(o.created_at),
+          Dealer: `${o.dealer_code} · ${o.dealer_name}`,
+          Status: o.status,
+          Total: Number(o.total || 0),
+        })),
+      });
+    }
+  };
+
+  const exportItemSales = (format) => {
+    if (format === "pdf") {
+      exportTableToPdf({
+        filename: exportFilenameFor(name, "Item-wise sales", "pdf"),
+        title: `Item-wise sales — ${name}`,
+        subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
+        columns: [
+          { header: "Item", key: "item_name" },
+          { header: "Qty", key: "qty" },
+          { header: "% share", key: "pct", format: (v) => `${v}%` },
+        ],
+        rows: items,
+      });
+    } else {
+      exportRowsToExcel({
+        filename: exportFilenameFor(name, "Item-wise sales", "xlsx"),
+        sheetName: "Item sales",
+        rows: items.map((it) => ({ Item: it.item_name, Qty: Number(it.qty || 0), "% share": Number(it.pct || 0) })),
+      });
+    }
+  };
+
+  const headerBack = subView ? () => setSubView(null) : onBack;
+  const headerLabel = subView ? name : "My team";
 
   return (
     <div>
-      <button onClick={onBack} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>
-        ← My team
+      <button onClick={headerBack} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>
+        ← {headerLabel}
       </button>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 999, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800 }}>
-          {initials(name)}
-        </div>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 800 }}>{name}</div>
-          <div style={{ fontSize: 11.5, color: "#999" }}>{summary ? roleLabel(summary.target_role) : "—"} · reports up to you</div>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ fontSize: 11.5, color: "#999" }}>Period</div>
-        <select
-          className="admin-select"
-          value={periodKey}
-          onChange={(e) => setPeriodKey(e.target.value)}
-          style={{ padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec", fontSize: 12.5 }}
-        >
-          {PERIODS.map((p) => (
-            <option key={p.key} value={p.key}>{p.label}</option>
-          ))}
-        </select>
-      </div>
-
-      {loading ? (
-        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
-      ) : error ? (
-        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
-      ) : (
+      {!subView && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
-              <div style={{ fontSize: 10.5, color: "#999" }}>Dues to collect</div>
-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: Number(summary?.dues_total) > 0 ? "#d64545" : "#2fa84f" }}>
-                ₹{Number(summary?.dues_total || 0).toLocaleString("en-IN")}
-              </div>
-            </div>
-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
-              <div style={{ fontSize: 10.5, color: "#999" }}>Dealers</div>
-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{summary?.dealer_count ?? 0}</div>
-            </div>
-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
-              <div style={{ fontSize: 10.5, color: "#999" }}>Orders</div>
-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{ordersCount}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <StaffAvatar photoUrl={summary?.target_photo_url} name={name} size={44} onClick={() => setPhotoOpen(true)} />
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800 }}>{name}</div>
+              <div style={{ fontSize: 11.5, color: "#999" }}>{summary ? roleLabel(summary.target_role) : "—"} · reports up to you</div>
             </div>
           </div>
+          <div style={{ fontSize: 10.5, color: "#bbb", marginBottom: 14 }}>Tap photo to view, download or share</div>
 
-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Dealers</div>
-          {dealers.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#999", marginBottom: 16 }}>No dealers yet.</div>
-          ) : (
-            <div style={{ marginBottom: 16 }}>
-              {dealers.map((d) => (
-                <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: "1px solid #f2f2f2" }}>
-                  <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
-                    <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
-                  </div>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
-                    ₹{Number(d.outstanding || 0).toLocaleString("en-IN")} due
-                  </div>
-                </div>
+          <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 8 }}>Period</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {PERIOD_CHIPS.map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => setPeriodKey(p.key)}
+                  style={{
+                    padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer",
+                    background: periodKey === p.key ? "#7B2D8B" : "#fff",
+                    color: periodKey === p.key ? "#fff" : "#666",
+                    border: periodKey === p.key ? "1px solid #7B2D8B" : "1px solid #eadcec",
+                  }}
+                >
+                  {p.label}
+                </button>
               ))}
             </div>
-          )}
-
-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Item-wise sales this period</div>
-          {items.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
-          ) : (
-            items.map((it) => (
-              <div key={it.item_name} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                  <span>{it.item_name}</span>
-                  <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
-                </div>
-                <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
-                </div>
+            {periodKey === "custom" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid #f2f2f2" }}>
+                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
+                <span style={{ color: "#999", fontSize: 12 }}>to</span>
+                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
               </div>
-            ))
+            )}
+          </div>
+
+          {!rangeReady ? (
+            <div style={{ padding: "16px 0", textAlign: "center", fontSize: 12.5, color: "#999" }}>Pick both dates to see this period.</div>
+          ) : loading ? (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+          ) : error ? (
+            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+                <StatTile
+                  label="Dues to collect"
+                  value={fmtCurrency(summary?.dues_total)}
+                  valueColor={Number(summary?.dues_total) > 0 ? "#d64545" : "#2fa84f"}
+                  onClick={() => setSubView("dues")}
+                />
+                <StatTile label="Dealers" value={summary?.dealer_count ?? 0} onClick={() => setSubView("dealers")} />
+                <StatTile label="Orders" value={ordersCount} onClick={() => setSubView("orders")} />
+                <ComingSoonTile label="Target achieved" />
+              </div>
+
+              <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, overflow: "hidden" }}>
+                <div onClick={() => setSalesOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, cursor: "pointer" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800 }}>Item-wise sales</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {items.length > 0 && (
+                      <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => exportItemSales("pdf")} style={MINI_EXPORT_BTN}>PDF</button>
+                        <button onClick={() => exportItemSales("excel")} style={MINI_EXPORT_BTN}>Excel</button>
+                      </span>
+                    )}
+                    <span style={{ fontSize: 11, color: "#999" }}>{salesOpen ? "▲" : "▼"}</span>
+                  </div>
+                </div>
+                {salesOpen && (
+                  <div style={{ borderTop: "1px solid #f2f2f2", padding: 12 }}>
+                    {items.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
+                    ) : (
+                      items.map((it) => (
+                        <div key={it.item_name} style={{ marginBottom: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                            <span>{it.item_name}</span>
+                            <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
+                          </div>
+                          <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
           )}
-          {totalQty === 0 && items.length > 0 && null}
         </>
+      )}
+
+      {subView === "dues" && (
+        <DealerListDetail
+          title="Dues to collect"
+          rows={duesSorted}
+          periodLabel={null}
+          onExportPdf={() => exportDealersPdf(duesSorted, "Dues to collect")}
+          onExportExcel={() => exportDealersExcel(duesSorted, "Dues to collect")}
+        />
+      )}
+      {subView === "dealers" && (
+        <DealerListDetail
+          title="Dealers"
+          rows={dealersSorted}
+          periodLabel={null}
+          onExportPdf={() => exportDealersPdf(dealersSorted, "Dealers")}
+          onExportExcel={() => exportDealersExcel(dealersSorted, "Dealers")}
+        />
+      )}
+      {subView === "orders" && (
+        <OrdersDetail
+          orders={orders}
+          periodLabel={periodLabel}
+          onExportPdf={() => exportOrders("pdf")}
+          onExportExcel={() => exportOrders("excel")}
+        />
+      )}
+
+      {photoOpen && (
+        <StaffPhotoViewer photoUrl={summary?.target_photo_url} name={name} onClose={() => setPhotoOpen(false)} />
       )}
     </div>
   );

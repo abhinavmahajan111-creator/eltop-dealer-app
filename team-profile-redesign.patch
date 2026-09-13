@@ -1,0 +1,1195 @@
+From 9e268c3905b975110401991d6c96f34307791fb0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 13:40:28 +0000
+Subject: [PATCH] Redesign team member profile: staff photos, drill-down pages,
+ PDF/Excel exports
+
+Team member profile page gets a full redesign: staff photo (self-service
+upload from the sales dashboard header, admin-editable for anyone from
+Admin > Staff, viewable/downloadable/shareable via tap-to-open lightbox),
+an on-demand custom date range alongside the existing period chips, and
+Dues/Dealers/Orders stat tiles that each open their own back-button detail
+page instead of showing everything inline. Item-wise sales becomes
+collapsible. Every report (Dues, Dealers, Orders, Item-wise sales) gets
+its own PDF and Excel export, reusing the existing exportTableToPdf/
+exportRowsToExcel helpers already used elsewhere in the app.
+
+New staff-media storage bucket (public read, write restricted to a
+staff member's own folder or an admin, mirroring the dealer-media/
+visit-media pattern). Self-service photo changes go through a narrow
+update_my_photo() RPC that only ever touches photo_url and re-derives
+the caller's identity from auth.uid() server-side, rather than a
+blanket "staff can update own row" policy that would let self role
+escalation slip in through the same row-level RLS. Admin's photo
+change path reuses the existing "admins can update any staff profile"
+policy already used for every other field. New get_team_member_orders()
+RPC returns the actual order rows the new Orders drill-down needs
+(get_team_member_orders_count already existed for the tile's number).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminStaff.jsx                      |  62 ++-
+ src/components/staff/StaffAvatar.jsx          |  77 +++
+ src/components/staff/StaffPhotoViewer.jsx     |  59 +++
+ src/context/AppContext.jsx                    |  10 +-
+ src/screens/staff/SalesDashboard.jsx          |  42 +-
+ src/screens/staff/TeamHierarchy.jsx           | 447 ++++++++++++++----
+ src/utils/staffPhoto.js                       |  20 +
+ supabase/migrations/dealer_access_control.sql | 153 +++++-
+ 8 files changed, 742 insertions(+), 128 deletions(-)
+ create mode 100644 src/components/staff/StaffAvatar.jsx
+ create mode 100644 src/components/staff/StaffPhotoViewer.jsx
+ create mode 100644 src/utils/staffPhoto.js
+
+diff --git a/src/admin/AdminStaff.jsx b/src/admin/AdminStaff.jsx
+index 064ae20..54b1779 100644
+--- a/src/admin/AdminStaff.jsx
++++ b/src/admin/AdminStaff.jsx
+@@ -1,6 +1,8 @@
+ import { useEffect, useState } from "react";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ import { STAFF_ROLE_META, staffRoleLabel } from "../utils/staffRoles";
++import { uploadStaffPhoto } from "../utils/staffPhoto";
++import StaffAvatar from "../components/staff/StaffAvatar";
+ 
+ const ROLE_OPTIONS = Object.keys(STAFF_ROLE_META);
+ 
+@@ -19,13 +21,34 @@ export default function AdminStaff() {
+   const [editSaving, setEditSaving]     = useState(false);
+   const [editError, setEditError]       = useState("");
+ 
++  const [photoUploadingEmail, setPhotoUploadingEmail] = useState(null);
++  const [photoError, setPhotoError]     = useState("");
++
++  // Admin can change ANY staff member's photo — no downline restriction
++  // like the staff self-service upload has, matching every other field
++  // in this table already being admin-editable.
++  const handlePhotoChange = async (email, file) => {
++    setPhotoError("");
++    setPhotoUploadingEmail(email);
++    try {
++      const url = await uploadStaffPhoto(email, file);
++      const { error } = await supabase.from("staff_profiles").update({ photo_url: url }).eq("email", email);
++      if (error) throw error;
++      load();
++    } catch (err) {
++      setPhotoError(err.message || "Couldn't update photo.");
++    } finally {
++      setPhotoUploadingEmail(null);
++    }
++  };
++
+   const load = async () => {
+     if (!isSupabaseConfigured) { setLoading(false); return; }
+     setLoading(true);
+     setFetchError("");
+     const { data, error } = await supabase
+       .from("staff_profiles")
+-      .select("email, id, name, role, department, reports_to, is_active, created_at")
++      .select("email, id, name, role, department, reports_to, is_active, created_at, photo_url")
+       .order("created_at", { ascending: false });
+     if (error) {
+       setFetchError(error.message || "Failed to load staff.");
+@@ -188,6 +211,12 @@ export default function AdminStaff() {
+         </div>
+       )}
+ 
++      {photoError && (
++        <div style={{ background: "#fff1f2", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#be123c", fontSize: 13 }}>
++          ⚠️ Photo update failed: {photoError}
++        </div>
++      )}
++
+       {loading ? (
+         <div className="admin-loading">Loading&hellip;</div>
+       ) : rows.length === 0 ? (
+@@ -215,13 +244,23 @@ export default function AdminStaff() {
+                     <tr key={r.email} style={{ background: "#fafaff" }}>
+                       <td>{r.email}</td>
+                       <td>
+-                        <input
+-                          type="text"
+-                          value={editForm.name}
+-                          onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+-                          placeholder="Optional"
+-                          style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13, width: 130 }}
+-                        />
++                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++                          <StaffAvatar
++                            photoUrl={r.photo_url}
++                            name={r.name}
++                            size={32}
++                            editable
++                            uploading={photoUploadingEmail === r.email}
++                            onUpload={(file) => handlePhotoChange(r.email, file)}
++                          />
++                          <input
++                            type="text"
++                            value={editForm.name}
++                            onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
++                            placeholder="Optional"
++                            style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13, width: 110 }}
++                          />
++                        </div>
+                       </td>
+                       <td>
+                         <select
+@@ -269,7 +308,12 @@ export default function AdminStaff() {
+                 return (
+                   <tr key={r.email}>
+                     <td>{r.email}</td>
+-                    <td>{r.name || "—"}</td>
++                    <td>
++                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
++                        <StaffAvatar photoUrl={r.photo_url} name={r.name} size={28} />
++                        <span>{r.name || "—"}</span>
++                      </div>
++                    </td>
+                     <td>{staffRoleLabel(r.role)}</td>
+                     <td>{r.department}</td>
+                     <td>{r.reports_to || "—"}</td>
+diff --git a/src/components/staff/StaffAvatar.jsx b/src/components/staff/StaffAvatar.jsx
+new file mode 100644
+index 0000000..7fce5e1
+--- /dev/null
++++ b/src/components/staff/StaffAvatar.jsx
+@@ -0,0 +1,77 @@
++import { useRef, useState } from "react";
++
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++// One avatar component covering every place a staff photo shows up:
++//   - plain view (My team tree cards) — just photoUrl/name, no props below
++//   - clickable view (a team member's profile header) — pass onClick, opens
++//     StaffPhotoViewer in the parent
++//   - editable (your own dashboard header, or an admin editing a staff row)
++//     — pass editable + onUpload(file); shows a small camera badge, tapping
++//     the avatar opens a native file picker instead of calling onClick
++export default function StaffAvatar({ photoUrl, name, size = 40, editable = false, uploading = false, onUpload, onClick, dark = false }) {
++  const inputRef = useRef(null);
++  const [broken, setBroken] = useState(false);
++  const showPhoto = photoUrl && !broken;
++
++  const handlePick = () => {
++    if (editable && inputRef.current) inputRef.current.click();
++    else if (onClick) onClick();
++  };
++
++  return (
++    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
++      <div
++        onClick={handlePick}
++        style={{
++          width: size, height: size, borderRadius: "50%", overflow: "hidden",
++          background: dark ? "rgba(255,255,255,0.25)" : "#f3e6f6",
++          color: dark ? "#fff" : "#7B2D8B",
++          border: dark ? "2px solid rgba(255,255,255,0.6)" : "none",
++          display: "flex", alignItems: "center", justifyContent: "center",
++          fontSize: size * 0.36, fontWeight: 800,
++          cursor: editable || onClick ? "pointer" : "default",
++        }}
++      >
++        {showPhoto ? (
++          <img
++            src={photoUrl}
++            alt=""
++            onError={() => setBroken(true)}
++            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", opacity: uploading ? 0.5 : 1 }}
++          />
++        ) : (
++          initials(name)
++        )}
++      </div>
++      {editable && (
++        <div
++          onClick={handlePick}
++          style={{
++            position: "absolute", bottom: -1, right: -1, width: Math.max(16, size * 0.36), height: Math.max(16, size * 0.36),
++            borderRadius: "50%", background: "#7B2D8B", border: "2px solid #fff",
++            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
++          }}
++        >
++          <span style={{ fontSize: Math.max(8, size * 0.22), lineHeight: 1 }} aria-hidden="true">📷</span>
++        </div>
++      )}
++      {editable && (
++        <input
++          ref={inputRef}
++          type="file"
++          accept="image/*"
++          hidden
++          onChange={(e) => {
++            const file = e.target.files && e.target.files[0];
++            e.target.value = "";
++            if (file && onUpload) onUpload(file);
++          }}
++        />
++      )}
++    </div>
++  );
++}
+diff --git a/src/components/staff/StaffPhotoViewer.jsx b/src/components/staff/StaffPhotoViewer.jsx
+new file mode 100644
+index 0000000..2e484bd
+--- /dev/null
++++ b/src/components/staff/StaffPhotoViewer.jsx
+@@ -0,0 +1,59 @@
++import { downloadImageAsFile } from "../../utils/productMedia";
++
++// Full-size staff photo viewer — same fixed-overlay lightbox pattern
++// ProductDetailView.jsx already uses for product images, with a Share
++// button added (Web Share API with the actual image file when the device
++// supports sharing files; falls back to just downloading it otherwise).
++export default function StaffPhotoViewer({ photoUrl, name, onClose }) {
++  if (!photoUrl) return null;
++
++  const handleShare = async () => {
++    try {
++      const response = await fetch(photoUrl);
++      const blob = await response.blob();
++      const file = new File([blob], `${(name || "staff-photo").replace(/\s+/g, "_")}.jpg`, { type: blob.type || "image/jpeg" });
++      if (navigator.canShare && navigator.canShare({ files: [file] })) {
++        await navigator.share({ files: [file], title: name || "Staff photo" });
++        return;
++      }
++    } catch (_) {
++      // fall through to download
++    }
++    downloadImageAsFile(photoUrl, name || "staff-photo");
++  };
++
++  return (
++    <div
++      onClick={onClose}
++      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 2000, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20 }}
++    >
++      <div style={{ position: "absolute", top: 16, right: 16, display: "flex", gap: 10 }} onClick={(e) => e.stopPropagation()}>
++        <button
++          onClick={() => downloadImageAsFile(photoUrl, name || "staff-photo")}
++          style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}
++        >
++          ⬇️ Download
++        </button>
++        <button
++          onClick={handleShare}
++          style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}
++        >
++          📤 Share
++        </button>
++        <button
++          onClick={onClose}
++          style={{ background: "rgba(255,255,255,.15)", border: "1px solid rgba(255,255,255,.3)", color: "#fff", borderRadius: 8, width: 36, height: 36, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
++        >
++          ✕
++        </button>
++      </div>
++      <img
++        src={photoUrl}
++        alt={name || ""}
++        onClick={(e) => e.stopPropagation()}
++        style={{ maxWidth: "min(360px, 90vw)", maxHeight: "70vh", borderRadius: 12, objectFit: "cover" }}
++      />
++      {name && <div style={{ color: "#fff", fontSize: 13, fontWeight: 700, marginTop: 14 }}>{name}</div>}
++    </div>
++  );
++}
+diff --git a/src/context/AppContext.jsx b/src/context/AppContext.jsx
+index 5de1b6d..354c4dc 100644
+--- a/src/context/AppContext.jsx
++++ b/src/context/AppContext.jsx
+@@ -237,7 +237,7 @@ export function AppProvider({ children }) {
+     }
+     supabase
+       .from('staff_profiles')
+-      .select('role, department, name, is_active')
++      .select('role, department, name, is_active, photo_url')
+       .eq('id', session.user.id)
+       .maybeSingle()
+       .then(({ data }) => {
+@@ -248,6 +248,13 @@ export function AppProvider({ children }) {
+       });
+   }, [session]);
+ 
++  // Optimistic local update after a self-photo upload — the caller already
++  // has the new public URL back from storage, so there's no need to
++  // re-fetch the whole staff_profiles row just to pick up one column.
++  const updateStaffPhotoUrl = useCallback((url) => {
++    setStaffProfile((prev) => (prev ? { ...prev, photo_url: url } : prev));
++  }, []);
++
+   const signOut = useCallback(async () => {
+     if (isSupabaseConfigured) await supabase.auth.signOut();
+     setSession(null);
+@@ -544,6 +551,7 @@ export function AppProvider({ children }) {
+     isStaff,
+     staffProfile,
+     staffChecked,
++    updateStaffPhotoUrl,
+     dealerApplicationStatus: profile?.dealer_application_status ?? 'none',
+     dealer: profile,
+     products,
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index f27d8eb..7a7f6f4 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -6,7 +6,9 @@ import { staffRoleLabel } from "../../utils/staffRoles";
+ import { featuresForRole } from "../../utils/staffFeatures";
+ import DashboardAiCard from "../../components/staff/DashboardAiCard";
+ import NotificationBell from "../../components/staff/NotificationBell";
++import StaffAvatar from "../../components/staff/StaffAvatar";
+ import { getCurrentPosition } from "../../utils/visitMedia";
++import { uploadStaffPhoto } from "../../utils/staffPhoto";
+ 
+ // Real dashboard for /staff/sales — all three Sales roles (sales_associate,
+ // senior_sales_associate, senior_sales_executive). Design approved against
+@@ -221,9 +223,28 @@ function RingStat({ title, value, total, sub, onClick }) {
+ 
+ export default function SalesDashboard() {
+   const navigate = useNavigate();
+-  const { staffProfile, signOut } = useApp();
++  const { staffProfile, session, signOut, updateStaffPhotoUrl } = useApp();
+   const dealersSectionRef = useRef(null);
+   const visitsSectionRef = useRef(null);
++  const [photoUploading, setPhotoUploading] = useState(false);
++  const [photoError, setPhotoError] = useState("");
++
++  const handlePhotoUpload = async (file) => {
++    const email = session?.user?.email;
++    if (!email) return;
++    setPhotoError("");
++    setPhotoUploading(true);
++    try {
++      const url = await uploadStaffPhoto(email, file);
++      const { error } = await supabase.rpc("update_my_photo", { p_photo_url: url });
++      if (error) throw error;
++      updateStaffPhotoUrl(url);
++    } catch (err) {
++      setPhotoError(err.message || "Couldn't update your photo.");
++    } finally {
++      setPhotoUploading(false);
++    }
++  };
+ 
+   const [dealers, setDealers] = useState([]);
+   const [loadingDealers, setLoadingDealers] = useState(true);
+@@ -440,13 +461,15 @@ export default function SalesDashboard() {
+           </div>
+         </div>
+         <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 22 }}>
+-          <div style={{
+-            width: 60, height: 60, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
+-            border: "2px solid rgba(255,255,255,0.6)", display: "flex", alignItems: "center", justifyContent: "center",
+-            fontSize: 22, fontWeight: 800, color: "#fff", flexShrink: 0,
+-          }}>
+-            {initials(staffProfile?.name)}
+-          </div>
++          <StaffAvatar
++            photoUrl={staffProfile?.photo_url}
++            name={staffProfile?.name}
++            size={60}
++            dark
++            editable
++            uploading={photoUploading}
++            onUpload={handlePhotoUpload}
++          />
+           <div>
+             <div style={{ fontSize: 22, fontWeight: 800 }}>
+               {staffProfile?.name ? `Welcome, ${staffProfile.name}` : "Welcome"}
+@@ -454,6 +477,9 @@ export default function SalesDashboard() {
+             <div style={{ fontSize: 13, fontWeight: 700, opacity: 0.85, marginTop: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>
+               {roleLabel}
+             </div>
++            {photoError && (
++              <div style={{ fontSize: 11, color: "#ffd9d9", marginTop: 4 }}>{photoError}</div>
++            )}
+           </div>
+         </div>
+ 
+diff --git a/src/screens/staff/TeamHierarchy.jsx b/src/screens/staff/TeamHierarchy.jsx
+index 96539db..aaf4d36 100644
+--- a/src/screens/staff/TeamHierarchy.jsx
++++ b/src/screens/staff/TeamHierarchy.jsx
+@@ -1,18 +1,17 @@
+ import { useEffect, useMemo, useState } from "react";
+ import { supabase } from "../../lib/supabase";
++import { exportRowsToExcel, exportTableToPdf, fmtCurrency } from "../../lib/dealerCrmUtils";
++import StaffAvatar from "../../components/staff/StaffAvatar";
++import StaffPhotoViewer from "../../components/staff/StaffPhotoViewer";
+ 
+ // "My team" tab — universal, unlike the Dealer Access tab next to it.
+ // Any active staff member can see whoever reports to them (directly or
+ // indirectly) as a collapsible org-chart tree, and drill into a profile
+-// for anyone in that downline: their dealers (owner + granted access),
+-// total dues across those dealers, and item-wise sales for a chosen
+-// period. Server enforces the "only your own downline" rule on every
+-// call via _is_in_my_downline() — this screen only decides what's shown.
+-
+-function initials(name) {
+-  if (!name) return "?";
+-  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+-}
++// for anyone in that downline: their photo, dealers (owner + granted
++// access) with a Dues drill-down, Orders for the period, and item-wise
++// sales — each with its own PDF/Excel export. Server enforces the "only
++// your own downline" rule on every call via _is_in_my_downline() — this
++// screen only decides what's shown.
+ 
+ function roleLabel(role) {
+   if (role === "senior_sales_executive") return "Senior Sales Executive";
+@@ -52,6 +51,19 @@ function toISO(d) {
+   return d.toISOString().slice(0, 10);
+ }
+ 
++function fmtDateShort(iso) {
++  if (!iso) return "—";
++  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
++}
++
++function exportFilenameFor(name, label, ext) {
++  const slug = (name || "staff").trim().replace(/\s+/g, "_");
++  const d = new Date();
++  const dd = String(d.getDate()).padStart(2, "0");
++  const mm = String(d.getMonth() + 1).padStart(2, "0");
++  return `Eltop_${slug}_${label.replace(/\s+/g, "_")}_${dd}${mm}${d.getFullYear()}.${ext}`;
++}
++
+ const PERIODS = [
+   {
+     key: "this_month",
+@@ -86,6 +98,14 @@ const PERIODS = [
+   },
+ ];
+ 
++const PERIOD_CHIPS = [...PERIODS.map((p) => ({ key: p.key, label: p.label })), { key: "custom", label: "Custom" }];
++
++function periodRangeFor(periodKey, customFrom, customTo) {
++  if (periodKey === "custom") return { start: customFrom || null, end: customTo || null };
++  const p = PERIODS.find((x) => x.key === periodKey) || PERIODS[0];
++  return p.range();
++}
++
+ function buildTree(rows) {
+   if (!rows || rows.length === 0) return null;
+   const byEmail = {};
+@@ -173,6 +193,7 @@ function computeLayout(root, expandedMap) {
+       email: node.email,
+       name: node.name,
+       role: node.role,
++      photoUrl: node.photo_url,
+       x, y, row,
+       childCount: (node.children || []).length,
+       expanded: isExpanded(node.email),
+@@ -237,7 +258,7 @@ function TeamTree({ tree, onSelect }) {
+               key={node.email}
+               style={{
+                 position: "absolute", left: node.x - CARD_W / 2, top: node.y, width: CARD_W,
+-                border: isRoot ? "1.5px solid #eadcec" : "1.5px solid #eadcec",
++                border: "1.5px solid #eadcec",
+                 borderLeft: `3px solid ${roleColor(node.role)}`,
+                 borderRadius: 10, overflow: "hidden", background: "#fff",
+               }}
+@@ -248,16 +269,7 @@ function TeamTree({ tree, onSelect }) {
+                   display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                 }}
+               >
+-                <div
+-                  style={{
+-                    width: 28, height: 28, borderRadius: 999,
+-                    background: isRoot ? "rgba(255,255,255,.25)" : "#fff",
+-                    color: isRoot ? "#fff" : "#7B2D8B",
+-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
+-                  }}
+-                >
+-                  {initials(node.name || node.email)}
+-                </div>
++                <StaffAvatar photoUrl={node.photoUrl} name={node.name || node.email} size={28} dark={isRoot} />
+                 <div
+                   onClick={isRoot ? undefined : () => onSelect(node.email, node.name)}
+                   style={{
+@@ -289,28 +301,126 @@ function TeamTree({ tree, onSelect }) {
+   );
+ }
+ 
++const EXPORT_BTN = { display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1.5px solid #eadcec", borderRadius: 8, padding: "6px 10px", cursor: "pointer" };
++const MINI_EXPORT_BTN = { fontSize: 10.5, fontWeight: 700, color: "#7B2D8B", background: "#fff", border: "1px solid #eadcec", borderRadius: 6, padding: "3px 7px", cursor: "pointer" };
++
++function StatTile({ label, value, valueColor, onClick }) {
++  return (
++    <div onClick={onClick} style={{ background: "#f8f0f9", borderRadius: 10, padding: 10, cursor: onClick ? "pointer" : "default" }}>
++      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
++        <div style={{ fontSize: 10.5, color: "#999" }}>{label}</div>
++        {onClick && <span style={{ fontSize: 12, color: "#c9a8d4" }}>›</span>}
++      </div>
++      <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: valueColor || "#1a1a1a" }}>{value}</div>
++    </div>
++  );
++}
++
++function ComingSoonTile({ label }) {
++  return (
++    <div style={{ background: "#f2f2f2", border: "1px dashed #d8d8d8", borderRadius: 10, padding: 10 }}>
++      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
++        <div style={{ fontSize: 10.5, color: "#aaa" }}>{label}</div>
++        <span style={{ fontSize: 11 }}>🔒</span>
++      </div>
++      <div style={{ fontSize: 10.5, fontWeight: 700, marginTop: 6, color: "#bbb" }}>Coming soon</div>
++    </div>
++  );
++}
++
++function DetailHeader({ title, periodLabel, onExportPdf, onExportExcel }) {
++  return (
++    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, gap: 8 }}>
++      <div>
++        <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
++        {periodLabel && <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{periodLabel}</div>}
++      </div>
++      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
++        <button onClick={onExportPdf} style={EXPORT_BTN}>📄 PDF</button>
++        <button onClick={onExportExcel} style={EXPORT_BTN}>📊 Excel</button>
++      </div>
++    </div>
++  );
++}
++
++function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel }) {
++  return (
++    <div>
++      <DetailHeader title={title} periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
++      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: rows.length ? "4px 12px" : 12 }}>
++        {rows.length === 0 ? (
++          <div style={{ fontSize: 12, color: "#999" }}>No dealers yet.</div>
++        ) : (
++          rows.map((d) => (
++            <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
++              <div>
++                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
++                <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
++              </div>
++              <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
++                {fmtCurrency(d.outstanding)} due
++              </div>
++            </div>
++          ))
++        )}
++      </div>
++    </div>
++  );
++}
++
++function OrdersDetail({ orders, periodLabel, onExportPdf, onExportExcel }) {
++  return (
++    <div>
++      <DetailHeader title="Orders" periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
++      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: orders.length ? "4px 12px" : 12 }}>
++        {orders.length === 0 ? (
++          <div style={{ fontSize: 12, color: "#999" }}>No orders this period.</div>
++        ) : (
++          orders.map((o) => (
++            <div key={o.order_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
++              <div>
++                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{o.dealer_code} · {o.dealer_name}</div>
++                <div style={{ fontSize: 10.5, color: "#999" }}>{fmtDateShort(o.created_at)} · {o.status}</div>
++              </div>
++              <div style={{ fontSize: 12.5, fontWeight: 800 }}>{fmtCurrency(o.total)}</div>
++            </div>
++          ))
++        )}
++      </div>
++    </div>
++  );
++}
++
+ function TeamMemberProfile({ email, name, onBack }) {
+   const [periodKey, setPeriodKey] = useState("this_month");
++  const [customFrom, setCustomFrom] = useState("");
++  const [customTo, setCustomTo] = useState("");
+   const [summary, setSummary] = useState(null);
+   const [dealers, setDealers] = useState([]);
+   const [items, setItems] = useState([]);
+   const [ordersCount, setOrdersCount] = useState(0);
++  const [orders, setOrders] = useState([]);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState(null);
++  const [subView, setSubView] = useState(null); // null | "dues" | "dealers" | "orders"
++  const [salesOpen, setSalesOpen] = useState(true);
++  const [photoOpen, setPhotoOpen] = useState(false);
+ 
+-  const period = useMemo(() => PERIODS.find((p) => p.key === periodKey) || PERIODS[0], [periodKey]);
++  const range = useMemo(() => periodRangeFor(periodKey, customFrom, customTo), [periodKey, customFrom, customTo]);
++  const rangeReady = Boolean(range.start && range.end);
+ 
+   useEffect(() => {
++    if (!rangeReady) return;
+     let cancelled = false;
+     setLoading(true);
+     setError(null);
+-    const { start, end } = period.range();
+     Promise.all([
+       supabase.rpc("get_team_member_summary", { p_email: email }),
+       supabase.rpc("get_team_member_dealers", { p_email: email }),
+-      supabase.rpc("get_team_member_orders_count", { p_email: email, p_start: start, p_end: end }),
+-      supabase.rpc("get_team_member_item_sales", { p_email: email, p_start: start, p_end: end }),
+-    ]).then(([s, d, oc, it]) => {
++      supabase.rpc("get_team_member_orders_count", { p_email: email, p_start: range.start, p_end: range.end }),
++      supabase.rpc("get_team_member_item_sales", { p_email: email, p_start: range.start, p_end: range.end }),
++      supabase.rpc("get_team_member_orders", { p_email: email, p_start: range.start, p_end: range.end }),
++    ]).then(([s, d, oc, it, ord]) => {
+       if (cancelled) return;
+       if (s.error || d.error) {
+         setError((s.error || d.error).message);
+@@ -321,104 +431,237 @@ function TeamMemberProfile({ email, name, onBack }) {
+       setDealers(d.data || []);
+       setOrdersCount(typeof oc.data === "number" ? oc.data : 0);
+       setItems(it.data || []);
++      setOrders(ord.data || []);
+       setLoading(false);
+     });
+     return () => { cancelled = true; };
+-  }, [email, period]);
++  }, [email, range.start, range.end, rangeReady]);
+ 
+-  const totalQty = items.reduce((s, it) => s + Number(it.qty || 0), 0);
++  const dealersSorted = useMemo(
++    () => [...dealers].sort((a, b) => (a.display_name || "").localeCompare(b.display_name || "")),
++    [dealers]
++  );
++  const duesSorted = useMemo(
++    () => [...dealers].sort((a, b) => Number(b.outstanding || 0) - Number(a.outstanding || 0)),
++    [dealers]
++  );
++
++  const periodLabel = periodKey === "custom"
++    ? (rangeReady ? `${fmtDateShort(range.start)} – ${fmtDateShort(range.end)}` : "Pick a range")
++    : `Period: ${PERIODS.find((p) => p.key === periodKey)?.label}`;
++
++  const exportDealersPdf = (rows, titleLabel) => {
++    exportTableToPdf({
++      filename: exportFilenameFor(name, titleLabel, "pdf"),
++      title: `${titleLabel} — ${name}`,
++      subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
++      columns: [
++        { header: "Dealer code", key: "dealer_code" },
++        { header: "Name", key: "display_name" },
++        { header: "Type", key: "tag" },
++        { header: "Outstanding", key: "outstanding", format: (v) => fmtCurrency(v) },
++      ],
++      rows,
++    });
++  };
++  const exportDealersExcel = (rows, titleLabel) => {
++    exportRowsToExcel({
++      filename: exportFilenameFor(name, titleLabel, "xlsx"),
++      sheetName: titleLabel.slice(0, 31),
++      rows: rows.map((d) => ({
++        "Dealer code": d.dealer_code,
++        Name: d.display_name,
++        Type: d.tag === "owner" ? "Owner" : "Granted access",
++        Outstanding: Number(d.outstanding || 0),
++      })),
++    });
++  };
++
++  const exportOrders = (format) => {
++    if (format === "pdf") {
++      exportTableToPdf({
++        filename: exportFilenameFor(name, "Orders", "pdf"),
++        title: `Orders — ${name}`,
++        subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
++        columns: [
++          { header: "Date", key: "created_at", format: (v) => fmtDateShort(v) },
++          { header: "Dealer", key: "dealer_name" },
++          { header: "Status", key: "status" },
++          { header: "Total", key: "total", format: (v) => fmtCurrency(v) },
++        ],
++        rows: orders,
++      });
++    } else {
++      exportRowsToExcel({
++        filename: exportFilenameFor(name, "Orders", "xlsx"),
++        sheetName: "Orders",
++        rows: orders.map((o) => ({
++          Date: fmtDateShort(o.created_at),
++          Dealer: `${o.dealer_code} · ${o.dealer_name}`,
++          Status: o.status,
++          Total: Number(o.total || 0),
++        })),
++      });
++    }
++  };
++
++  const exportItemSales = (format) => {
++    if (format === "pdf") {
++      exportTableToPdf({
++        filename: exportFilenameFor(name, "Item-wise sales", "pdf"),
++        title: `Item-wise sales — ${name}`,
++        subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
++        columns: [
++          { header: "Item", key: "item_name" },
++          { header: "Qty", key: "qty" },
++          { header: "% share", key: "pct", format: (v) => `${v}%` },
++        ],
++        rows: items,
++      });
++    } else {
++      exportRowsToExcel({
++        filename: exportFilenameFor(name, "Item-wise sales", "xlsx"),
++        sheetName: "Item sales",
++        rows: items.map((it) => ({ Item: it.item_name, Qty: Number(it.qty || 0), "% share": Number(it.pct || 0) })),
++      });
++    }
++  };
++
++  const headerBack = subView ? () => setSubView(null) : onBack;
++  const headerLabel = subView ? name : "My team";
+ 
+   return (
+     <div>
+-      <button onClick={onBack} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>
+-        ← My team
++      <button onClick={headerBack} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 10 }}>
++        ← {headerLabel}
+       </button>
+ 
+-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+-        <div style={{ width: 36, height: 36, borderRadius: 999, background: "#f3e6f6", color: "#7B2D8B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800 }}>
+-          {initials(name)}
+-        </div>
+-        <div>
+-          <div style={{ fontSize: 16, fontWeight: 800 }}>{name}</div>
+-          <div style={{ fontSize: 11.5, color: "#999" }}>{summary ? roleLabel(summary.target_role) : "—"} · reports up to you</div>
+-        </div>
+-      </div>
+-
+-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+-        <div style={{ fontSize: 11.5, color: "#999" }}>Period</div>
+-        <select
+-          className="admin-select"
+-          value={periodKey}
+-          onChange={(e) => setPeriodKey(e.target.value)}
+-          style={{ padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec", fontSize: 12.5 }}
+-        >
+-          {PERIODS.map((p) => (
+-            <option key={p.key} value={p.key}>{p.label}</option>
+-          ))}
+-        </select>
+-      </div>
+-
+-      {loading ? (
+-        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+-      ) : error ? (
+-        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
+-      ) : (
++      {!subView && (
+         <>
+-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
+-              <div style={{ fontSize: 10.5, color: "#999" }}>Dues to collect</div>
+-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4, color: Number(summary?.dues_total) > 0 ? "#d64545" : "#2fa84f" }}>
+-                ₹{Number(summary?.dues_total || 0).toLocaleString("en-IN")}
+-              </div>
+-            </div>
+-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
+-              <div style={{ fontSize: 10.5, color: "#999" }}>Dealers</div>
+-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{summary?.dealer_count ?? 0}</div>
+-            </div>
+-            <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10 }}>
+-              <div style={{ fontSize: 10.5, color: "#999" }}>Orders</div>
+-              <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{ordersCount}</div>
++          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
++            <StaffAvatar photoUrl={summary?.target_photo_url} name={name} size={44} onClick={() => setPhotoOpen(true)} />
++            <div>
++              <div style={{ fontSize: 16, fontWeight: 800 }}>{name}</div>
++              <div style={{ fontSize: 11.5, color: "#999" }}>{summary ? roleLabel(summary.target_role) : "—"} · reports up to you</div>
+             </div>
+           </div>
+-
+-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Dealers</div>
+-          {dealers.length === 0 ? (
+-            <div style={{ fontSize: 12, color: "#999", marginBottom: 16 }}>No dealers yet.</div>
+-          ) : (
+-            <div style={{ marginBottom: 16 }}>
+-              {dealers.map((d) => (
+-                <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderTop: "1px solid #f2f2f2" }}>
+-                  <div>
+-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
+-                    <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
+-                  </div>
+-                  <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
+-                    ₹{Number(d.outstanding || 0).toLocaleString("en-IN")} due
+-                  </div>
+-                </div>
++          <div style={{ fontSize: 10.5, color: "#bbb", marginBottom: 14 }}>Tap photo to view, download or share</div>
++
++          <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++            <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 8 }}>Period</div>
++            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
++              {PERIOD_CHIPS.map((p) => (
++                <button
++                  key={p.key}
++                  onClick={() => setPeriodKey(p.key)}
++                  style={{
++                    padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, cursor: "pointer",
++                    background: periodKey === p.key ? "#7B2D8B" : "#fff",
++                    color: periodKey === p.key ? "#fff" : "#666",
++                    border: periodKey === p.key ? "1px solid #7B2D8B" : "1px solid #eadcec",
++                  }}
++                >
++                  {p.label}
++                </button>
+               ))}
+             </div>
+-          )}
++            {periodKey === "custom" && (
++              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, paddingTop: 10, borderTop: "1px solid #f2f2f2" }}>
++                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
++                <span style={{ color: "#999", fontSize: 12 }}>to</span>
++                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
++              </div>
++            )}
++          </div>
+ 
+-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Item-wise sales this period</div>
+-          {items.length === 0 ? (
+-            <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
++          {!rangeReady ? (
++            <div style={{ padding: "16px 0", textAlign: "center", fontSize: 12.5, color: "#999" }}>Pick both dates to see this period.</div>
++          ) : loading ? (
++            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++          ) : error ? (
++            <div style={{ padding: "20px 0", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
+           ) : (
+-            items.map((it) => (
+-              <div key={it.item_name} style={{ marginBottom: 10 }}>
+-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+-                  <span>{it.item_name}</span>
+-                  <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
+-                </div>
+-                <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
+-                  <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
++            <>
++              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
++                <StatTile
++                  label="Dues to collect"
++                  value={fmtCurrency(summary?.dues_total)}
++                  valueColor={Number(summary?.dues_total) > 0 ? "#d64545" : "#2fa84f"}
++                  onClick={() => setSubView("dues")}
++                />
++                <StatTile label="Dealers" value={summary?.dealer_count ?? 0} onClick={() => setSubView("dealers")} />
++                <StatTile label="Orders" value={ordersCount} onClick={() => setSubView("orders")} />
++                <ComingSoonTile label="Target achieved" />
++              </div>
++
++              <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, overflow: "hidden" }}>
++                <div onClick={() => setSalesOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 12, cursor: "pointer" }}>
++                  <div style={{ fontSize: 13, fontWeight: 800 }}>Item-wise sales</div>
++                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
++                    {items.length > 0 && (
++                      <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6 }}>
++                        <button onClick={() => exportItemSales("pdf")} style={MINI_EXPORT_BTN}>PDF</button>
++                        <button onClick={() => exportItemSales("excel")} style={MINI_EXPORT_BTN}>Excel</button>
++                      </span>
++                    )}
++                    <span style={{ fontSize: 11, color: "#999" }}>{salesOpen ? "▲" : "▼"}</span>
++                  </div>
+                 </div>
++                {salesOpen && (
++                  <div style={{ borderTop: "1px solid #f2f2f2", padding: 12 }}>
++                    {items.length === 0 ? (
++                      <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
++                    ) : (
++                      items.map((it) => (
++                        <div key={it.item_name} style={{ marginBottom: 10 }}>
++                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
++                            <span>{it.item_name}</span>
++                            <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
++                          </div>
++                          <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
++                            <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
++                          </div>
++                        </div>
++                      ))
++                    )}
++                  </div>
++                )}
+               </div>
+-            ))
++            </>
+           )}
+-          {totalQty === 0 && items.length > 0 && null}
+         </>
+       )}
++
++      {subView === "dues" && (
++        <DealerListDetail
++          title="Dues to collect"
++          rows={duesSorted}
++          periodLabel={null}
++          onExportPdf={() => exportDealersPdf(duesSorted, "Dues to collect")}
++          onExportExcel={() => exportDealersExcel(duesSorted, "Dues to collect")}
++        />
++      )}
++      {subView === "dealers" && (
++        <DealerListDetail
++          title="Dealers"
++          rows={dealersSorted}
++          periodLabel={null}
++          onExportPdf={() => exportDealersPdf(dealersSorted, "Dealers")}
++          onExportExcel={() => exportDealersExcel(dealersSorted, "Dealers")}
++        />
++      )}
++      {subView === "orders" && (
++        <OrdersDetail
++          orders={orders}
++          periodLabel={periodLabel}
++          onExportPdf={() => exportOrders("pdf")}
++          onExportExcel={() => exportOrders("excel")}
++        />
++      )}
++
++      {photoOpen && (
++        <StaffPhotoViewer photoUrl={summary?.target_photo_url} name={name} onClose={() => setPhotoOpen(false)} />
++      )}
+     </div>
+   );
+ }
+diff --git a/src/utils/staffPhoto.js b/src/utils/staffPhoto.js
+new file mode 100644
+index 0000000..09798df
+--- /dev/null
++++ b/src/utils/staffPhoto.js
+@@ -0,0 +1,20 @@
++import { supabase } from "../lib/supabase";
++
++// Staff profile photos live in their own bucket, one object per staff
++// member at "<email>/photo.<ext>" (upsert: true so re-uploading just
++// replaces it) — same shape as AdminDealers.jsx's dealer-media uploader.
++// RLS on storage.objects (see supabase/migrations/dealer_access_control.sql
++// section 17) only lets a staff member write under their own email, or an
++// admin write under anyone's.
++const BUCKET = "staff-media";
++
++export async function uploadStaffPhoto(email, file) {
++  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
++  const path = `${email}/photo.${ext}`;
++  const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true });
++  if (error) throw error;
++  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
++  // Cache-bust — same path gets reused on every re-upload, so without this
++  // the browser (and any CDN) would keep serving the old cached image.
++  return `${data.publicUrl}?t=${Date.now()}`;
++}
+diff --git a/supabase/migrations/dealer_access_control.sql b/supabase/migrations/dealer_access_control.sql
+index 5a9991e..865402b 100644
+--- a/supabase/migrations/dealer_access_control.sql
++++ b/supabase/migrations/dealer_access_control.sql
+@@ -1123,13 +1123,18 @@ grant execute on function public._is_in_my_downline(text, text) to authenticated
+ -- Everyone's own subtree, self included at depth 0 — the tree the "My
+ -- team" tab renders. No role gate: a plain Sales Associate with nobody
+ -- under them just gets back a single root row.
++-- Return type changed (added photo_url) — drop first, Postgres won't
++-- let create-or-replace change a function's output columns in place.
++drop function if exists public.get_my_team_subtree();
++
+ create or replace function public.get_my_team_subtree()
+ returns table (
+   email      text,
+   name       text,
+   role       text,
+   reports_to text,
+-  depth      int
++  depth      int,
++  photo_url  text
+ )
+ language plpgsql
+ security definer
+@@ -1146,13 +1151,13 @@ begin
+ 
+   return query
+     with recursive downline as (
+-      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth
++      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth, sp.photo_url
+       from public.staff_profiles sp
+       where sp.email = v_email
+ 
+       union all
+ 
+-      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1
++      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1, sp.photo_url
+       from public.staff_profiles sp
+       join downline d on sp.reports_to = d.email
+       where sp.is_active and d.depth < 10
+@@ -1164,17 +1169,22 @@ $$;
+ 
+ grant execute on function public.get_my_team_subtree() to authenticated;
+ 
+--- Header stats for one person's profile: name/role, total dues across
+--- every dealer they can reach (owner + granted access, same set the
+--- "Dealers" list below shows), and how many such dealers there are.
++-- Header stats for one person's profile: name/role/photo, total dues
++-- across every dealer they can reach (owner + granted access, same set
++-- the "Dealers" list below shows), and how many such dealers there are.
+ -- p_email must be the caller themself or someone in the caller's own
+ -- downline (_is_in_my_downline) — otherwise this returns no rows.
++-- Return type changed (added target_photo_url) — drop first, same reason
++-- as get_my_team_subtree above.
++drop function if exists public.get_team_member_summary(text);
++
+ create or replace function public.get_team_member_summary(p_email text)
+ returns table (
+   target_name text,
+   target_role text,
+   dues_total  numeric,
+-  dealer_count int
++  dealer_count int,
++  target_photo_url text
+ )
+ language plpgsql
+ security definer
+@@ -1217,7 +1227,8 @@ begin
+       sp.name,
+       sp.role,
+       coalesce((select sum(balance) from bal), 0),
+-      (select count(*) from my_dealers)::int
++      (select count(*) from my_dealers)::int,
++      sp.photo_url
+     from public.staff_profiles sp
+     where sp.email = p_email;
+ end;
+@@ -1380,3 +1391,129 @@ end;
+ $$;
+ 
+ grant execute on function public.get_team_member_item_sales(text, date, date) to authenticated;
++
++-- ═══════════════════════════════════════════════════════════════════════
++-- 17. Staff photos + team member order list (13 Sep 2026)
++--     A staff photo column, a bucket for it, a self-service "change my
++--     own photo" RPC (admin changes anyone's via a direct table update —
++--     already allowed by the existing "Admins can update any staff
++--     profile" policy), and the order list the "My team" profile's new
++--     Orders drill-down page needs (get_team_member_orders_count already
++--     gave a number; this gives the actual rows).
++-- ═══════════════════════════════════════════════════════════════════════
++
++alter table public.staff_profiles add column if not exists photo_url text;
++
++-- Bucket for staff profile photos. Public read (same as dealer-media and
++-- visit-media — these are internal-app photos, not sensitive documents),
++-- write restricted to the staff member's own folder (named by their email,
++-- the same stable identifier used throughout this file) or an admin.
++insert into storage.buckets (id, name, public)
++  values ('staff-media', 'staff-media', true)
++  on conflict (id) do nothing;
++
++drop policy if exists "Public can view staff media" on storage.objects;
++create policy "Public can view staff media"
++  on storage.objects for select
++  using (bucket_id = 'staff-media');
++
++drop policy if exists "Staff can upload own photo or admin any" on storage.objects;
++create policy "Staff can upload own photo or admin any"
++  on storage.objects for insert
++  to authenticated
++  with check (
++    bucket_id = 'staff-media'
++    and (
++      public.is_admin()
++      or (storage.foldername(name))[1] = (select sp.email from public.staff_profiles sp where sp.id = auth.uid())
++    )
++  );
++
++drop policy if exists "Staff can replace own photo or admin any" on storage.objects;
++create policy "Staff can replace own photo or admin any"
++  on storage.objects for update
++  to authenticated
++  using (
++    bucket_id = 'staff-media'
++    and (
++      public.is_admin()
++      or (storage.foldername(name))[1] = (select sp.email from public.staff_profiles sp where sp.id = auth.uid())
++    )
++  );
++
++-- Self-service photo change. Deliberately an RPC rather than a blanket
++-- "staff can update their own row" RLS policy — that would let anyone
++-- self-edit their own role/reports_to too, since RLS in this app is
++-- row-level, not column-level. This only ever touches photo_url, and only
++-- for the caller's own row (auth.uid() re-derived server-side, never the
++-- client's say-so).
++create or replace function public.update_my_photo(p_photo_url text)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid uuid := auth.uid();
++begin
++  update public.staff_profiles
++  set photo_url = p_photo_url
++  where id = v_uid;
++end;
++$$;
++
++grant execute on function public.update_my_photo(text) to authenticated;
++
++-- Order rows (not just the count) for the Orders drill-down page — same
++-- owner+granted dealer set and downline guard as every other function in
++-- this section.
++create or replace function public.get_team_member_orders(p_email text, p_start date, p_end date)
++returns table (
++  order_id    uuid,
++  dealer_code text,
++  dealer_name text,
++  created_at  timestamptz,
++  status      text,
++  total       numeric
++)
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_uid   uuid := auth.uid();
++  v_email text;
++begin
++  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
++  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
++    return;
++  end if;
++
++  return query
++    select
++      o.id,
++      p.dealer_code,
++      coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name),
++      o.created_at,
++      o.status,
++      o.total
++    from public.orders o
++    join public.profiles p on p.id = o.dealer_id
++    where o.created_at::date between p_start and p_end
++      and o.dealer_id in (
++        select p2.id
++        from public.profiles p2
++        where p2.deleted_at is null
++          and (
++            p2.assigned_sales_rep = p_email
++            or exists (
++              select 1 from public.dealer_access_grants g
++              where g.dealer_id = p2.id and g.grantee_email = p_email and g.revoked_at is null
++            )
++          )
++      )
++    order by o.created_at desc;
++end;
++$$;
++
++grant execute on function public.get_team_member_orders(text, date, date) to authenticated;
+-- 
+2.43.0
+
