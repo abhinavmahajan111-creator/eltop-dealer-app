@@ -21,10 +21,10 @@ function roleLabel(role) {
   return role || "—";
 }
 
-// Seniority rank purely for display — sorting siblings and coloring the
-// role badge so two people with different job roles who happen to report
-// to the same manager don't read as equals in the tree. Has no bearing on
-// who reports to whom (that's still reports_to / depth from the server).
+// Seniority rank purely for display — rows and the role badge, so two
+// people with different job roles who happen to share a manager don't
+// read as equals in the tree. Has no bearing on who reports to whom
+// (that's still reports_to from the server).
 function roleRank(role) {
   if (role === "senior_sales_executive") return 3;
   if (role === "senior_sales_associate") return 2;
@@ -37,6 +37,15 @@ function roleColor(role) {
   if (role === "senior_sales_associate") return "#2f6fa8";
   if (role === "sales_associate") return "#c98a1a";
   return "#999";
+}
+
+// Which row a role sits in, independent of reports_to depth — every
+// Senior Sales Associate lands in the same row whether they report
+// straight to a Senior Sales Executive or via someone else. Unknown
+// roles fall one row below Sales Associate.
+function tierRow(role) {
+  const rank = roleRank(role);
+  return rank > 0 ? 3 - rank : 3;
 }
 
 function toISO(d) {
@@ -88,8 +97,8 @@ function buildTree(rows) {
     if (parent) parent.children.push(byEmail[r.email]);
   });
   // Same reports_to doesn't mean same seniority — sort siblings by job-role
-  // rank (senior roles first) so the tree reads by position, not just by
-  // who happens to report to whom.
+  // rank (senior roles first) so left-to-right order reads sensibly; the
+  // row each one ends up in is decided separately, by tierRow below.
   const sortChildren = (node) => {
     if (!node) return;
     node.children.sort((a, b) => roleRank(b.role) - roleRank(a.role) || (a.name || "").localeCompare(b.name || ""));
@@ -99,80 +108,184 @@ function buildTree(rows) {
   return root;
 }
 
-function TreeNode({ node, isRoot, onSelect, depth }) {
-  const [expanded, setExpanded] = useState(true);
-  const hasKids = node.children && node.children.length > 0;
+const CARD_W = 138;
+const CARD_H = 84;
+const COL_W = CARD_W + 16;
+const ROW_H = CARD_H + 46;
+
+// Lays the tree out on a grid: row = job-role tier (so every Senior Sales
+// Associate lines up in the same row regardless of who they report to),
+// column = a standard tidy-tree position derived purely from the actual
+// reports_to edges (leaves get sequential slots, a parent centers over its
+// own children). Because column slots are assigned uniquely per node in a
+// single left-to-right pass, a connector line dropped straight down a
+// node's own column can never cross another unrelated card, even when it
+// has to pass through a row where that node's real manager isn't — which
+// is exactly what lets, say, a Sales Associate who reports straight to a
+// Senior Sales Executive sit in the Sales Associate row next to their
+// peers, with a line that skips the Senior Sales Associate row entirely.
+function computeLayout(root, expandedMap) {
+  if (!root) return { nodes: [], edges: [], width: COL_W, height: ROW_H };
+
+  const isExpanded = (email) => expandedMap[email] !== false;
+
+  const rowOf = {};
+  const kidsOf = {};
+  function walkRows(node, parentRow) {
+    const r = parentRow == null ? tierRow(node.role) : Math.max(tierRow(node.role), parentRow + 1);
+    rowOf[node.email] = r;
+    const kids = isExpanded(node.email) ? (node.children || []) : [];
+    kidsOf[node.email] = kids;
+    kids.forEach((c) => walkRows(c, r));
+  }
+  walkRows(root, null);
+
+  const colOf = {};
+  let nextLeaf = 0;
+  function walkCols(node) {
+    const kids = kidsOf[node.email] || [];
+    if (kids.length === 0) {
+      colOf[node.email] = nextLeaf;
+      nextLeaf += 1;
+      return colOf[node.email];
+    }
+    const kidCols = kids.map(walkCols);
+    colOf[node.email] = kidCols.reduce((a, b) => a + b, 0) / kidCols.length;
+    return colOf[node.email];
+  }
+  walkCols(root);
+
+  const minRow = Math.min(...Object.values(rowOf));
+  const nodes = [];
+  const edges = [];
+  let maxCol = 0;
+  let maxRow = 0;
+
+  function collect(node, parentCoord) {
+    const row = rowOf[node.email] - minRow;
+    const col = colOf[node.email];
+    const x = col * COL_W + COL_W / 2;
+    const y = row * ROW_H;
+    maxCol = Math.max(maxCol, col);
+    maxRow = Math.max(maxRow, row);
+    const kids = kidsOf[node.email] || [];
+    nodes.push({
+      email: node.email,
+      name: node.name,
+      role: node.role,
+      x, y, row,
+      childCount: (node.children || []).length,
+      expanded: isExpanded(node.email),
+    });
+    if (parentCoord) {
+      edges.push({
+        key: node.email,
+        fromX: parentCoord.x, fromY: parentCoord.y, fromRow: parentCoord.row,
+        toX: x, toY: y, toRow: row,
+      });
+    }
+    kids.forEach((c) => collect(c, { x, y, row }));
+  }
+  collect(root, null);
+
+  return {
+    nodes, edges,
+    width: (maxCol + 1) * COL_W,
+    height: (maxRow + 1) * ROW_H + CARD_H,
+  };
+}
+
+function TeamTree({ tree, onSelect }) {
+  const [expandedMap, setExpandedMap] = useState({});
+  const layout = useMemo(() => computeLayout(tree, expandedMap), [tree, expandedMap]);
+
+  const toggleExpand = (email) => {
+    setExpandedMap((m) => ({ ...m, [email]: m[email] === false }));
+  };
 
   return (
-    <li style={{ listStyle: "none", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", padding: depth === 0 ? 0 : "24px 10px 0 10px" }}>
-      {depth > 0 && (
-        <span style={{ position: "absolute", top: 0, left: "50%", width: 0, height: 24, borderLeft: "1.5px solid #e3cdea" }} />
-      )}
-      <div
-        style={{
-          width: 138, border: "1.5px solid #eadcec", borderLeft: `3px solid ${roleColor(node.role)}`,
-          borderRadius: 10, overflow: "hidden", background: "#fff", flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            background: isRoot ? "#7B2D8B" : "#f8f0f9", padding: "8px 6px",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-          }}
+    <div style={{ overflowX: "auto", paddingBottom: 6 }}>
+      <div style={{ position: "relative", width: layout.width, height: layout.height, margin: "0 auto" }}>
+        <svg
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
         >
-          <div
-            style={{
-              width: 28, height: 28, borderRadius: 999,
-              background: isRoot ? "rgba(255,255,255,.25)" : "#fff",
-              color: isRoot ? "#fff" : "#7B2D8B",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
-            }}
-          >
-            {initials(node.name || node.email)}
-          </div>
-          <div
-            onClick={isRoot ? undefined : () => onSelect(node.email, node.name)}
-            style={{
-              fontSize: 12, fontWeight: 800, textAlign: "center", lineHeight: 1.25,
-              color: isRoot ? "#fff" : "#7B2D8B", cursor: isRoot ? "default" : "pointer",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
-            }}
-          >
-            {node.name || node.email}{isRoot ? " (you)" : ""}
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
-          <span style={{ width: 6, height: 6, borderRadius: 999, background: roleColor(node.role), flexShrink: 0 }} />
-          {roleLabel(node.role)}
-        </div>
-        {hasKids && (
-          <div
-            onClick={() => setExpanded((v) => !v)}
-            style={{ textAlign: "center", fontSize: 10, color: "#999", padding: "3px", borderTop: "1px solid #f2f2f2", cursor: "pointer" }}
-          >
-            {expanded ? "▲" : `▼ ${node.children.length}`}
-          </div>
-        )}
-      </div>
+          <defs>
+            <marker id="team-tree-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L8,4 L0,8 Z" fill="#7B2D8B" />
+            </marker>
+          </defs>
+          {layout.edges.map((e) => {
+            const skip = e.toRow > e.fromRow + 1;
+            const fromBottom = e.fromY + CARD_H;
+            const channelY = fromBottom + (ROW_H - CARD_H) / 2;
+            const d = `M${e.fromX},${fromBottom} L${e.fromX},${channelY} L${e.toX},${channelY} L${e.toX},${e.toY}`;
+            return skip ? (
+              <path key={e.key} d={d} fill="none" stroke="#7B2D8B" strokeWidth="2" strokeDasharray="5,4" markerEnd="url(#team-tree-arrow)" />
+            ) : (
+              <path key={e.key} d={d} fill="none" stroke="#e3cdea" strokeWidth="1.5" />
+            );
+          })}
+        </svg>
 
-      {hasKids && expanded && (
-        <ul style={{ display: "flex", padding: 0, margin: 0, position: "relative", paddingTop: 24 }}>
-          {node.children.length > 1 && (
-            <span
+        {layout.nodes.map((node) => {
+          const isRoot = node.email === tree.email;
+          return (
+            <div
+              key={node.email}
               style={{
-                position: "absolute", top: 0, height: 0,
-                left: `${100 / (node.children.length * 2)}%`,
-                right: `${100 / (node.children.length * 2)}%`,
-                borderTop: "1.5px solid #e3cdea",
+                position: "absolute", left: node.x - CARD_W / 2, top: node.y, width: CARD_W,
+                border: isRoot ? "1.5px solid #eadcec" : "1.5px solid #eadcec",
+                borderLeft: `3px solid ${roleColor(node.role)}`,
+                borderRadius: 10, overflow: "hidden", background: "#fff",
               }}
-            />
-          )}
-          {node.children.map((c) => (
-            <TreeNode key={c.email} node={c} onSelect={onSelect} depth={depth + 1} />
-          ))}
-        </ul>
-      )}
-    </li>
+            >
+              <div
+                style={{
+                  background: isRoot ? "#7B2D8B" : "#f8f0f9", padding: "8px 6px",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                }}
+              >
+                <div
+                  style={{
+                    width: 28, height: 28, borderRadius: 999,
+                    background: isRoot ? "rgba(255,255,255,.25)" : "#fff",
+                    color: isRoot ? "#fff" : "#7B2D8B",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800,
+                  }}
+                >
+                  {initials(node.name || node.email)}
+                </div>
+                <div
+                  onClick={isRoot ? undefined : () => onSelect(node.email, node.name)}
+                  style={{
+                    fontSize: 12, fontWeight: 800, textAlign: "center", lineHeight: 1.25,
+                    color: isRoot ? "#fff" : "#7B2D8B", cursor: isRoot ? "default" : "pointer",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%",
+                  }}
+                >
+                  {node.name || node.email}{isRoot ? " (you)" : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, fontSize: 10.5, color: "#999", textAlign: "center", padding: "5px 4px", borderTop: "1px solid #f2f2f2" }}>
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: roleColor(node.role), flexShrink: 0 }} />
+                {roleLabel(node.role)}
+              </div>
+              {node.childCount > 0 && (
+                <div
+                  onClick={() => toggleExpand(node.email)}
+                  style={{ textAlign: "center", fontSize: 10, color: "#999", padding: "3px", borderTop: "1px solid #f2f2f2", cursor: "pointer" }}
+                >
+                  {node.expanded ? "▲" : `▼ ${node.childCount}`}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -339,11 +452,7 @@ export default function TeamHierarchy() {
           ? "No one reports to you yet."
           : "Tap the arrow to expand a branch, tap a name to open their profile"}
       </div>
-      <div style={{ overflowX: "auto", paddingBottom: 6 }}>
-        <ul style={{ display: "flex", justifyContent: "center", padding: 0, margin: 0, minWidth: 160 }}>
-          <TreeNode node={tree} isRoot onSelect={(email, name) => setSelected({ email, name })} depth={0} />
-        </ul>
-      </div>
+      <TeamTree tree={tree} onSelect={(email, name) => setSelected({ email, name })} />
     </div>
   );
 }
