@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
-import { exportRowsToExcel, exportTableToPdf, fmtCurrency } from "../../lib/dealerCrmUtils";
+import { exportRowsToExcel, exportReportWithCharts, fmtCurrency, fmtCurrencyPdf } from "../../lib/dealerCrmUtils";
 import StaffAvatar from "../../components/staff/StaffAvatar";
 import StaffPhotoViewer from "../../components/staff/StaffPhotoViewer";
 
@@ -571,39 +571,264 @@ function itemSalesPieSlices(items) {
   return top;
 }
 
-function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel, variant }) {
+// ── Bar-graph data for PDF export ──────────────────────────────────────
+// Mirror the on-screen chart components' own top-N/bucketing math, kept as
+// separate small functions rather than reused from the components
+// themselves — the on-screen charts render live DOM, PDF export draws
+// straight into jsPDF with no DOM involved, so the two paths only share
+// the underlying numbers, not any rendering code.
+function topDuesBarData(rows) {
+  return [...rows]
+    .filter((d) => Number(d.outstanding) > 0)
+    .sort((a, b) => Number(b.outstanding) - Number(a.outstanding))
+    .slice(0, 5)
+    .map((d) => ({ label: d.dealer_code, value: Number(d.outstanding), valueLabel: fmtCurrencyPdf(d.outstanding) }));
+}
+
+function dealersSplitBarData(rows) {
+  const ownerCount = rows.filter((d) => d.tag === "owner").length;
+  const grantedCount = rows.length - ownerCount;
+  return [
+    { label: "Owner", value: ownerCount, valueLabel: String(ownerCount) },
+    { label: "Granted access", value: grantedCount, valueLabel: String(grantedCount) },
+  ];
+}
+
+function ordersBarData(orders, start, end) {
+  return bucketOrders(orders, start, end)
+    .filter((b) => b.total > 0)
+    .map((b) => ({
+      label: `${b.start.getDate()}/${b.start.getMonth() + 1}`,
+      value: b.total,
+      valueLabel: fmtCurrencyPdf(b.total),
+    }));
+}
+
+function itemSalesBarData(items) {
+  return [...items]
+    .sort((a, b) => Number(b.qty) - Number(a.qty))
+    .slice(0, 10)
+    .map((it) => ({ label: it.item_name, value: Number(it.qty), valueLabel: `${it.qty} pc` }));
+}
+
+// Shared bottom sheet every report's PDF/Excel button opens — lets the
+// user tick which representations (Number table, Bar graph, Pie chart)
+// go into the file, or export all three. Excel only ever carries the
+// number table (a spreadsheet cell can't hold a chart image the way a
+// PDF page can), so its bar/pie boxes are shown but disabled rather than
+// hidden — that's clearer than silently dropping the option.
+function ExportOptionsSheet({ format, onClose, onConfirm }) {
+  const [reps, setReps] = useState({ number: true, bar: false, pie: false });
+  const isExcel = format === "excel";
+  const OPTIONS = [
+    { key: "number", label: "Number table", icon: "#" },
+    { key: "bar", label: "Bar graph", icon: "📊" },
+    { key: "pie", label: "Pie chart", icon: "🥧" },
+  ];
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 2000, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: "16px 16px 0 0", padding: "18px 18px 22px", width: "100%", maxWidth: 420 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#1a1a1a" }}>Export {isExcel ? "Excel" : "PDF"}</div>
+        <div style={{ fontSize: 11, color: "#999", marginBottom: 12 }}>Choose what to include in the file.</div>
+        {OPTIONS.map((opt, i) => {
+          const disabled = isExcel && opt.key !== "number";
+          const checked = disabled ? false : reps[opt.key];
+          return (
+            <label
+              key={opt.key}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 2px", borderBottom: i < OPTIONS.length - 1 ? "1px solid #f2f2f2" : "none", opacity: disabled ? 0.4 : 1, cursor: disabled ? "default" : "pointer" }}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={() => setReps((r) => ({ ...r, [opt.key]: !r[opt.key] }))}
+                style={{ width: 16, height: 16, accentColor: "#7B2D8B" }}
+              />
+              <span style={{ fontSize: 14 }}>{opt.icon}</span>
+              <span style={{ fontSize: 13, color: "#1a1a1a" }}>{opt.label}</span>
+            </label>
+          );
+        })}
+        {isExcel && (
+          <div style={{ fontSize: 10.5, color: "#999", marginTop: 10 }}>
+            Excel keeps the underlying numbers only — charts are a PDF-only extra, since a spreadsheet cell can't hold a picture the same way.
+          </div>
+        )}
+        <button
+          onClick={() => {
+            const chosen = Object.keys(reps).filter((k) => (isExcel ? k === "number" : reps[k]));
+            if (chosen.length === 0) return;
+            onConfirm(chosen);
+            onClose();
+          }}
+          style={{ width: "100%", background: "#7B2D8B", color: "#fff", border: "none", borderRadius: 10, padding: "11px 0", fontSize: 13, fontWeight: 800, cursor: "pointer", marginTop: 14 }}
+        >
+          Export {isExcel ? "Excel" : "PDF"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const FILTER_PERIOD_CHIPS = [{ key: "all_time", label: "All time" }, ...PERIOD_CHIPS];
+
+// Dues/Dealers are running totals — neither RPC takes a date range, so
+// there's no "dues as of a date" to show. What a period picker CAN
+// meaningfully do here is narrow the list to dealers who actually had
+// order activity in that window, while the amount itself stays the live
+// running total. Defaults to "All time" (today's existing behaviour,
+// unfiltered) so opening this page looks exactly as it always has until
+// someone opts into a period.
+function DealerListDetail({ title, rows, onExportPdf, onExportExcel, variant, email }) {
   const [viewMode, setViewMode] = useState("number");
-  const barChart = variant === "dues" ? <TopDuesChart rows={rows} /> : <DealersSplitChart rows={rows} />;
-  const pieSlices = variant === "dues" ? duesPieSlices(rows) : dealersPieSlices(rows);
+  const [exportFmt, setExportFmt] = useState(null);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const [filterPeriodKey, setFilterPeriodKey] = useState("all_time");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [activeOrders, setActiveOrders] = useState([]);
+  const [activeLoading, setActiveLoading] = useState(false);
+  const [activeError, setActiveError] = useState(null);
+
+  const filterRange = useMemo(
+    () => (filterPeriodKey === "all_time" ? { start: null, end: null } : periodRangeFor(filterPeriodKey, filterFrom, filterTo)),
+    [filterPeriodKey, filterFrom, filterTo]
+  );
+  const filterRangeReady = filterPeriodKey !== "all_time" && Boolean(filterRange.start && filterRange.end);
+
+  useEffect(() => {
+    if (!filterRangeReady) return;
+    let cancelled = false;
+    setActiveLoading(true);
+    setActiveError(null);
+    supabase
+      .rpc("get_team_member_orders", { p_email: email, p_start: filterRange.start, p_end: filterRange.end })
+      .then(({ data, error: err }) => {
+        if (cancelled) return;
+        if (err) { setActiveError(err.message); setActiveLoading(false); return; }
+        setActiveOrders(data || []);
+        setActiveLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [email, filterRangeReady, filterRange.start, filterRange.end]);
+
+  const activeDealerCodes = useMemo(() => new Set(activeOrders.map((o) => o.dealer_code)), [activeOrders]);
+  const filteredRows = useMemo(() => {
+    if (filterPeriodKey === "all_time") return rows;
+    if (!filterRangeReady || activeLoading) return [];
+    return rows.filter((d) => activeDealerCodes.has(d.dealer_code));
+  }, [rows, filterPeriodKey, filterRangeReady, activeLoading, activeDealerCodes]);
+
+  const filterPeriodLabel = filterPeriodKey === "all_time"
+    ? "All time"
+    : filterPeriodKey === "custom"
+    ? (filterRangeReady ? `${fmtDateShort(filterRange.start)} – ${fmtDateShort(filterRange.end)}` : "Pick a range")
+    : FILTER_PERIOD_CHIPS.find((p) => p.key === filterPeriodKey)?.label;
+
+  const barChart = variant === "dues" ? <TopDuesChart rows={filteredRows} /> : <DealersSplitChart rows={filteredRows} />;
+  const barData = variant === "dues" ? topDuesBarData(filteredRows) : dealersSplitBarData(filteredRows);
+  const pieSlices = variant === "dues" ? duesPieSlices(filteredRows) : dealersPieSlices(filteredRows);
+
   return (
     <div>
-      <DetailHeader title={title} periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
-      <ViewToggle mode={viewMode} onChange={setViewMode} />
-      {viewMode === "bar" && barChart}
-      {viewMode === "pie" && (
-        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 10 }}>Share of total</div>
-          <PieChart slices={pieSlices} />
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10, gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{title}</div>
+          <button
+            onClick={() => setPeriodOpen((v) => !v)}
+            style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 4, background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, color: "#7B2D8B", cursor: "pointer" }}
+          >
+            {filterPeriodLabel} {periodOpen ? "▲" : "▼"}
+          </button>
         </div>
-      )}
-      {viewMode === "number" && (
-        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: rows.length ? "4px 12px" : 12 }}>
-          {rows.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#999" }}>No dealers yet.</div>
-          ) : (
-            rows.map((d) => (
-              <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
-                <div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
-                  <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
-                </div>
-                <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
-                  {fmtCurrency(d.outstanding)} due
-                </div>
-              </div>
-            ))
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={() => setExportFmt("pdf")} style={EXPORT_BTN}>📄 PDF</button>
+          <button onClick={() => setExportFmt("excel")} style={EXPORT_BTN}>📊 Excel</button>
+        </div>
+      </div>
+
+      {periodOpen && (
+        <div style={{ background: "#f8f0f9", borderRadius: 10, padding: 10, marginBottom: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {FILTER_PERIOD_CHIPS.map((p) => (
+              <button
+                key={p.key}
+                onClick={() => setFilterPeriodKey(p.key)}
+                style={{
+                  padding: "6px 11px", borderRadius: 16, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  background: filterPeriodKey === p.key ? "#7B2D8B" : "#fff",
+                  color: filterPeriodKey === p.key ? "#fff" : "#666",
+                  border: filterPeriodKey === p.key ? "1px solid #7B2D8B" : "1px solid #eadcec",
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {filterPeriodKey === "custom" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
+              <input type="date" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
+              <span style={{ color: "#999", fontSize: 12 }}>to</span>
+              <input type="date" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} style={{ flex: 1, fontSize: 12, padding: "6px 8px", borderRadius: 8, border: "1.5px solid #eadcec" }} />
+            </div>
+          )}
+          {filterPeriodKey !== "all_time" && (
+            <div style={{ fontSize: 10.5, color: "#999", marginTop: 8, lineHeight: 1.4 }}>
+              Outstanding stays the live running balance — this narrows the list to dealers with order activity in the period.
+            </div>
           )}
         </div>
+      )}
+
+      <ViewToggle mode={viewMode} onChange={setViewMode} />
+      {activeError && <div style={{ fontSize: 11.5, color: "#d64545", marginBottom: 10 }}>Couldn't load activity for that period ({activeError}).</div>}
+      {filterPeriodKey !== "all_time" && !filterRangeReady ? (
+        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, fontSize: 12, color: "#999" }}>Pick both dates to see this period.</div>
+      ) : filterPeriodKey !== "all_time" && activeLoading ? (
+        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, fontSize: 12, color: "#999" }}>Loading…</div>
+      ) : (
+        <>
+          {viewMode === "bar" && barChart}
+          {viewMode === "pie" && (
+            <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 10 }}>Share of total</div>
+              <PieChart slices={pieSlices} />
+            </div>
+          )}
+          {viewMode === "number" && (
+            <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: filteredRows.length ? "4px 12px" : 12 }}>
+              {filteredRows.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#999" }}>{filterPeriodKey === "all_time" ? "No dealers yet." : "No dealers active in this period."}</div>
+              ) : (
+                filteredRows.map((d) => (
+                  <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
+                      <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
+                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
+                      {fmtCurrency(d.outstanding)} due
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {exportFmt && (
+        <ExportOptionsSheet
+          format={exportFmt}
+          onClose={() => setExportFmt(null)}
+          onConfirm={(reps) => (exportFmt === "pdf"
+            ? onExportPdf({ rows: filteredRows, reps, barData, barTitle: title, pieSlices, pieTitle: `Share of ${title.toLowerCase()}`, periodLabel: filterPeriodLabel })
+            : onExportExcel({ rows: filteredRows }))}
+        />
       )}
     </div>
   );
@@ -611,10 +836,12 @@ function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel
 
 function OrdersDetail({ orders, periodLabel, onExportPdf, onExportExcel, range }) {
   const [viewMode, setViewMode] = useState("number");
+  const [exportFmt, setExportFmt] = useState(null);
   const pieSlices = useMemo(() => ordersPieSlices(orders), [orders]);
+  const barData = useMemo(() => ordersBarData(orders, range.start, range.end), [orders, range.start, range.end]);
   return (
     <div>
-      <DetailHeader title="Orders" periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
+      <DetailHeader title="Orders" periodLabel={periodLabel} onExportPdf={() => setExportFmt("pdf")} onExportExcel={() => setExportFmt("excel")} />
       <ViewToggle mode={viewMode} onChange={setViewMode} />
       {viewMode === "bar" && <OrdersBarChart orders={orders} start={range.start} end={range.end} />}
       {viewMode === "pie" && (
@@ -640,6 +867,15 @@ function OrdersDetail({ orders, periodLabel, onExportPdf, onExportExcel, range }
           )}
         </div>
       )}
+      {exportFmt && (
+        <ExportOptionsSheet
+          format={exportFmt}
+          onClose={() => setExportFmt(null)}
+          onConfirm={(reps) => (exportFmt === "pdf"
+            ? onExportPdf({ reps, barData, barTitle: "Order value over the period", pieSlices, pieTitle: "Share of order value by dealer" })
+            : onExportExcel())}
+        />
+      )}
     </div>
   );
 }
@@ -660,6 +896,7 @@ function TeamMemberProfile({ email, name, onBack }) {
   const [subView, setSubView] = useState(null); // null | "dues" | "dealers" | "orders"
   const [salesOpen, setSalesOpen] = useState(true);
   const [itemsViewMode, setItemsViewMode] = useState("number");
+  const [itemsExportFmt, setItemsExportFmt] = useState(null);
   const [photoOpen, setPhotoOpen] = useState(false);
 
   const range = useMemo(() => periodRangeFor(periodKey, customFrom, customTo), [periodKey, customFrom, customTo]);
@@ -731,21 +968,32 @@ function TeamMemberProfile({ email, name, onBack }) {
     ? (rangeReady ? `${fmtDateShort(range.start)} – ${fmtDateShort(range.end)}` : "Pick a range")
     : `Period: ${PERIODS.find((p) => p.key === periodKey)?.label}`;
 
-  const exportDealersPdf = (rows, titleLabel) => {
-    exportTableToPdf({
+  // rows/reps/bar*/pie* arrive from each DealerListDetail's own export
+  // sheet — the caller already knows which dealers matched its period
+  // filter (or didn't apply one) and which representations were ticked.
+  // fmtCurrencyPdf (not fmtCurrency) for every PDF column: jsPDF's built-in
+  // fonts don't carry the ₹ glyph and silently substitute a stray "1" —
+  // the same workaround the rest of the app's PDF exports already use.
+  const exportDealersPdf = ({ rows, reps, barData, barTitle, pieSlices, pieTitle, periodLabel: filterLabel }, titleLabel) => {
+    exportReportWithCharts({
       filename: exportFilenameFor(name, titleLabel, "pdf"),
       title: `${titleLabel} — ${name}`,
-      subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
+      subtitle: `Period: ${filterLabel}`,
       columns: [
         { header: "Dealer code", key: "dealer_code" },
         { header: "Name", key: "display_name" },
         { header: "Type", key: "tag" },
-        { header: "Outstanding", key: "outstanding", format: (v) => fmtCurrency(v) },
+        { header: "Outstanding", key: "outstanding", format: (v) => fmtCurrencyPdf(v) },
       ],
       rows,
+      reps,
+      barTitle: barTitle || titleLabel,
+      barData,
+      pieTitle,
+      pieSlices,
     });
   };
-  const exportDealersExcel = (rows, titleLabel) => {
+  const exportDealersExcel = ({ rows }, titleLabel) => {
     exportRowsToExcel({
       filename: exportFilenameFor(name, titleLabel, "xlsx"),
       sheetName: titleLabel.slice(0, 31),
@@ -758,9 +1006,9 @@ function TeamMemberProfile({ email, name, onBack }) {
     });
   };
 
-  const exportOrders = (format) => {
+  const exportOrders = (format, opts = {}) => {
     if (format === "pdf") {
-      exportTableToPdf({
+      exportReportWithCharts({
         filename: exportFilenameFor(name, "Orders", "pdf"),
         title: `Orders — ${name}`,
         subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
@@ -768,9 +1016,14 @@ function TeamMemberProfile({ email, name, onBack }) {
           { header: "Date", key: "created_at", format: (v) => fmtDateShort(v) },
           { header: "Dealer", key: "dealer_name" },
           { header: "Status", key: "status" },
-          { header: "Total", key: "total", format: (v) => fmtCurrency(v) },
+          { header: "Total", key: "total", format: (v) => fmtCurrencyPdf(v) },
         ],
         rows: orders,
+        reps: opts.reps,
+        barTitle: opts.barTitle,
+        barData: opts.barData,
+        pieTitle: opts.pieTitle,
+        pieSlices: opts.pieSlices,
       });
     } else {
       exportRowsToExcel({
@@ -786,9 +1039,12 @@ function TeamMemberProfile({ email, name, onBack }) {
     }
   };
 
-  const exportItemSales = (format) => {
+  const itemsBarData = useMemo(() => itemSalesBarData(items), [items]);
+  const itemsPieSlices = useMemo(() => itemSalesPieSlices(items), [items]);
+
+  const exportItemSales = (format, opts = {}) => {
     if (format === "pdf") {
-      exportTableToPdf({
+      exportReportWithCharts({
         filename: exportFilenameFor(name, "Item-wise sales", "pdf"),
         title: `Item-wise sales — ${name}`,
         subtitle: `Period: ${fmtDateShort(range.start)} to ${fmtDateShort(range.end)}`,
@@ -798,6 +1054,11 @@ function TeamMemberProfile({ email, name, onBack }) {
           { header: "% share", key: "pct", format: (v) => `${v}%` },
         ],
         rows: items,
+        reps: opts.reps,
+        barTitle: "Top items by quantity",
+        barData: itemsBarData,
+        pieTitle: "Share of quantity sold",
+        pieSlices: itemsPieSlices,
       });
     } else {
       exportRowsToExcel({
@@ -883,8 +1144,8 @@ function TeamMemberProfile({ email, name, onBack }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {rangeReady && items.length > 0 && (
                       <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => exportItemSales("pdf")} style={MINI_EXPORT_BTN}>PDF</button>
-                        <button onClick={() => exportItemSales("excel")} style={MINI_EXPORT_BTN}>Excel</button>
+                        <button onClick={() => setItemsExportFmt("pdf")} style={MINI_EXPORT_BTN}>PDF</button>
+                        <button onClick={() => setItemsExportFmt("excel")} style={MINI_EXPORT_BTN}>Excel</button>
                       </span>
                     )}
                     <span style={{ fontSize: 11, color: "#999" }}>{salesOpen ? "▲" : "▼"}</span>
@@ -932,7 +1193,7 @@ function TeamMemberProfile({ email, name, onBack }) {
                         {itemsViewMode === "pie" && (
                           <div>
                             <div style={{ fontSize: 10.5, color: "#999", marginBottom: 10 }}>Share of quantity sold</div>
-                            <PieChart slices={itemSalesPieSlices(items)} />
+                            <PieChart slices={itemsPieSlices} />
                           </div>
                         )}
                       </>
@@ -945,13 +1206,21 @@ function TeamMemberProfile({ email, name, onBack }) {
         </>
       )}
 
+      {itemsExportFmt && (
+        <ExportOptionsSheet
+          format={itemsExportFmt}
+          onClose={() => setItemsExportFmt(null)}
+          onConfirm={(reps) => exportItemSales(itemsExportFmt, { reps })}
+        />
+      )}
+
       {subView === "dues" && (
         <DealerListDetail
           title="Dues to collect"
           rows={duesSorted}
-          periodLabel={null}
-          onExportPdf={() => exportDealersPdf(duesSorted, "Dues to collect")}
-          onExportExcel={() => exportDealersExcel(duesSorted, "Dues to collect")}
+          email={email}
+          onExportPdf={(opts) => exportDealersPdf(opts, "Dues to collect")}
+          onExportExcel={(opts) => exportDealersExcel(opts, "Dues to collect")}
           variant="dues"
         />
       )}
@@ -959,9 +1228,9 @@ function TeamMemberProfile({ email, name, onBack }) {
         <DealerListDetail
           title="Dealers"
           rows={dealersSorted}
-          periodLabel={null}
-          onExportPdf={() => exportDealersPdf(dealersSorted, "Dealers")}
-          onExportExcel={() => exportDealersExcel(dealersSorted, "Dealers")}
+          email={email}
+          onExportPdf={(opts) => exportDealersPdf(opts, "Dealers")}
+          onExportExcel={(opts) => exportDealersExcel(opts, "Dealers")}
           variant="dealers"
         />
       )}
@@ -969,7 +1238,7 @@ function TeamMemberProfile({ email, name, onBack }) {
         <OrdersDetail
           orders={orders}
           periodLabel={periodLabel}
-          onExportPdf={() => exportOrders("pdf")}
+          onExportPdf={(opts) => exportOrders("pdf", opts)}
           onExportExcel={() => exportOrders("excel")}
           range={range}
         />

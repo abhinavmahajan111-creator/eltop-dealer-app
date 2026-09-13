@@ -1386,7 +1386,13 @@ begin
       end as pct
     from items i, totals t
     group by i.name, t.total_qty
-    order by qty desc;
+    -- "order by qty" is ambiguous here: qty is both an output column alias
+    -- (sum(i.qty)::bigint as qty) and an input column of items i, which is
+    -- still in scope in the FROM clause. Postgres can't tell which one a
+    -- bare "qty" means and throws "column reference qty is ambiguous" at
+    -- query time. Ordering by the aggregate expression itself sidesteps
+    -- the naming clash entirely.
+    order by sum(i.qty) desc;
 end;
 $$;
 

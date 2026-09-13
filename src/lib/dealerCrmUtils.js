@@ -148,6 +148,151 @@ export function exportTableToPdf({ filename, title, subtitle, columns, rows }) {
   doc.save(filename);
 }
 
+function hexToRgb(hex) {
+  const h = String(hex || "#7B2D8B").replace("#", "");
+  const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  return [parseInt(n.slice(0, 2), 16) || 0, parseInt(n.slice(2, 4), 16) || 0, parseInt(n.slice(4, 6), 16) || 0];
+}
+
+// Bar graph drawn straight into the PDF with jsPDF's own rect() — no
+// canvas/screenshot library involved, so it stays crisp at any zoom and
+// doesn't need the on-screen chart to be mounted to export it. Always
+// starts on a fresh page so it never runs into whatever came before.
+function drawBarChartPage(doc, { title, data, color = [123, 45, 139] }) {
+  doc.addPage();
+  const PW = doc.internal.pageSize.getWidth();
+  const PH = doc.internal.pageSize.getHeight();
+  doc.setFontSize(12);
+  doc.setTextColor(30, 30, 30);
+  doc.text(title, 40, 40);
+  if (!data || data.length === 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Nothing to chart for this selection.", 40, 66);
+    return;
+  }
+  const chartX = 50;
+  const chartTop = 70;
+  const chartBottom = PH - 90;
+  const chartW = PW - 100;
+  const chartH = chartBottom - chartTop;
+  const max = Math.max(...data.map((d) => Number(d.value) || 0), 1);
+  const n = data.length;
+  const gap = 12;
+  const barW = Math.min(64, (chartW - gap * (n - 1)) / n);
+  const totalW = barW * n + gap * Math.max(0, n - 1);
+  const startX = chartX + Math.max(0, (chartW - totalW) / 2);
+  doc.setDrawColor(225, 225, 225);
+  doc.line(chartX, chartBottom, chartX + chartW, chartBottom);
+  data.forEach((d, i) => {
+    const val = Number(d.value) || 0;
+    const h = Math.max(2, (val / max) * (chartH - 24));
+    const x = startX + i * (barW + gap);
+    const y = chartBottom - h;
+    doc.setFillColor(...color);
+    doc.rect(x, y, barW, h, "F");
+    doc.setFontSize(7.5);
+    doc.setTextColor(60, 60, 60);
+    doc.text(String(d.valueLabel ?? val), x + barW / 2, y - 5, { align: "center" });
+    doc.setFontSize(7.5);
+    doc.setTextColor(130, 130, 130);
+    const label = String(d.label ?? "").slice(0, 14);
+    doc.text(label, x + barW / 2, chartBottom + 13, { align: "center" });
+  });
+}
+
+// Pie/donut drawn as a fan of thin triangles from the center — jsPDF has
+// no native arc-fill primitive, but a wedge subdivided into ~2.5deg
+// triangles reads as smooth at print resolution. Mirrors the on-screen
+// PieChart's conic-gradient slices and legend, just in vector form.
+function drawPieChartPage(doc, { title, slices }) {
+  doc.addPage();
+  doc.setFontSize(12);
+  doc.setTextColor(30, 30, 30);
+  doc.text(title, 40, 40);
+  const total = (slices || []).reduce((s, x) => s + (Number(x.value) || 0), 0);
+  if (!slices || slices.length === 0 || total <= 0) {
+    doc.setFontSize(10);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Nothing to chart for this selection.", 40, 66);
+    return;
+  }
+  const cx = 150;
+  const cy = 180;
+  const r = 85;
+  let startAngle = -Math.PI / 2;
+  slices.forEach((s) => {
+    const frac = (Number(s.value) || 0) / total;
+    const endAngle = startAngle + frac * 2 * Math.PI;
+    const steps = Math.max(1, Math.ceil((frac * 360) / 2.5));
+    const rgb = hexToRgb(s.color);
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    for (let i = 0; i < steps; i++) {
+      const a1 = startAngle + ((endAngle - startAngle) * i) / steps;
+      const a2 = startAngle + ((endAngle - startAngle) * (i + 1)) / steps;
+      doc.triangle(
+        cx, cy,
+        cx + r * Math.cos(a1), cy + r * Math.sin(a1),
+        cx + r * Math.cos(a2), cy + r * Math.sin(a2),
+        "F"
+      );
+    }
+    startAngle = endAngle;
+  });
+  let ly = cy - r + 4;
+  slices.forEach((s) => {
+    const rgb = hexToRgb(s.color);
+    doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    doc.rect(cx + r + 30, ly, 8, 8, "F");
+    doc.setFontSize(8.5);
+    doc.setTextColor(70, 70, 70);
+    const pct = Math.round(((Number(s.value) || 0) / total) * 100);
+    doc.text(`${s.label} - ${pct}%`, cx + r + 44, ly + 7);
+    ly += 16;
+  });
+}
+
+// Superset of exportTableToPdf that can also append a bar-graph page and/or
+// a pie-chart page after the number table, driven by which representations
+// the user ticked in the export sheet (reps: any of "number"/"bar"/"pie").
+// exportTableToPdf itself is untouched — DealerDetail.jsx's ledger/insights
+// exports keep using it exactly as before.
+export function exportReportWithCharts({ filename, title, subtitle, columns, rows, reps, barTitle, barData, pieTitle, pieSlices }) {
+  const activeReps = reps && reps.length ? reps : ["number"];
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  doc.setFontSize(13);
+  doc.setTextColor(123, 45, 139);
+  doc.text("Eltop by Embassy Electricals", 40, 40);
+  doc.setFontSize(11);
+  doc.setTextColor(30, 30, 30);
+  doc.text(title, 40, 58);
+  let startY = 72;
+  if (subtitle) {
+    doc.setFontSize(9);
+    doc.setTextColor(130, 130, 130);
+    doc.text(subtitle, 40, 72);
+    startY = 84;
+  }
+  if (activeReps.includes("number")) {
+    autoTable(doc, {
+      startY,
+      head: [columns.map((c) => c.header)],
+      body: rows.map((r) => columns.map((c) => (c.format ? c.format(r[c.key]) : r[c.key] ?? ""))),
+      styles: { fontSize: 8.5, cellPadding: 5 },
+      headStyles: { fillColor: [123, 45, 139], textColor: 255 },
+      alternateRowStyles: { fillColor: [250, 245, 251] },
+      margin: { left: 40, right: 40 },
+    });
+  }
+  if (activeReps.includes("bar")) {
+    drawBarChartPage(doc, { title: barTitle || "Bar graph", data: barData || [] });
+  }
+  if (activeReps.includes("pie")) {
+    drawPieChartPage(doc, { title: pieTitle || "Share breakdown", slices: pieSlices || [] });
+  }
+  doc.save(filename);
+}
+
 // Same company letterhead data generatePriceListPDF.js uses (there it's
 // sourced from Store.jsx's footer — the app's single source of truth for
 // this static business info). Duplicated as a small constant here rather
