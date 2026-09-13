@@ -1,0 +1,43 @@
+From 8fddff997d53cfba1a03c5ed29ea1d2e9623db34 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 03:38:53 +0000
+Subject: [PATCH] Fix checkbox layout in Team & Access grant picker
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The app has a global `input { width:100%; padding:13px; ... }` CSS
+rule (src/index.css) intended for text inputs, which also silently
+applied to the new grant-picker checkbox — stretching it to fill the
+row and pushing the avatar/name off to the side with a horizontal
+scrollbar, instead of the compact row shown in the approved mockup.
+Explicitly overrides width/height/padding/margin/border on the
+checkbox so it renders at its intended small size.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/TeamAccess.jsx | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/screens/staff/TeamAccess.jsx b/src/screens/staff/TeamAccess.jsx
+index 54482ea..7b1598f 100644
+--- a/src/screens/staff/TeamAccess.jsx
++++ b/src/screens/staff/TeamAccess.jsx
+@@ -164,7 +164,12 @@ function GrantPicker({ dealerId, onDone, onCancel }) {
+                 background: selected.includes(s.email) ? "#eee0f2" : "transparent",
+               }}
+             >
+-              <input type="checkbox" checked={selected.includes(s.email)} onChange={() => toggle(s.email)} style={{ flexShrink: 0 }} />
++              <input
++                type="checkbox"
++                checked={selected.includes(s.email)}
++                onChange={() => toggle(s.email)}
++                style={{ flexShrink: 0, width: 16, height: 16, padding: 0, margin: 0, border: "1.5px solid #ccc", borderRadius: 4 }}
++              />
+               <div style={AVATAR_STYLE}>{initials(s.name || s.email)}</div>
+               <div style={{ flex: 1, minWidth: 0 }}>
+                 <div style={{ fontSize: 12.5, fontWeight: 700, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+-- 
+2.43.0
+
