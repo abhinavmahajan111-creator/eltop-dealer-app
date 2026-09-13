@@ -14,6 +14,11 @@ export default function AdminStaff() {
   const [saving, setSaving]     = useState(false);
   const [formError, setFormError] = useState("");
 
+  const [editingEmail, setEditingEmail] = useState(null);
+  const [editForm, setEditForm]         = useState(EMPTY_FORM);
+  const [editSaving, setEditSaving]     = useState(false);
+  const [editError, setEditError]       = useState("");
+
   const load = async () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
@@ -64,6 +69,49 @@ export default function AdminStaff() {
   const removeRow = async (row) => {
     if (!window.confirm(`Remove ${row.email} from staff? This cannot be undone.`)) return;
     await supabase.from("staff_profiles").delete().eq("email", row.email);
+    load();
+  };
+
+  const startEdit = (row) => {
+    setEditError("");
+    setEditingEmail(row.email);
+    setEditForm({
+      email: row.email,
+      name: row.name || "",
+      role: row.role,
+      reports_to: row.reports_to || "",
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingEmail(null);
+    setEditForm(EMPTY_FORM);
+    setEditError("");
+  };
+
+  const saveEdit = async () => {
+    setEditError("");
+    if (editForm.reports_to && editForm.reports_to === editingEmail) {
+      setEditError("A staff member can't report to themselves.");
+      return;
+    }
+    setEditSaving(true);
+    const department = STAFF_ROLE_META[editForm.role]?.department || "";
+    const { error } = await supabase
+      .from("staff_profiles")
+      .update({
+        name: editForm.name.trim() || null,
+        role: editForm.role,
+        department,
+        reports_to: editForm.reports_to || null,
+      })
+      .eq("email", editingEmail);
+    setEditSaving(false);
+    if (error) {
+      setEditError(error.message || "Could not save changes.");
+      return;
+    }
+    cancelEdit();
     load();
   };
 
@@ -160,26 +208,90 @@ export default function AdminStaff() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.email}>
-                  <td>{r.email}</td>
-                  <td>{r.name || "—"}</td>
-                  <td>{staffRoleLabel(r.role)}</td>
-                  <td>{r.department}</td>
-                  <td>{r.reports_to || "—"}</td>
-                  <td>{r.id ? "Logged in at least once" : "Never logged in"}</td>
-                  <td>
-                    <button className="btn small outline" onClick={() => toggleActive(r)}>
-                      {r.is_active ? "Active — deactivate" : "Deactivated — activate"}
-                    </button>
-                  </td>
-                  <td>
-                    <button className="btn small outline" style={{ color: "#c0392b", borderColor: "#c0392b" }} onClick={() => removeRow(r)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map(r => {
+                const isEditing = editingEmail === r.email;
+                if (isEditing) {
+                  return (
+                    <tr key={r.email} style={{ background: "#fafaff" }}>
+                      <td>{r.email}</td>
+                      <td>
+                        <input
+                          type="text"
+                          value={editForm.name}
+                          onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                          placeholder="Optional"
+                          style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13, width: 130 }}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          className="admin-select"
+                          value={editForm.role}
+                          onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                          style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13 }}
+                        >
+                          {ROLE_OPTIONS.map(ro => (
+                            <option key={ro} value={ro}>{staffRoleLabel(ro)}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{STAFF_ROLE_META[editForm.role]?.department || "—"}</td>
+                      <td>
+                        <select
+                          className="admin-select"
+                          value={editForm.reports_to}
+                          onChange={e => setEditForm(f => ({ ...f, reports_to: e.target.value }))}
+                          style={{ padding: "6px 8px", borderRadius: 6, border: "1.5px solid #ddd", fontSize: 13 }}
+                        >
+                          <option value="">— none —</option>
+                          {rows.filter(o => o.email !== r.email).map(o => (
+                            <option key={o.email} value={o.email}>{o.name || o.email}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>{r.id ? "Logged in at least once" : "Never logged in"}</td>
+                      <td colSpan={2}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button className="btn small" disabled={editSaving} onClick={saveEdit}>
+                            {editSaving ? "Saving…" : "Save"}
+                          </button>
+                          <button className="btn small outline" disabled={editSaving} onClick={cancelEdit}>
+                            Cancel
+                          </button>
+                        </div>
+                        {editError && (
+                          <div style={{ color: "#be123c", fontSize: 12, marginTop: 6 }}>{editError}</div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                }
+                return (
+                  <tr key={r.email}>
+                    <td>{r.email}</td>
+                    <td>{r.name || "—"}</td>
+                    <td>{staffRoleLabel(r.role)}</td>
+                    <td>{r.department}</td>
+                    <td>{r.reports_to || "—"}</td>
+                    <td>{r.id ? "Logged in at least once" : "Never logged in"}</td>
+                    <td>
+                      <button className="btn small outline" onClick={() => toggleActive(r)}>
+                        {r.is_active ? "Active — deactivate" : "Deactivated — activate"}
+                      </button>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn small outline" onClick={() => startEdit(r)}>
+                          Edit
+                        </button>
+                        <button className="btn small outline" style={{ color: "#c0392b", borderColor: "#c0392b" }} onClick={() => removeRow(r)}>
+                          Remove
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
