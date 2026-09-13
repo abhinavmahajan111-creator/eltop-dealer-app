@@ -42,6 +42,30 @@ alter table public.dealer_access_grants enable row level security;
 -- No policies — SECURITY DEFINER functions only, same pattern as dealer_field_adds.
 
 -- ═══════════════════════════════════════════════════════════════════════
+-- 1b. dealer_access_history — append-only audit trail (added 13 Sep 2026,
+--     Team & Access UI redesign). dealer_access_grants itself only holds
+--     CURRENT state — a grant re-issued after a revoke overwrites the row
+--     (granted_at/revoked_at reset), so it can't answer "what happened,
+--     when". This table is never updated, only inserted into, from inside
+--     grant_dealer_access() and revoke_dealer_access() — one row per
+--     event, kept forever.
+-- ═══════════════════════════════════════════════════════════════════════
+
+create table if not exists public.dealer_access_history (
+  id            bigint generated always as identity primary key,
+  dealer_id     uuid not null references public.profiles(id) on delete cascade,
+  action        text not null check (action in ('granted', 'revoked')),
+  grantee_email text not null,
+  actor_email   text not null,
+  created_at    timestamptz not null default now()
+);
+
+create index if not exists idx_dealer_access_history_dealer on public.dealer_access_history(dealer_id, created_at desc);
+
+alter table public.dealer_access_history enable row level security;
+-- No policies — SECURITY DEFINER functions only (get_dealer_access_history below).
+
+-- ═══════════════════════════════════════════════════════════════════════
 -- 2. staff_notifications — lightweight in-app notification feed
 -- ═══════════════════════════════════════════════════════════════════════
 
@@ -742,6 +766,9 @@ begin
       p_dealer_id
     );
 
+    insert into public.dealer_access_history (dealer_id, action, grantee_email, actor_email)
+    values (p_dealer_id, 'granted', v_ge, v_email);
+
     v_granted := v_granted + 1;
   end loop;
 
@@ -800,6 +827,9 @@ begin
   update public.dealer_access_grants
   set revoked_at = now(), revoked_by = v_email
   where dealer_id = p_dealer_id and grantee_email = p_grantee_email and revoked_at is null;
+
+  insert into public.dealer_access_history (dealer_id, action, grantee_email, actor_email)
+  values (p_dealer_id, 'revoked', p_grantee_email, v_email);
 
   return query select true, 'access revoked'::text;
 end;
@@ -977,3 +1007,58 @@ end;
 $$;
 
 grant execute on function public.mark_all_notifications_read() to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 15. get_dealer_access_history() — Team & Access UI redesign (13 Sep
+--     2026). Full grant/revoke timeline for one dealer, newest first.
+--     Same permission gate as get_grantable_staff/grant_dealer_access:
+--     senior tiers only, and only for a dealer the caller can already
+--     see the ledger of.
+-- ═══════════════════════════════════════════════════════════════════════
+
+create or replace function public.get_dealer_access_history(p_dealer_id uuid)
+returns table (
+  action        text,
+  grantee_email text,
+  grantee_name  text,
+  actor_email   text,
+  actor_name    text,
+  created_at    timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+  v_role  text;
+begin
+  select sp.email, sp.role into v_email, v_role
+  from public.staff_profiles sp where sp.id = v_uid;
+
+  if v_email is null or v_role not in ('senior_sales_associate', 'senior_sales_executive') then
+    return;
+  end if;
+
+  if not public._dealer_has_ledger_access(p_dealer_id, v_email, v_role) then
+    return;
+  end if;
+
+  return query
+    select
+      h.action,
+      h.grantee_email,
+      coalesce(gsp.name, h.grantee_email) as grantee_name,
+      h.actor_email,
+      coalesce(asp.name, h.actor_email) as actor_name,
+      h.created_at
+    from public.dealer_access_history h
+    left join public.staff_profiles gsp on gsp.email = h.grantee_email
+    left join public.staff_profiles asp on asp.email = h.actor_email
+    where h.dealer_id = p_dealer_id
+    order by h.created_at desc;
+end;
+$$;
+
+grant execute on function public.get_dealer_access_history(uuid) to authenticated;
