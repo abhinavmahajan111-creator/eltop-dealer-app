@@ -1,0 +1,385 @@
+From 9084e96117889f19c84d97c2e2a841af639d1c91 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 15:00:27 +0000
+Subject: [PATCH] Add Number/Bar/Pie view toggle to every team member report
+
+Dues, Dealers, Orders and Item-wise sales each get a small three-icon
+switcher (# Number, chart-bar Bars, pie-chart Pie) at the top of the
+report, defaulting to the plain number list. Bar reuses the charts
+already shipped; Pie is a new plain CSS conic-gradient donut plus a
+color-swatch legend (no charting library), fed by small per-report
+slice builders (top dealers by outstanding for Dues, owner vs granted
+for Dealers, order value by dealer for Orders, quantity share for
+Item-wise sales) that all fold anything past the top 4 into an
+"Others" slice. Every chart component now shows a plain "Nothing to
+chart yet" message instead of silently rendering nothing, since
+they're reachable directly from the toggle now rather than only
+appearing when a parent already knew there was data.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/screens/staff/TeamHierarchy.jsx | 276 ++++++++++++++++++++++------
+ 1 file changed, 222 insertions(+), 54 deletions(-)
+
+diff --git a/src/screens/staff/TeamHierarchy.jsx b/src/screens/staff/TeamHierarchy.jsx
+index ae05808..8ab89bd 100644
+--- a/src/screens/staff/TeamHierarchy.jsx
++++ b/src/screens/staff/TeamHierarchy.jsx
+@@ -343,14 +343,21 @@ function DetailHeader({ title, periodLabel, onExportPdf, onExportExcel }) {
+   );
+ }
+ 
+-// Top N dealers by outstanding, as horizontal bars — sits above the Dues
+-// list. Skipped entirely when nobody owes anything (nothing to chart).
++// Top N dealers by outstanding, as horizontal bars — one of the Dues
++// report's view modes. Shows a plain empty message when nobody owes
++// anything, rather than rendering nothing under a selected toggle.
+ function TopDuesChart({ rows }) {
+   const top = [...rows]
+     .filter((d) => Number(d.outstanding) > 0)
+     .sort((a, b) => Number(b.outstanding) - Number(a.outstanding))
+     .slice(0, 5);
+-  if (top.length === 0) return null;
++  if (top.length === 0) {
++    return (
++      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++        <div style={{ fontSize: 12, color: "#999" }}>Nothing to chart yet.</div>
++      </div>
++    );
++  }
+   const max = Math.max(...top.map((d) => Number(d.outstanding)));
+   return (
+     <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
+@@ -372,9 +379,15 @@ function TopDuesChart({ rows }) {
+   );
+ }
+ 
+-// Owner-vs-granted-access split — sits above the Dealers list.
++// Owner-vs-granted-access split — one of the Dealers report's view modes.
+ function DealersSplitChart({ rows }) {
+-  if (rows.length === 0) return null;
++  if (rows.length === 0) {
++    return (
++      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++        <div style={{ fontSize: 12, color: "#999" }}>Nothing to chart yet.</div>
++      </div>
++    );
++  }
+   const ownerCount = rows.filter((d) => d.tag === "owner").length;
+   const grantedCount = rows.length - ownerCount;
+   const max = Math.max(ownerCount, grantedCount, 1);
+@@ -424,11 +437,16 @@ function bucketOrders(orders, startISO, endISO) {
+   return buckets;
+ }
+ 
+-// Order value over the period — sits above the Orders list. Skipped when
+-// there are no orders at all (nothing to chart, the empty state below covers it).
++// Order value over the period — one of the Orders report's view modes.
+ function OrdersBarChart({ orders, start, end }) {
+   const buckets = useMemo(() => bucketOrders(orders, start, end), [orders, start, end]);
+-  if (orders.length === 0 || buckets.length === 0) return null;
++  if (orders.length === 0 || buckets.length === 0) {
++    return (
++      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++        <div style={{ fontSize: 12, color: "#999" }}>Nothing to chart yet.</div>
++      </div>
++    );
++  }
+   const max = Math.max(...buckets.map((b) => b.total), 1);
+   const manyBuckets = buckets.length > 12;
+   return (
+@@ -448,52 +466,180 @@ function OrdersBarChart({ orders, start, end }) {
+   );
+ }
+ 
+-function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel, chart }) {
++// Number / Bars / Pie switcher — same three icon buttons on every report.
++const VIEW_MODES = [
++  { key: "number", icon: "#", label: "Number" },
++  { key: "bar", icon: "📊", label: "Bars" },
++  { key: "pie", icon: "🥧", label: "Pie" },
++];
++
++function ViewToggle({ mode, onChange }) {
++  return (
++    <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
++      {VIEW_MODES.map((m) => (
++        <button
++          key={m.key}
++          onClick={() => onChange(m.key)}
++          style={{
++            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
++            fontSize: 11, fontWeight: 700, padding: "7px 0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
++            background: mode === m.key ? "#7B2D8B" : "#fff",
++            color: mode === m.key ? "#fff" : "#666",
++            border: mode === m.key ? "1px solid #7B2D8B" : "1px solid #eadcec",
++          }}
++        >
++          <span>{m.icon}</span><span>{m.label}</span>
++        </button>
++      ))}
++    </div>
++  );
++}
++
++// Generic donut — a plain CSS conic-gradient circle plus a color-swatch
++// legend, shared by every report's Pie view. No charting library needed.
++function buildConicGradient(slices) {
++  const total = slices.reduce((sum, s) => sum + s.value, 0);
++  if (total <= 0) return "#f2f2f2";
++  let acc = 0;
++  const stops = slices.map((s) => {
++    const startPct = (acc / total) * 100;
++    acc += s.value;
++    const endPct = (acc / total) * 100;
++    return `${s.color} ${startPct}% ${endPct}%`;
++  });
++  return `conic-gradient(${stops.join(", ")})`;
++}
++
++function PieChart({ slices, size = 88 }) {
++  const total = slices.reduce((sum, s) => sum + s.value, 0);
++  if (total <= 0) return <div style={{ fontSize: 12, color: "#999" }}>Nothing to chart yet.</div>;
++  return (
++    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
++      <div style={{ width: size, height: size, borderRadius: "50%", background: buildConicGradient(slices), flexShrink: 0 }} />
++      <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11.5 }}>
++        {slices.map((s) => (
++          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
++            <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, flexShrink: 0 }} />
++            <span>{s.label} · {Math.round((s.value / total) * 100)}%</span>
++          </div>
++        ))}
++      </div>
++    </div>
++  );
++}
++
++// Top 4 dealers by outstanding + an "Others" bucket for the rest — a red
++// ramp since these are dues, matching TopDuesChart's own red bars.
++function duesPieSlices(rows) {
++  const withDue = [...rows].filter((d) => Number(d.outstanding) > 0).sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
++  const colors = ["#d64545", "#e2726f", "#eb9c99", "#f4c5c3"];
++  const top = withDue.slice(0, 4).map((d, i) => ({ label: d.dealer_code, value: Number(d.outstanding), color: colors[i] }));
++  const rest = withDue.slice(4).reduce((sum, d) => sum + Number(d.outstanding), 0);
++  if (rest > 0) top.push({ label: "Others", value: rest, color: "#f8dede" });
++  return top;
++}
++
++function dealersPieSlices(rows) {
++  const ownerCount = rows.filter((d) => d.tag === "owner").length;
++  const grantedCount = rows.length - ownerCount;
++  const slices = [];
++  if (ownerCount > 0) slices.push({ label: "Owner", value: ownerCount, color: "#7B2D8B" });
++  if (grantedCount > 0) slices.push({ label: "Granted access", value: grantedCount, color: "#c98a1a" });
++  return slices;
++}
++
++function ordersPieSlices(orders) {
++  const byDealer = {};
++  orders.forEach((o) => {
++    const key = o.dealer_code || o.dealer_name;
++    byDealer[key] = (byDealer[key] || 0) + Number(o.total || 0);
++  });
++  const sorted = Object.entries(byDealer).sort((a, b) => b[1] - a[1]);
++  const colors = ["#7B2D8B", "#9c5ba8", "#c9a8d4", "#e3cdea"];
++  const top = sorted.slice(0, 4).map(([label, value], i) => ({ label, value, color: colors[i] }));
++  const rest = sorted.slice(4).reduce((sum, [, v]) => sum + v, 0);
++  if (rest > 0) top.push({ label: "Others", value: rest, color: "#f2e9f5" });
++  return top;
++}
++
++function itemSalesPieSlices(items) {
++  const sorted = [...items].sort((a, b) => Number(b.qty) - Number(a.qty));
++  const colors = ["#7B2D8B", "#9c5ba8", "#c9a8d4", "#e3cdea"];
++  const top = sorted.slice(0, 4).map((it, i) => ({ label: it.item_name, value: Number(it.qty), color: colors[i] }));
++  const rest = sorted.slice(4).reduce((sum, it) => sum + Number(it.qty), 0);
++  if (rest > 0) top.push({ label: "Others", value: rest, color: "#f2e9f5" });
++  return top;
++}
++
++function DealerListDetail({ title, rows, periodLabel, onExportPdf, onExportExcel, variant }) {
++  const [viewMode, setViewMode] = useState("number");
++  const barChart = variant === "dues" ? <TopDuesChart rows={rows} /> : <DealersSplitChart rows={rows} />;
++  const pieSlices = variant === "dues" ? duesPieSlices(rows) : dealersPieSlices(rows);
+   return (
+     <div>
+       <DetailHeader title={title} periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
+-      {chart}
+-      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: rows.length ? "4px 12px" : 12 }}>
+-        {rows.length === 0 ? (
+-          <div style={{ fontSize: 12, color: "#999" }}>No dealers yet.</div>
+-        ) : (
+-          rows.map((d) => (
+-            <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
+-              <div>
+-                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
+-                <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
+-              </div>
+-              <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
+-                {fmtCurrency(d.outstanding)} due
++      <ViewToggle mode={viewMode} onChange={setViewMode} />
++      {viewMode === "bar" && barChart}
++      {viewMode === "pie" && (
++        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++          <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 10 }}>Share of total</div>
++          <PieChart slices={pieSlices} />
++        </div>
++      )}
++      {viewMode === "number" && (
++        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: rows.length ? "4px 12px" : 12 }}>
++          {rows.length === 0 ? (
++            <div style={{ fontSize: 12, color: "#999" }}>No dealers yet.</div>
++          ) : (
++            rows.map((d) => (
++              <div key={d.dealer_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
++                <div>
++                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{d.dealer_code} · {d.display_name}</div>
++                  <div style={{ fontSize: 10.5, color: d.tag === "owner" ? "#999" : "#7B2D8B" }}>{d.tag === "owner" ? "owner" : "granted access"}</div>
++                </div>
++                <div style={{ fontSize: 12.5, fontWeight: 800, color: Number(d.outstanding) > 0 ? "#d64545" : "#2fa84f" }}>
++                  {fmtCurrency(d.outstanding)} due
++                </div>
+               </div>
+-            </div>
+-          ))
+-        )}
+-      </div>
++            ))
++          )}
++        </div>
++      )}
+     </div>
+   );
+ }
+ 
+ function OrdersDetail({ orders, periodLabel, onExportPdf, onExportExcel, range }) {
++  const [viewMode, setViewMode] = useState("number");
++  const pieSlices = useMemo(() => ordersPieSlices(orders), [orders]);
+   return (
+     <div>
+       <DetailHeader title="Orders" periodLabel={periodLabel} onExportPdf={onExportPdf} onExportExcel={onExportExcel} />
+-      <OrdersBarChart orders={orders} start={range.start} end={range.end} />
+-      <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: orders.length ? "4px 12px" : 12 }}>
+-        {orders.length === 0 ? (
+-          <div style={{ fontSize: 12, color: "#999" }}>No orders this period.</div>
+-        ) : (
+-          orders.map((o) => (
+-            <div key={o.order_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
+-              <div>
+-                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{o.dealer_code} · {o.dealer_name}</div>
+-                <div style={{ fontSize: 10.5, color: "#999" }}>{fmtDateShort(o.created_at)} · {o.status}</div>
++      <ViewToggle mode={viewMode} onChange={setViewMode} />
++      {viewMode === "bar" && <OrdersBarChart orders={orders} start={range.start} end={range.end} />}
++      {viewMode === "pie" && (
++        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: 12, marginBottom: 14 }}>
++          <div style={{ fontSize: 11, fontWeight: 800, color: "#999", marginBottom: 10 }}>Share of order value by dealer</div>
++          <PieChart slices={pieSlices} />
++        </div>
++      )}
++      {viewMode === "number" && (
++        <div style={{ border: "1.5px solid #eadcec", borderRadius: 12, padding: orders.length ? "4px 12px" : 12 }}>
++          {orders.length === 0 ? (
++            <div style={{ fontSize: 12, color: "#999" }}>No orders this period.</div>
++          ) : (
++            orders.map((o) => (
++              <div key={o.order_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: "1px solid #f2f2f2" }}>
++                <div>
++                  <div style={{ fontSize: 12.5, fontWeight: 700 }}>{o.dealer_code} · {o.dealer_name}</div>
++                  <div style={{ fontSize: 10.5, color: "#999" }}>{fmtDateShort(o.created_at)} · {o.status}</div>
++                </div>
++                <div style={{ fontSize: 12.5, fontWeight: 800 }}>{fmtCurrency(o.total)}</div>
+               </div>
+-              <div style={{ fontSize: 12.5, fontWeight: 800 }}>{fmtCurrency(o.total)}</div>
+-            </div>
+-          ))
+-        )}
+-      </div>
++            ))
++          )}
++        </div>
++      )}
+     </div>
+   );
+ }
+@@ -513,6 +659,7 @@ function TeamMemberProfile({ email, name, onBack }) {
+   const [error, setError] = useState(null);
+   const [subView, setSubView] = useState(null); // null | "dues" | "dealers" | "orders"
+   const [salesOpen, setSalesOpen] = useState(true);
++  const [itemsViewMode, setItemsViewMode] = useState("number");
+   const [photoOpen, setPhotoOpen] = useState(false);
+ 
+   const range = useMemo(() => periodRangeFor(periodKey, customFrom, customTo), [periodKey, customFrom, customTo]);
+@@ -755,18 +902,39 @@ function TeamMemberProfile({ email, name, onBack }) {
+                       <div style={{ fontSize: 12, color: "#999" }}>No sales this period.</div>
+                     ) : (
+                       <>
+-                        <div style={{ fontSize: 10.5, color: "#999", marginBottom: 8 }}>Top items by quantity</div>
+-                        {items.map((it) => (
+-                          <div key={it.item_name} style={{ marginBottom: 10 }}>
+-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+-                              <span>{it.item_name}</span>
+-                              <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
+-                            </div>
+-                            <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
+-                              <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
+-                            </div>
++                        <ViewToggle mode={itemsViewMode} onChange={setItemsViewMode} />
++                        {itemsViewMode === "number" && (
++                          <div>
++                            {items.map((it) => (
++                              <div key={it.item_name} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, padding: "6px 0", borderTop: "1px solid #f2f2f2" }}>
++                                <span>{it.item_name}</span>
++                                <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
++                              </div>
++                            ))}
++                          </div>
++                        )}
++                        {itemsViewMode === "bar" && (
++                          <div>
++                            <div style={{ fontSize: 10.5, color: "#999", marginBottom: 8 }}>Top items by quantity</div>
++                            {items.map((it) => (
++                              <div key={it.item_name} style={{ marginBottom: 10 }}>
++                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
++                                  <span>{it.item_name}</span>
++                                  <span style={{ color: "#999" }}>{it.qty} pc · {it.pct}%</span>
++                                </div>
++                                <div style={{ height: 5, background: "#f2f2f2", borderRadius: 3, marginTop: 4, overflow: "hidden" }}>
++                                  <div style={{ height: "100%", width: `${Math.min(100, Number(it.pct) || 0)}%`, background: "#7B2D8B" }} />
++                                </div>
++                              </div>
++                            ))}
++                          </div>
++                        )}
++                        {itemsViewMode === "pie" && (
++                          <div>
++                            <div style={{ fontSize: 10.5, color: "#999", marginBottom: 10 }}>Share of quantity sold</div>
++                            <PieChart slices={itemSalesPieSlices(items)} />
+                           </div>
+-                        ))}
++                        )}
+                       </>
+                     )}
+                   </div>
+@@ -784,7 +952,7 @@ function TeamMemberProfile({ email, name, onBack }) {
+           periodLabel={null}
+           onExportPdf={() => exportDealersPdf(duesSorted, "Dues to collect")}
+           onExportExcel={() => exportDealersExcel(duesSorted, "Dues to collect")}
+-          chart={<TopDuesChart rows={duesSorted} />}
++          variant="dues"
+         />
+       )}
+       {subView === "dealers" && (
+@@ -794,7 +962,7 @@ function TeamMemberProfile({ email, name, onBack }) {
+           periodLabel={null}
+           onExportPdf={() => exportDealersPdf(dealersSorted, "Dealers")}
+           onExportExcel={() => exportDealersExcel(dealersSorted, "Dealers")}
+-          chart={<DealersSplitChart rows={dealersSorted} />}
++          variant="dealers"
+         />
+       )}
+       {subView === "orders" && (
+-- 
+2.43.0
+
