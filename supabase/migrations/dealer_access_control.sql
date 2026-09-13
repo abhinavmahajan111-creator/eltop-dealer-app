@@ -1084,3 +1084,299 @@ end;
 $$;
 
 grant execute on function public.get_dealer_access_history(uuid) to authenticated;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 16. Team hierarchy (13 Sep 2026) — "My team" tab on Team & Access.
+--     Unlike everything above (grant/revoke, which stays restricted to
+--     Senior Sales Associate / Senior Sales Executive), VIEWING your own
+--     reporting chain is universal: any active staff member can see
+--     whoever reports to them, directly or indirectly, and drill into a
+--     profile (their dealers, dues, item-wise sales) for anyone in that
+--     downline. Nobody can see sideways or upward — only their own
+--     subtree, enforced server-side by _is_in_my_downline() on every call.
+-- ═══════════════════════════════════════════════════════════════════════
+
+create or replace function public._is_in_my_downline(p_target_email text, p_viewer_email text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with recursive downline as (
+    select sp.email, 0 as depth
+    from public.staff_profiles sp
+    where sp.email = p_viewer_email
+
+    union all
+
+    select sp.email, d.depth + 1
+    from public.staff_profiles sp
+    join downline d on sp.reports_to = d.email
+    where d.depth < 10
+  )
+  select exists (select 1 from downline where email = p_target_email);
+$$;
+
+grant execute on function public._is_in_my_downline(text, text) to authenticated;
+
+-- Everyone's own subtree, self included at depth 0 — the tree the "My
+-- team" tab renders. No role gate: a plain Sales Associate with nobody
+-- under them just gets back a single root row.
+create or replace function public.get_my_team_subtree()
+returns table (
+  email      text,
+  name       text,
+  role       text,
+  reports_to text,
+  depth      int
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null then
+    return;
+  end if;
+
+  return query
+    with recursive downline as (
+      select sp.email, sp.name, sp.role, sp.reports_to, 0 as depth
+      from public.staff_profiles sp
+      where sp.email = v_email
+
+      union all
+
+      select sp.email, sp.name, sp.role, sp.reports_to, d.depth + 1
+      from public.staff_profiles sp
+      join downline d on sp.reports_to = d.email
+      where sp.is_active and d.depth < 10
+    )
+    select * from downline
+    order by depth, name;
+end;
+$$;
+
+grant execute on function public.get_my_team_subtree() to authenticated;
+
+-- Header stats for one person's profile: name/role, total dues across
+-- every dealer they can reach (owner + granted access, same set the
+-- "Dealers" list below shows), and how many such dealers there are.
+-- p_email must be the caller themself or someone in the caller's own
+-- downline (_is_in_my_downline) — otherwise this returns no rows.
+create or replace function public.get_team_member_summary(p_email text)
+returns table (
+  target_name text,
+  target_role text,
+  dues_total  numeric,
+  dealer_count int
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
+    return;
+  end if;
+
+  return query
+    with my_dealers as (
+      select p.id
+      from public.profiles p
+      where p.deleted_at is null
+        and (
+          p.assigned_sales_rep = p_email
+          or exists (
+            select 1 from public.dealer_access_grants g
+            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
+          )
+        )
+    ),
+    bal as (
+      select dl.dealer_id,
+        sum(case
+          when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
+          when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
+          else 0
+        end) as balance
+      from public.dealer_ledger dl
+      where dl.dealer_id in (select id from my_dealers)
+      group by dl.dealer_id
+    )
+    select
+      sp.name,
+      sp.role,
+      coalesce((select sum(balance) from bal), 0),
+      (select count(*) from my_dealers)::int
+    from public.staff_profiles sp
+    where sp.email = p_email;
+end;
+$$;
+
+grant execute on function public.get_team_member_summary(text) to authenticated;
+
+-- The dealer list itself — owner dealers and granted-access dealers
+-- together, tagged so the UI can show which is which, each with its
+-- own outstanding balance (same dealer_ledger formula used everywhere
+-- else in this file).
+create or replace function public.get_team_member_dealers(p_email text)
+returns table (
+  dealer_id    uuid,
+  dealer_code  text,
+  display_name text,
+  tag          text,
+  outstanding  numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
+    return;
+  end if;
+
+  return query
+    with my_dealers as (
+      select p.id, p.dealer_code,
+        coalesce(nullif(p.shop_name, ''), nullif(p.alias_name, ''), p.name) as display_name,
+        case when p.assigned_sales_rep = p_email then 'owner' else 'granted' end as tag
+      from public.profiles p
+      where p.deleted_at is null
+        and (
+          p.assigned_sales_rep = p_email
+          or exists (
+            select 1 from public.dealer_access_grants g
+            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
+          )
+        )
+    )
+    select
+      md.id,
+      md.dealer_code,
+      md.display_name,
+      md.tag,
+      coalesce((
+        select sum(case
+          when dl.type = 'order' or (dl.type = 'journal' and dl.dr_dealer) then dl.amount
+          when dl.type = 'payment' or dl.type = 'credit_note' or (dl.type = 'journal' and dl.cr_dealer) then -dl.amount
+          else 0
+        end)
+        from public.dealer_ledger dl where dl.dealer_id = md.id
+      ), 0) as outstanding
+    from my_dealers md
+    order by md.display_name;
+end;
+$$;
+
+grant execute on function public.get_team_member_dealers(text) to authenticated;
+
+-- Orders count for the period, across the same owner+granted dealer set.
+create or replace function public.get_team_member_orders_count(p_email text, p_start date, p_end date)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+  v_count int;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
+    return 0;
+  end if;
+
+  select count(*) into v_count
+  from public.orders o
+  where o.created_at::date between p_start and p_end
+    and o.dealer_id in (
+      select p.id from public.profiles p
+      where p.deleted_at is null
+        and (
+          p.assigned_sales_rep = p_email
+          or exists (
+            select 1 from public.dealer_access_grants g
+            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
+          )
+        )
+    );
+
+  return coalesce(v_count, 0);
+end;
+$$;
+
+grant execute on function public.get_team_member_orders_count(text, date, date) to authenticated;
+
+-- Item-wise sales for the period — quantity and % share of this
+-- person's total units sold in that window, across the same dealer set.
+create or replace function public.get_team_member_item_sales(p_email text, p_start date, p_end date)
+returns table (
+  item_name text,
+  qty       bigint,
+  pct       numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_email text;
+begin
+  select sp.email into v_email from public.staff_profiles sp where sp.id = v_uid;
+  if v_email is null or not public._is_in_my_downline(p_email, v_email) then
+    return;
+  end if;
+
+  return query
+    with my_dealers as (
+      select p.id
+      from public.profiles p
+      where p.deleted_at is null
+        and (
+          p.assigned_sales_rep = p_email
+          or exists (
+            select 1 from public.dealer_access_grants g
+            where g.dealer_id = p.id and g.grantee_email = p_email and g.revoked_at is null
+          )
+        )
+    ),
+    items as (
+      select oi.name, oi.qty
+      from public.order_items oi
+      join public.orders o on o.id = oi.order_id
+      where o.dealer_id in (select id from my_dealers)
+        and o.created_at::date between p_start and p_end
+    ),
+    totals as (
+      select coalesce(sum(qty), 0) as total_qty from items
+    )
+    select
+      i.name,
+      sum(i.qty)::bigint as qty,
+      case when t.total_qty = 0 then 0
+        else round(100.0 * sum(i.qty) / t.total_qty, 1)
+      end as pct
+    from items i, totals t
+    group by i.name, t.total_qty
+    order by qty desc;
+end;
+$$;
+
+grant execute on function public.get_team_member_item_sales(text, date, date) to authenticated;

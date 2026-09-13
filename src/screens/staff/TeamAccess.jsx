@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useApp } from "../../context/AppContext";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+import TeamHierarchy from "./TeamHierarchy";
 
 // Team & Access — Senior Sales Associate + Senior Sales Executive only.
 // Lets a senior grant or revoke another Sales staff member's LEDGER
@@ -363,16 +364,26 @@ function DealerAccessCard({ row, number, granterEmail, granterName, canRevokeAll
   );
 }
 
-export default function TeamAccess() {
-  const navigate = useNavigate();
-  const { staffProfile, session } = useApp();
-  const myEmail = session?.user?.email || "";
+function TabButton({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1, padding: "12px 8px", border: "none", background: active ? "#fff" : "#f3e6f6",
+        color: active ? "#7B2D8B" : "#8a5a92", fontSize: 13, fontWeight: 800, cursor: "pointer",
+        borderBottom: active ? "2.5px solid #7B2D8B" : "2.5px solid transparent",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DealerAccessTab({ staffProfile, myEmail }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dealerQuery, setDealerQuery] = useState("");
-
-  const canManage = staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive";
 
   const load = () => {
     setLoading(true);
@@ -397,20 +408,56 @@ export default function TeamAccess() {
     );
   }, [rows, dealerQuery]);
 
-  if (!canManage) {
-    return (
-      <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
-        <div style={{ padding: "18px 24px" }}>
-          <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
-            ← Back
-          </button>
+  return (
+    <>
+      {!loading && !error && rows.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <SearchBox value={dealerQuery} onChange={setDealerQuery} placeholder="Search dealer by name or code" />
         </div>
-        <div style={{ textAlign: "center", padding: "60px 24px", color: "#999", fontSize: 13.5 }}>
-          This screen is only for Senior Sales Associate and Senior Sales Executive.
+      )}
+
+      {loading ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
+      ) : error ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealers with ledger access yet.</div>
+      ) : filteredRows.length === 0 ? (
+        <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealer matches "{dealerQuery}".</div>
+      ) : (
+        filteredRows.map((row, i) => (
+          <DealerAccessCard
+            key={row.dealer_id}
+            row={row}
+            number={i + 1}
+            granterEmail={myEmail}
+            granterName={staffProfile?.name}
+            canRevokeAll={staffProfile?.role === "senior_sales_executive"}
+            onChanged={load}
+          />
+        ))
+      )}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 10, padding: "10px 12px", marginTop: 4 }}>
+        <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff", border: "1.5px solid #7B2D8B", color: "#7B2D8B", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          i
+        </div>
+        <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
+          {staffProfile?.role === "senior_sales_executive"
+            ? "As Senior Sales Executive you can grant or revoke any Sales dealer's ledger, for anyone on Sales."
+            : "You see this for dealers you can already see the ledger of — and can only grant access to people who report to you."}
         </div>
       </div>
-    );
-  }
+    </>
+  );
+}
+
+export default function TeamAccess() {
+  const navigate = useNavigate();
+  const { staffProfile, session } = useApp();
+  const myEmail = session?.user?.email || "";
+  const canManage = staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive";
+  const [tab, setTab] = useState("team");
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
@@ -420,50 +467,30 @@ export default function TeamAccess() {
         </button>
         <div style={{ fontSize: 19, fontWeight: 800, marginTop: 6 }}>Team &amp; Access</div>
         <div style={{ fontSize: 11.5, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
-          {staffProfile?.name} · {staffProfile?.role === "senior_sales_executive" ? "Senior Sales Executive" : "Senior Sales Associate"} — grant or revoke ledger access to a dealer, for anyone on Sales.
+          {staffProfile?.name} · {roleLabelFor(staffProfile?.role)}
         </div>
       </div>
 
-      <div style={{ padding: "14px 16px", maxWidth: 640, margin: "0 auto" }}>
-        {!loading && !error && rows.length > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <SearchBox value={dealerQuery} onChange={setDealerQuery} placeholder="Search dealer by name or code" />
-          </div>
-        )}
-
-        {loading ? (
-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
-        ) : error ? (
-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>Couldn't load ({error}).</div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealers with ledger access yet.</div>
-        ) : filteredRows.length === 0 ? (
-          <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>No dealer matches "{dealerQuery}".</div>
-        ) : (
-          filteredRows.map((row, i) => (
-            <DealerAccessCard
-              key={row.dealer_id}
-              row={row}
-              number={i + 1}
-              granterEmail={myEmail}
-              granterName={staffProfile?.name}
-              canRevokeAll={staffProfile?.role === "senior_sales_executive"}
-              onChanged={load}
-            />
-          ))
-        )}
-
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: "#f8f0f9", border: "1px solid #eadcec", borderRadius: 10, padding: "10px 12px", marginTop: 4 }}>
-          <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff", border: "1.5px solid #7B2D8B", color: "#7B2D8B", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            i
-          </div>
-          <div style={{ fontSize: 11, color: "#7B2D8B", fontWeight: 600, lineHeight: 1.5 }}>
-            {staffProfile?.role === "senior_sales_executive"
-              ? "As Senior Sales Executive you can grant or revoke any Sales dealer's ledger, for anyone on Sales."
-              : "You see this for dealers you can already see the ledger of — and can only grant access to people who report to you."}
-          </div>
+      {canManage && (
+        <div style={{ display: "flex", background: "#f3e6f6" }}>
+          <TabButton active={tab === "team"} onClick={() => setTab("team")}>My team</TabButton>
+          <TabButton active={tab === "dealer"} onClick={() => setTab("dealer")}>Dealer access</TabButton>
         </div>
+      )}
+
+      <div style={{ padding: "14px 16px", maxWidth: 640, margin: "0 auto" }}>
+        {tab === "team" || !canManage ? (
+          <TeamHierarchy />
+        ) : (
+          <DealerAccessTab staffProfile={staffProfile} myEmail={myEmail} />
+        )}
       </div>
     </div>
   );
+}
+
+function roleLabelFor(role) {
+  if (role === "senior_sales_executive") return "Senior Sales Executive — see your team and manage ledger access.";
+  if (role === "senior_sales_associate") return "Senior Sales Associate — see your team and manage ledger access.";
+  return "See who reports to you and their dealers, dues, and sales.";
 }

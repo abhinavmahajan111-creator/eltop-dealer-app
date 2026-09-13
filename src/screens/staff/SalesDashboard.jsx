@@ -572,14 +572,12 @@ export default function SalesDashboard() {
 
         <div ref={dealersSectionRef} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 12px" }}>
           <div style={{ fontSize: 15, fontWeight: 800 }}>My Dealers / Parties</div>
-          {(staffProfile?.role === "senior_sales_associate" || staffProfile?.role === "senior_sales_executive") && (
-            <div
-              onClick={() => navigate("/staff/sales/team-access")}
-              style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
-            >
-              🔐 Team &amp; Access ›
-            </div>
-          )}
+          <div
+            onClick={() => navigate("/staff/sales/team-access")}
+            style={{ fontSize: 11.5, fontWeight: 800, color: "#7B2D8B", cursor: "pointer" }}
+          >
+            🔐 Team &amp; Access ›
+          </div>
         </div>
 
         <button
