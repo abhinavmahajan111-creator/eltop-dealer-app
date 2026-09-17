@@ -166,13 +166,17 @@ export function CameraPhotoSlot({ label, file, onChange, disabled }) {
 
 // Hard cap on the shop-interior video — recording auto-stops at this many
 // seconds, so there's no way to submit a long clip (previously this was
-// only a soft, after-the-fact warning; now it's enforced live).
+// only a soft, after-the-fact warning; now it's enforced live). Kept as
+// the default for every existing caller (DayCheckIn's shop-interior
+// video); callers that need a different cap (e.g. the dealer-onboarding
+// 15s intro video) pass their own via the maxSeconds prop.
 const MAX_VIDEO_SECONDS = 5;
 
-export function CameraVideoSlot({ label = "Record 5s video of shop interior", file, onChange, disabled }) {
+export function CameraVideoSlot({ label, file, onChange, disabled, maxSeconds = MAX_VIDEO_SECONDS }) {
+  const resolvedLabel = label || `Record ${maxSeconds}s video of shop interior`;
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(MAX_VIDEO_SECONDS);
+  const [secondsLeft, setSecondsLeft] = useState(maxSeconds);
   const { videoRef, streamRef, error } = useCameraStream(open, true);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
@@ -195,7 +199,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
 
   const handleOpen = () => {
     if (disabled) return;
-    setSecondsLeft(MAX_VIDEO_SECONDS);
+    setSecondsLeft(maxSeconds);
     setOpen(true);
   };
 
@@ -214,14 +218,14 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
     recorder.start();
     recorderRef.current = recorder;
     setRecording(true);
-    setSecondsLeft(MAX_VIDEO_SECONDS);
+    setSecondsLeft(maxSeconds);
 
     tickIntervalRef.current = setInterval(() => {
       setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     stopTimeoutRef.current = setTimeout(() => {
       stopRecording();
-    }, MAX_VIDEO_SECONDS * 1000);
+    }, maxSeconds * 1000);
   };
 
   const stopRecording = () => {
@@ -240,7 +244,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
           cursor: disabled ? "default" : "pointer",
         }}
       >
-        {file ? "✓ Video captured" : `🎥 ${label}`}
+        {file ? "✓ Video captured" : `🎥 ${resolvedLabel}`}
       </div>
 
       {open && (
@@ -248,7 +252,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
           title="Record video"
           videoRef={videoRef}
           error={error}
-          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${MAX_VIDEO_SECONDS}s — recording stops automatically`}
+          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${maxSeconds}s — recording stops automatically`}
           onClose={() => { stopRecording(); setOpen(false); }}
         >
           {!recording ? (

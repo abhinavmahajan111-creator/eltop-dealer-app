@@ -1636,8 +1636,11 @@ export default function Store() {
           <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
             ⚠️ Your application is incomplete. Complete your application to unlock dealer discounts.
           </span>
-          <button style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'not-allowed', whiteSpace: 'nowrap', flexShrink: 0, opacity: 0.8 }}>
-            Application form coming soon
+          <button
+            onClick={() => navigate('/dealer/apply')}
+            style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            Complete Application
           </button>
         </div>
       )}
@@ -1646,6 +1649,19 @@ export default function Store() {
           <span style={{ fontSize: 13, color: '#1E40AF', fontWeight: 600 }}>
             🕐 Your application is under review. Dealer discounts will be visible once approved. Our sales team will guide you through the onboarding process.
           </span>
+        </div>
+      )}
+      {isDealer && profileLoaded && dealerApplicationStatus === 'rejected' && (
+        <div style={{ background: '#FEE2E2', borderBottom: '2px solid #DC2626', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: '#991B1B', fontWeight: 600 }}>
+            ✕ Your application was not approved. Please review and resubmit your documents, or contact your sales person.
+          </span>
+          <button
+            onClick={() => navigate('/dealer/apply')}
+            style={{ background: '#DC2626', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            Reapply
+          </button>
         </div>
       )}
 

@@ -1,0 +1,1121 @@
+From 89866962d11c8de4d1e3b3f3c54050904658bb1f Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 17 Sep 2026 10:48:33 +0000
+Subject: [PATCH] Add self-service dealer onboarding document upload
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Wires up the "Application form coming soon" button on Store.jsx (which
+did nothing — no onClick at all) to a new /dealer/apply screen where a
+pending dealer can submit their own onboarding documents instead of an
+admin having to enter everything by hand.
+
+New dealer-facing flow (DealerApply.jsx):
+- Registration type toggle (Unregistered/Registered) + GSTIN field.
+- Identity documents (Aadhaar, PAN, and GST certificate when registered)
+  via plain file upload, stored in a new private "dealer-documents"
+  bucket — viewed only through short-lived signed URLs, never a public
+  link, since these are sensitive documents.
+- Owner photo, staff photo, shop outside photo, shop board photo, a 5s
+  shop-interior video, and a 15s intro video — all captured live via the
+  existing CameraPhotoSlot/CameraVideoSlot components (already proven in
+  the field-rep check-in flow), so there's no gallery-upload path for a
+  fake/old photo. CameraVideoSlot's previously-hardcoded 5s cap is now a
+  `maxSeconds` prop (default still 5) so the 15s intro video can reuse it
+  without touching the existing DayCheckIn behavior.
+- Submits via a new submit_dealer_application() RPC that re-validates
+  completeness server-side and flips dealer_application_status to
+  'under_review' (the existing banner for that state already exists in
+  Store.jsx, unchanged).
+- A new "rejected" banner + Reapply button, and a Profile.jsx shortcut,
+  since a rejected dealer previously had no path back into the app to
+  fix and resubmit anything.
+
+Admin side (per Sumaksh's picks: review surfaces in both screens, and
+Approve is allowed through a warning rather than hard-blocked):
+- AdminDealers.jsx: new "Identity Documents" tiles (signed-URL view,
+  admin can still upload/replace as a fallback) alongside the existing
+  Photos & Media grid, which now also shows the two new fields (Shop
+  Outside, Intro Video). Approve asks for confirmation first if the
+  application is missing anything.
+- DealerCRM.jsx: read-only "Documents & Photos" summary in the Overview
+  tab (view-only — replacing a file still goes through AdminDealers.jsx
+  to keep upload logic in one place) with the same Approve warning gate.
+
+Schema (supabase/migrations/dealer_onboarding_documents.sql): new
+profiles columns (doc_aadhaar, doc_pan, doc_gst_cert, shop_outside_photo,
+intro_video, documents_submitted_at); a new private "dealer-documents"
+storage bucket + RLS (owner or admin only, unlike the existing public
+dealer-media/staff-media buckets); a dealer-can-write-own-folder policy
+added to the existing "dealer-media" bucket (previously admin-only);
+update_my_dealer_field() — a narrow, whitelisted self-service RPC
+(mirrors update_my_photo()'s defense-in-depth reasoning: no blanket
+"dealer can edit own row" policy, and blocked once already approved);
+and submit_dealer_application() for the completeness check + status
+flip.
+
+Reuses the existing owner_photo/staff1_photo/shop_board_photo/shop_video
+columns (already admin-writable) rather than adding parallel ones, so
+whatever a dealer uploads themselves shows up automatically in the
+admin screens that already read those columns.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                                   |   2 +
+ src/admin/AdminDealers.jsx                    | 104 +++++-
+ src/admin/DealerCRM.jsx                       | 105 +++++-
+ src/components/staff/CameraCapture.jsx        |  20 +-
+ src/pages/Store.jsx                           |  20 +-
+ src/screens/DealerApply.jsx                   | 315 ++++++++++++++++++
+ src/screens/Profile.jsx                       |   9 +
+ src/utils/dealerDocuments.js                  |  83 +++++
+ .../dealer_onboarding_documents.sql           | 174 ++++++++++
+ 9 files changed, 815 insertions(+), 17 deletions(-)
+ create mode 100644 src/screens/DealerApply.jsx
+ create mode 100644 src/utils/dealerDocuments.js
+ create mode 100644 supabase/migrations/dealer_onboarding_documents.sql
+
+diff --git a/src/App.jsx b/src/App.jsx
+index b8d5760..dbd4786 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -19,6 +19,7 @@ import OrderConfirm from "./screens/OrderConfirm";
+ import OrderTracking from "./screens/OrderTracking";
+ import Ledger from "./screens/Ledger";
+ import Profile from "./screens/Profile";
++import DealerApply from "./screens/DealerApply";
+ import Schemes from "./screens/Schemes";
+ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+@@ -78,6 +79,7 @@ export default function App() {
+         </Route>
+         <Route element={<DealerProfileRoute />}>
+           <Route path="/profile" element={<Profile />} />
++          <Route path="/dealer/apply" element={<DealerApply />} />
+         </Route>
+       </Route>
+ 
+diff --git a/src/admin/AdminDealers.jsx b/src/admin/AdminDealers.jsx
+index 2d1af8c..f56d85b 100644
+--- a/src/admin/AdminDealers.jsx
++++ b/src/admin/AdminDealers.jsx
+@@ -5,8 +5,37 @@ import * as XLSX from "xlsx";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ import ScrollFade from "../components/ScrollFade";
+ import { staffRoleLabel } from "../utils/staffRoles";
++import { uploadDealerDocument, getDealerDocumentUrl } from "../utils/dealerDocuments";
+ 
+ const BUCKET = "dealer-media";
++const IDENTITY_DOC_FIELDS = [
++  { key: "doc_aadhaar", label: "Aadhaar Card" },
++  { key: "doc_pan", label: "PAN Card" },
++  { key: "doc_gst_cert", label: "GST Certificate" },
++];
++
++// What a dealer's application must have before it can be safely approved —
++// mirrors the server-side check in submit_dealer_application() (see
++// supabase/migrations/dealer_onboarding_documents.sql). Kept here too so
++// the admin gets a clear warning instead of just relying on the dealer's
++// own submit-time validation.
++function missingApplicationItems(p) {
++  if (!p) return [];
++  const missing = [];
++  if (!p.doc_aadhaar) missing.push("Aadhaar");
++  if (!p.doc_pan) missing.push("PAN");
++  if (!p.owner_photo) missing.push("Owner photo");
++  if (!p.staff1_photo) missing.push("Staff photo");
++  if (!p.shop_outside_photo) missing.push("Shop outside photo");
++  if (!p.shop_board_photo) missing.push("Shop board photo");
++  if (!p.shop_video) missing.push("Shop inside video");
++  if (!p.intro_video) missing.push("Intro video");
++  if (p.registration_type === "Registered") {
++    if (!p.doc_gst_cert) missing.push("GST certificate");
++    if (!p.gstin) missing.push("GSTIN");
++  }
++  return missing;
++}
+ 
+ async function uploadFile(dealerId, key, file) {
+   const ext = file.name.split(".").pop();
+@@ -306,6 +335,7 @@ export default function AdminDealers() {
+   const typeDropdownBtnRef = useRef(null);     // ref on the trigger <button> for positioning
+   const typeDropdownPortalRef = useRef(null);  // ref on the portal div — kept out of the <th> DOM tree
+   const [deletedGuests, setDeletedGuests]     = useState([]);
++  const [docUrls, setDocUrls]                 = useState({}); // { [field]: signed url }
+ 
+   // ── Column-resize state ──────────────────────────────────────────────────────
+   // Indices: 0=checkbox 1=# 2=Type 3=Name 4=AppStatus 5=Phone 6=Email 7=Orders 8=Spent 9=LastOrder 10=Actions
+@@ -808,6 +838,13 @@ export default function AdminDealers() {
+     setLightbox(null);
+     setEditingCreditLimit(false);
+     setCreditLimitDraft("");
++    setDocUrls({});
++    IDENTITY_DOC_FIELDS.forEach(({ key }) => {
++      if (!d[key]) return;
++      getDealerDocumentUrl(d[key])
++        .then((url) => setDocUrls((p) => ({ ...p, [key]: url })))
++        .catch((e) => console.warn(`[AdminDealers] couldn't sign URL for ${key}:`, e.message));
++    });
+     if (isSupabaseConfigured) {
+       // Live ledger-based outstanding — matches the real credit-limit gate in
+       // AppContext.jsx's placeOrder() (Dr: order + journal-dr, Cr: payment +
+@@ -994,6 +1031,28 @@ export default function AdminDealers() {
+     setUploading(p => ({ ...p, [key]: false }));
+   };
+ 
++  // Identity documents (Aadhaar/PAN/GST cert) live in the private
++  // "dealer-documents" bucket, unlike the rest of Photos & Media above
++  // (public "dealer-media") — profiles.<key> stores a storage *path*
++  // here, not a public URL, so viewing needs a fresh signed URL each
++  // time. Admin can still upload/replace these as a fallback, same as
++  // every other tile in this section.
++  const handleDocUpload = async (key, file) => {
++    setUploading(p => ({ ...p, [key]: true }));
++    try {
++      const path = await uploadDealerDocument(selected.id, key, file);
++      await supabase.from("profiles").update({ [key]: path }).eq("id", selected.id);
++      const updated = { ...selected, [key]: path };
++      setSelected(updated);
++      setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
++      const signedUrl = await getDealerDocumentUrl(path);
++      setDocUrls(p => ({ ...p, [key]: signedUrl }));
++    } catch (e) {
++      alert("Upload failed: " + e.message);
++    }
++    setUploading(p => ({ ...p, [key]: false }));
++  };
++
+   const fetchLocation = () => {
+     if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+     navigator.geolocation.getCurrentPosition(
+@@ -1323,7 +1382,9 @@ export default function AdminDealers() {
+       { key: "staff2_photo",      label: `${selected.staff2_name || "Staff 2"} Photo`, filename: `${code}_staff2-photo.jpg`, accept: "image/*" },
+       { key: "shop_inside_photo", label: "Shop Inside",          filename: `${code}_shop-inside.jpg`,       accept: "image/*" },
+       { key: "shop_board_photo",  label: "Shop Board",           filename: `${code}_shop-board.jpg`,        accept: "image/*" },
++      { key: "shop_outside_photo",label: "Shop Outside",         filename: `${code}_shop-outside.jpg`,      accept: "image/*" },
+       { key: "shop_video",        label: "Interior Video",       filename: `${code}_interior-video.mp4`,    accept: "video/*" },
++      { key: "intro_video",       label: "Intro Video",          filename: `${code}_intro-video.mp4`,       accept: "video/*" },
+     ]
+       .filter(m => !!selected[m.key])
+       .map(m => ({ ...m, url: selected[m.key] }));
+@@ -1433,7 +1494,14 @@ export default function AdminDealers() {
+                 );
+                 if (isPending) return (
+                   <div style={{ display: 'flex', gap: 6 }}>
+-                    <button onClick={() => handleAction('approve')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓ Approve</button>
++                    <button
++                      onClick={() => {
++                        const missing = missingApplicationItems(selected);
++                        if (missing.length > 0 && !window.confirm(`This application is missing: ${missing.join(', ')}. Approve anyway?`)) return;
++                        handleAction('approve');
++                      }}
++                      style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
++                    >✓ Approve</button>
+                     <button onClick={() => handleAction('reject')}  style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✕ Reject</button>
+                   </div>
+                 );
+@@ -1682,12 +1750,36 @@ export default function AdminDealers() {
+ 
+             <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop &amp; Owner</div>
+             <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+-              <MediaTile label="Owner Photo"          url={selected.owner_photo}       uploading={uploading.owner_photo}       onPick={f => handleMediaUpload("owner_photo", f)}       editing={true} onView={() => openLightbox("owner_photo")} />
+-              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo} uploading={uploading.shop_inside_photo} onPick={f => handleMediaUpload("shop_inside_photo", f)} editing={true} onView={() => openLightbox("shop_inside_photo")} />
+-              <MediaTile label="Shop Board"           url={selected.shop_board_photo}  uploading={uploading.shop_board_photo}  onPick={f => handleMediaUpload("shop_board_photo", f)}  editing={true} onView={() => openLightbox("shop_board_photo")} />
+-              <MediaTile label="Interior Video (30s)" url={selected.shop_video}        uploading={uploading.shop_video}        onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
++              <MediaTile label="Owner Photo"          url={selected.owner_photo}        uploading={uploading.owner_photo}        onPick={f => handleMediaUpload("owner_photo", f)}        editing={true} onView={() => openLightbox("owner_photo")} />
++              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo}  uploading={uploading.shop_inside_photo}  onPick={f => handleMediaUpload("shop_inside_photo", f)}  editing={true} onView={() => openLightbox("shop_inside_photo")} />
++              <MediaTile label="Shop Board"           url={selected.shop_board_photo}   uploading={uploading.shop_board_photo}   onPick={f => handleMediaUpload("shop_board_photo", f)}   editing={true} onView={() => openLightbox("shop_board_photo")} />
++              <MediaTile label="Shop Outside"         url={selected.shop_outside_photo} uploading={uploading.shop_outside_photo} onPick={f => handleMediaUpload("shop_outside_photo", f)} editing={true} onView={() => openLightbox("shop_outside_photo")} />
++              <MediaTile label="Interior Video (30s)" url={selected.shop_video}         uploading={uploading.shop_video}         onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
++              <MediaTile label="Intro Video (15s)"    url={selected.intro_video}        uploading={uploading.intro_video}        onPick={f => handleMediaUpload("intro_video", f)}        editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("intro_video")} />
++            </div>
++            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov.</div>
++          </div>
++
++          <div style={{ marginTop: 22 }}>
++            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Identity Documents</div>
++            <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
++              {IDENTITY_DOC_FIELDS.map(({ key, label }) => (
++                <MediaTile
++                  key={key}
++                  label={label}
++                  url={docUrls[key]}
++                  uploading={uploading[key]}
++                  accept="image/*,application/pdf"
++                  onPick={f => handleDocUpload(key, f)}
++                  editing={true}
++                  onView={() => docUrls[key] && window.open(docUrls[key], "_blank", "noopener,noreferrer")}
++                />
++              ))}
++            </div>
++            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
++              Private documents — links open with a temporary signed URL, not stored as a public link.
++              {selected.registration_type !== "Registered" && " GST Certificate only applies to registered shops."}
+             </div>
+-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov, max 30 seconds.</div>
+           </div>
+ 
+           <div style={{ borderTop: "2px solid var(--red-light)", paddingTop: 6, marginTop: 20 }}>
+diff --git a/src/admin/DealerCRM.jsx b/src/admin/DealerCRM.jsx
+index 58fa907..6ee65c4 100644
+--- a/src/admin/DealerCRM.jsx
++++ b/src/admin/DealerCRM.jsx
+@@ -2,9 +2,45 @@ import { useEffect, useRef, useState } from "react";
+ import { useNavigate, useParams } from "react-router-dom";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ import { isDebitEntry as entryDr, isCreditEntry as entryCr } from "../lib/ledgerUtils";
++import { getDealerDocumentUrl } from "../utils/dealerDocuments";
+ 
+ const TABS = ["Overview", "Orders", "Activity", "Ledger", "AI Assistant"];
+ 
++const IDENTITY_DOC_FIELDS = [
++  { key: "doc_aadhaar", label: "Aadhaar Card" },
++  { key: "doc_pan", label: "PAN Card" },
++  { key: "doc_gst_cert", label: "GST Certificate" },
++];
++const MEDIA_FIELDS = [
++  { key: "owner_photo", label: "Owner Photo" },
++  { key: "staff1_photo", label: "Staff Photo" },
++  { key: "shop_outside_photo", label: "Shop Outside" },
++  { key: "shop_board_photo", label: "Shop Board" },
++  { key: "shop_video", label: "Shop Inside Video" },
++  { key: "intro_video", label: "Intro Video" },
++];
++
++// Mirrors submit_dealer_application()'s server-side completeness check
++// (see supabase/migrations/dealer_onboarding_documents.sql) — used here
++// only to warn an admin before they approve an incomplete application.
++function missingApplicationItems(p) {
++  if (!p) return [];
++  const missing = [];
++  if (!p.doc_aadhaar) missing.push("Aadhaar");
++  if (!p.doc_pan) missing.push("PAN");
++  if (!p.owner_photo) missing.push("Owner photo");
++  if (!p.staff1_photo) missing.push("Staff photo");
++  if (!p.shop_outside_photo) missing.push("Shop outside photo");
++  if (!p.shop_board_photo) missing.push("Shop board photo");
++  if (!p.shop_video) missing.push("Shop inside video");
++  if (!p.intro_video) missing.push("Intro video");
++  if (p.registration_type === "Registered") {
++    if (!p.doc_gst_cert) missing.push("GST certificate");
++    if (!p.gstin) missing.push("GSTIN");
++  }
++  return missing;
++}
++
+ const ACTIVITY_ICONS = { call: "📞", whatsapp: "💬", visit: "🤝", note: "📝" };
+ 
+ // ── Helpers ──────────────────────────────────────────────────────────────────
+@@ -57,7 +93,12 @@ export default function DealerCRM() {
+ 
+   // Application status
+   const [appStatusBusy, setAppStatusBusy] = useState(false);
++  const [docUrls, setDocUrls] = useState({}); // { [field]: signed url } for the private identity documents
+   const handleAction = async (action) => {
++    if (action === 'approve') {
++      const missing = missingApplicationItems(dealer);
++      if (missing.length > 0 && !window.confirm(`This application is missing: ${missing.join(', ')}. Approve anyway?`)) return;
++    }
+     const updates = {
+       approve:   { is_dealer: true,  dealer_application_status: 'approved' },
+       reject:    { is_dealer: false, dealer_application_status: 'rejected' },
+@@ -113,7 +154,15 @@ export default function DealerCRM() {
+       supabase.from("dealer_activities").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
+       supabase.from("dealer_ledger").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
+     ]).then(async ([d, o, a, l]) => {
+-      if (d.data) setDealer(d.data);
++      if (d.data) {
++        setDealer(d.data);
++        IDENTITY_DOC_FIELDS.forEach(({ key }) => {
++          if (!d.data[key]) return;
++          getDealerDocumentUrl(d.data[key])
++            .then((url) => setDocUrls((p) => ({ ...p, [key]: url })))
++            .catch((e) => console.warn(`[DealerCRM] couldn't sign URL for ${key}:`, e.message));
++        });
++      }
+       const fetchedOrders = o.data || [];
+       setOrders(fetchedOrders);
+       setActivities(a.data || []);
+@@ -578,6 +627,60 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}:
+               </div>
+             </div>
+ 
++            <div style={card}>
++              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>Documents &amp; Photos</div>
++              <div style={{ fontSize: 11, color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Identity Documents</div>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
++                {IDENTITY_DOC_FIELDS.map(({ key, label: docLabel }) => {
++                  const has = Boolean(dealer[key]);
++                  const url = docUrls[key];
++                  return (
++                    <a
++                      key={key}
++                      href={url || undefined}
++                      target="_blank" rel="noreferrer"
++                      onClick={(e) => { if (!url) e.preventDefault(); }}
++                      style={{
++                        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
++                        padding: "6px 12px", borderRadius: 8, textDecoration: "none",
++                        background: has ? "#eafaf0" : "#f5f5f5", color: has ? "#166534" : "#999",
++                        border: `1.5px solid ${has ? "#86efac" : "#ddd"}`,
++                        cursor: has ? "pointer" : "default",
++                      }}
++                    >
++                      {has ? "📄" : "—"} {docLabel}
++                    </a>
++                  );
++                })}
++              </div>
++              <div style={{ fontSize: 11, color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Photos &amp; Video</div>
++              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
++                {MEDIA_FIELDS.map(({ key, label: mLabel }) => {
++                  const url = dealer[key];
++                  return (
++                    <a
++                      key={key}
++                      href={url || undefined}
++                      target="_blank" rel="noreferrer"
++                      onClick={(e) => { if (!url) e.preventDefault(); }}
++                      style={{
++                        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
++                        padding: "6px 12px", borderRadius: 8, textDecoration: "none",
++                        background: url ? "#eafaf0" : "#f5f5f5", color: url ? "#166534" : "#999",
++                        border: `1.5px solid ${url ? "#86efac" : "#ddd"}`,
++                        cursor: url ? "pointer" : "default",
++                      }}
++                    >
++                      {url ? "🖼️" : "—"} {mLabel}
++                    </a>
++                  );
++                })}
++              </div>
++              <div style={{ fontSize: 11, color: "var(--muted, #888)", marginTop: 10 }}>
++                Uploads here are view-only — use Admin → Dealers &amp; Customers to replace a photo or document.
++              </div>
++            </div>
++
+             <div style={card}>
+               <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Account Health — {health.label}</div>
+               <div style={{ fontSize: 13, color: "#555", lineHeight: 1.6 }}>
+diff --git a/src/components/staff/CameraCapture.jsx b/src/components/staff/CameraCapture.jsx
+index d29e752..ccec462 100644
+--- a/src/components/staff/CameraCapture.jsx
++++ b/src/components/staff/CameraCapture.jsx
+@@ -166,13 +166,17 @@ export function CameraPhotoSlot({ label, file, onChange, disabled }) {
+ 
+ // Hard cap on the shop-interior video — recording auto-stops at this many
+ // seconds, so there's no way to submit a long clip (previously this was
+-// only a soft, after-the-fact warning; now it's enforced live).
++// only a soft, after-the-fact warning; now it's enforced live). Kept as
++// the default for every existing caller (DayCheckIn's shop-interior
++// video); callers that need a different cap (e.g. the dealer-onboarding
++// 15s intro video) pass their own via the maxSeconds prop.
+ const MAX_VIDEO_SECONDS = 5;
+ 
+-export function CameraVideoSlot({ label = "Record 5s video of shop interior", file, onChange, disabled }) {
++export function CameraVideoSlot({ label, file, onChange, disabled, maxSeconds = MAX_VIDEO_SECONDS }) {
++  const resolvedLabel = label || `Record ${maxSeconds}s video of shop interior`;
+   const [open, setOpen] = useState(false);
+   const [recording, setRecording] = useState(false);
+-  const [secondsLeft, setSecondsLeft] = useState(MAX_VIDEO_SECONDS);
++  const [secondsLeft, setSecondsLeft] = useState(maxSeconds);
+   const { videoRef, streamRef, error } = useCameraStream(open, true);
+   const recorderRef = useRef(null);
+   const chunksRef = useRef([]);
+@@ -195,7 +199,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
+ 
+   const handleOpen = () => {
+     if (disabled) return;
+-    setSecondsLeft(MAX_VIDEO_SECONDS);
++    setSecondsLeft(maxSeconds);
+     setOpen(true);
+   };
+ 
+@@ -214,14 +218,14 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
+     recorder.start();
+     recorderRef.current = recorder;
+     setRecording(true);
+-    setSecondsLeft(MAX_VIDEO_SECONDS);
++    setSecondsLeft(maxSeconds);
+ 
+     tickIntervalRef.current = setInterval(() => {
+       setSecondsLeft((s) => (s > 0 ? s - 1 : 0));
+     }, 1000);
+     stopTimeoutRef.current = setTimeout(() => {
+       stopRecording();
+-    }, MAX_VIDEO_SECONDS * 1000);
++    }, maxSeconds * 1000);
+   };
+ 
+   const stopRecording = () => {
+@@ -240,7 +244,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
+           cursor: disabled ? "default" : "pointer",
+         }}
+       >
+-        {file ? "✓ Video captured" : `🎥 ${label}`}
++        {file ? "✓ Video captured" : `🎥 ${resolvedLabel}`}
+       </div>
+ 
+       {open && (
+@@ -248,7 +252,7 @@ export function CameraVideoSlot({ label = "Record 5s video of shop interior", fi
+           title="Record video"
+           videoRef={videoRef}
+           error={error}
+-          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${MAX_VIDEO_SECONDS}s — recording stops automatically`}
++          hint={recording ? `⏺ Recording — stops automatically in ${secondsLeft}s` : `Max ${maxSeconds}s — recording stops automatically`}
+           onClose={() => { stopRecording(); setOpen(false); }}
+         >
+           {!recording ? (
+diff --git a/src/pages/Store.jsx b/src/pages/Store.jsx
+index 767d0f3..f1f780e 100644
+--- a/src/pages/Store.jsx
++++ b/src/pages/Store.jsx
+@@ -1636,8 +1636,11 @@ export default function Store() {
+           <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
+             ⚠️ Your application is incomplete. Complete your application to unlock dealer discounts.
+           </span>
+-          <button style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'not-allowed', whiteSpace: 'nowrap', flexShrink: 0, opacity: 0.8 }}>
+-            Application form coming soon
++          <button
++            onClick={() => navigate('/dealer/apply')}
++            style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
++          >
++            Complete Application
+           </button>
+         </div>
+       )}
+@@ -1648,6 +1651,19 @@ export default function Store() {
+           </span>
+         </div>
+       )}
++      {isDealer && profileLoaded && dealerApplicationStatus === 'rejected' && (
++        <div style={{ background: '#FEE2E2', borderBottom: '2px solid #DC2626', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
++          <span style={{ fontSize: 13, color: '#991B1B', fontWeight: 600 }}>
++            ✕ Your application was not approved. Please review and resubmit your documents, or contact your sales person.
++          </span>
++          <button
++            onClick={() => navigate('/dealer/apply')}
++            style={{ background: '#DC2626', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
++          >
++            Reapply
++          </button>
++        </div>
++      )}
+ 
+       {/* ── Hero banner ── */}
+       {!selectedProduct && (
+diff --git a/src/screens/DealerApply.jsx b/src/screens/DealerApply.jsx
+new file mode 100644
+index 0000000..35b62e5
+--- /dev/null
++++ b/src/screens/DealerApply.jsx
+@@ -0,0 +1,315 @@
++import { useEffect, useRef, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { useApp } from "../context/AppContext";
++import { supabase } from "../lib/supabase";
++import { CameraPhotoSlot, CameraVideoSlot } from "../components/staff/CameraCapture";
++import {
++  DEALER_DOC_FIELDS,
++  DEALER_DOC_FIELD_GST,
++  uploadDealerMedia,
++  uploadDealerDocument,
++  getDealerDocumentUrl,
++} from "../utils/dealerDocuments";
++
++// Plain file-picker tile for identity documents (Aadhaar / PAN / GST
++// certificate) — unlike the photo/video tiles below, these are scanned
++// copies of existing paper documents, not something to capture live, so
++// there's no camera/geotag flow here, just an upload + a "tap to view"
++// state once one is on file.
++function DocumentTile({ label, hasFile, uploading, onPick, onView }) {
++  const ref = useRef();
++  return (
++    <div style={{ textAlign: "center" }}>
++      <div
++        onClick={() => { if (uploading) return; if (hasFile) onView(); else ref.current?.click(); }}
++        style={{
++          width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
++          border: hasFile ? "2px solid #2fa84f" : "1.5px dashed #ccc",
++          background: hasFile ? "#eafaf0" : "#fafafa",
++          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
++          cursor: "pointer", position: "relative", padding: 6,
++        }}
++      >
++        <span style={{ fontSize: 22 }}>{uploading ? "⏳" : hasFile ? "📄" : "📎"}</span>
++        {hasFile && !uploading && (
++          <span style={{ fontSize: 9.5, color: "#2fa84f", fontWeight: 700, textAlign: "center" }}>Uploaded — tap to view</span>
++        )}
++      </div>
++      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{label}</div>
++      <input
++        ref={ref} type="file" accept="image/*,application/pdf" style={{ display: "none" }}
++        onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onPick(f); }}
++      />
++    </div>
++  );
++}
++
++export default function DealerApply() {
++  const navigate = useNavigate();
++  const { session, dealer, isDealer, dealerApplicationStatus, profileLoaded, refreshProfile } = useApp();
++
++  const [busy, setBusy] = useState({});      // { [fieldKey]: true } while that tile is uploading
++  const [regType, setRegType] = useState(dealer?.registration_type === "Registered" ? "Registered" : "Unregistered");
++  const [gstin, setGstin] = useState(dealer?.gstin || "");
++  const [savingGstin, setSavingGstin] = useState(false);
++  const [error, setError] = useState("");
++  const [submitting, setSubmitting] = useState(false);
++  const [submitted, setSubmitted] = useState(false);
++
++  // Once the profile has loaded, redirect away if this account has
++  // nothing to apply for (already approved / not actually a dealer) —
++  // mirrors the same guard pattern DealerRoute/DealerProfileRoute use.
++  useEffect(() => {
++    if (!profileLoaded) return;
++    if (!isDealer) { navigate("/store", { replace: true }); return; }
++    if (dealerApplicationStatus === "approved" || dealerApplicationStatus === "none") {
++      navigate("/store", { replace: true });
++    }
++  }, [profileLoaded, isDealer, dealerApplicationStatus, navigate]);
++
++  useEffect(() => {
++    setRegType(dealer?.registration_type === "Registered" ? "Registered" : "Unregistered");
++    setGstin(dealer?.gstin || "");
++  }, [dealer?.registration_type, dealer?.gstin]);
++
++  if (!session) return null;
++
++  const dealerId = session.user.id;
++  const fields = regType === "Registered" ? [...DEALER_DOC_FIELDS, DEALER_DOC_FIELD_GST] : DEALER_DOC_FIELDS;
++
++  async function saveField(field, value) {
++    const { error: rpcError } = await supabase.rpc("update_my_dealer_field", { p_field: field, p_value: value });
++    if (rpcError) throw rpcError;
++  }
++
++  async function handleRegTypeChange(next) {
++    setRegType(next);
++    setError("");
++    try {
++      await saveField("registration_type", next);
++      await refreshProfile();
++    } catch (e) {
++      setError("Couldn't save registration type: " + e.message);
++    }
++  }
++
++  async function handleGstinBlur() {
++    if (gstin === (dealer?.gstin || "")) return;
++    setSavingGstin(true);
++    setError("");
++    try {
++      await saveField("gstin", gstin);
++      await refreshProfile();
++    } catch (e) {
++      setError("Couldn't save GSTIN: " + e.message);
++    }
++    setSavingGstin(false);
++  }
++
++  async function handleMediaCapture(key, blob) {
++    setBusy((p) => ({ ...p, [key]: true }));
++    setError("");
++    try {
++      const url = await uploadDealerMedia(dealerId, key, blob);
++      await saveField(key, url);
++      await refreshProfile();
++    } catch (e) {
++      setError(`Upload failed (${key}): ` + e.message);
++    }
++    setBusy((p) => ({ ...p, [key]: false }));
++  }
++
++  async function handleDocumentPick(key, file) {
++    setBusy((p) => ({ ...p, [key]: true }));
++    setError("");
++    try {
++      const path = await uploadDealerDocument(dealerId, key, file);
++      await saveField(key, path);
++      await refreshProfile();
++    } catch (e) {
++      setError(`Upload failed (${key}): ` + e.message);
++    }
++    setBusy((p) => ({ ...p, [key]: false }));
++  }
++
++  async function handleDocumentView(key) {
++    try {
++      const url = await getDealerDocumentUrl(dealer?.[key]);
++      if (url) window.open(url, "_blank", "noopener,noreferrer");
++    } catch (e) {
++      setError("Couldn't open document: " + e.message);
++    }
++  }
++
++  const missing = fields.filter((f) => !dealer?.[f.key]).map((f) => f.label);
++  if (regType === "Registered" && !(gstin || "").trim()) missing.push("GSTIN");
++  const complete = missing.length === 0;
++
++  async function handleSubmit() {
++    setSubmitting(true);
++    setError("");
++    try {
++      const { error: rpcError } = await supabase.rpc("submit_dealer_application");
++      if (rpcError) throw rpcError;
++      await refreshProfile();
++      setSubmitted(true);
++    } catch (e) {
++      setError(e.message || "Couldn't submit your application — please try again.");
++    }
++    setSubmitting(false);
++  }
++
++  if (submitted) {
++    return (
++      <div className="screen" id="screen-dealer-apply">
++        <div className="topbar">
++          <span className="back" onClick={() => navigate("/store")}>&#8592;</span>
++          <h1>Application Submitted</h1>
++        </div>
++        <div className="content" style={{ textAlign: "center", paddingTop: 40 }}>
++          <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
++          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Documents submitted!</div>
++          <div style={{ fontSize: 13, color: "#666", marginBottom: 24, lineHeight: 1.5 }}>
++            Our team will review your application within 24–48 hours. You'll see dealer pricing unlock automatically once approved — or contact your sales person if you need help sooner.
++          </div>
++          <button className="btn" onClick={() => navigate("/store")}>Back to Store</button>
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <div className="screen" id="screen-dealer-apply">
++      <div className="topbar">
++        <span className="back" onClick={() => navigate("/store")}>&#8592;</span>
++        <h1>Complete Your Application</h1>
++      </div>
++
++      <div className="content">
++        <div style={{ fontSize: 12.5, color: "#666", marginBottom: 16, lineHeight: 1.5 }}>
++          Upload these documents so our team can verify your shop and unlock dealer pricing. Photos and videos are captured live from your camera — no gallery uploads — so please have your shop, owner, and staff ready.
++        </div>
++
++        {error && (
++          <div style={{ background: "#fee2e2", color: "#991b1b", border: "1.5px solid #fca5a5", borderRadius: 8, padding: "9px 12px", fontSize: 12, fontWeight: 600, marginBottom: 14 }}>
++            {error}
++          </div>
++        )}
++
++        <div className="list-card" style={{ padding: 14, marginBottom: 16 }}>
++          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>
++            Shop Registration Type
++          </div>
++          <div style={{ display: "flex", gap: 8, marginBottom: regType === "Registered" ? 12 : 0 }}>
++            {["Unregistered", "Registered"].map((opt) => (
++              <button
++                key={opt}
++                onClick={() => handleRegTypeChange(opt)}
++                style={{
++                  flex: 1, padding: "8px 10px", borderRadius: 8, fontSize: 12.5, fontWeight: 700,
++                  cursor: "pointer",
++                  border: regType === opt ? "2px solid var(--purple, #7B2D8B)" : "1.5px solid #ddd",
++                  background: regType === opt ? "var(--purple-tint, #f3e4f5)" : "#fff",
++                  color: regType === opt ? "var(--purple, #7B2D8B)" : "#666",
++                }}
++              >
++                {opt}
++              </button>
++            ))}
++          </div>
++          {regType === "Registered" && (
++            <div>
++              <input
++                value={gstin}
++                onChange={(e) => setGstin(e.target.value.toUpperCase())}
++                onBlur={handleGstinBlur}
++                placeholder="Enter GSTIN"
++                style={{ width: "100%", marginBottom: 0 }}
++              />
++              {savingGstin && <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 4 }}>Saving…</div>}
++            </div>
++          )}
++        </div>
++
++        <div className="list-card" style={{ padding: 14, marginBottom: 16 }}>
++          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>
++            Identity Documents
++          </div>
++          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
++            {fields.filter((f) => f.kind === "document").map((f) => (
++              <DocumentTile
++                key={f.key}
++                label={f.label}
++                hasFile={Boolean(dealer?.[f.key])}
++                uploading={Boolean(busy[f.key])}
++                onPick={(file) => handleDocumentPick(f.key, file)}
++                onView={() => handleDocumentView(f.key)}
++              />
++            ))}
++          </div>
++        </div>
++
++        <div className="list-card" style={{ padding: 14, marginBottom: 16 }}>
++          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>
++            Photos
++          </div>
++          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
++            {fields.filter((f) => f.kind === "photo").map((f) => (
++              <div key={f.key} style={{ position: "relative" }}>
++                {/* file is always null here — CameraPhotoSlot's own preview needs a
++                    real Blob (it calls URL.createObjectURL on it), and the uploaded
++                    blob is discarded right after upload. Already-uploaded state and
++                    the busy spinner are drawn as overlays instead, on top of the
++                    slot's own (otherwise-empty) tile. */}
++                <CameraPhotoSlot
++                  label={f.label}
++                  file={null}
++                  disabled={Boolean(busy[f.key])}
++                  onChange={(blob) => handleMediaCapture(f.key, blob)}
++                />
++                {dealer?.[f.key] && !busy[f.key] && (
++                  <img src={dealer[f.key]} alt={f.label} style={{ position: "absolute", inset: 0, width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, pointerEvents: "none" }} />
++                )}
++                {dealer?.[f.key] && !busy[f.key] && (
++                  <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
++                )}
++                {busy[f.key] && (
++                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.7)", borderRadius: 10, fontSize: 20 }}>⏳</div>
++                )}
++              </div>
++            ))}
++          </div>
++          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 10 }}>Tap a tile to open the camera. Tap again to retake.</div>
++        </div>
++
++        <div className="list-card" style={{ padding: 14, marginBottom: 16 }}>
++          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>
++            Videos
++          </div>
++          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
++            {fields.filter((f) => f.kind === "video").map((f) => (
++              <CameraVideoSlot
++                key={f.key}
++                label={f.label}
++                maxSeconds={f.maxSeconds}
++                file={dealer?.[f.key] ? "done" : (busy[f.key] ? "uploading" : null)}
++                disabled={Boolean(busy[f.key])}
++                onChange={(blob) => handleMediaCapture(f.key, blob)}
++              />
++            ))}
++          </div>
++        </div>
++
++        {!complete && (
++          <div style={{ fontSize: 12, color: "#92400E", background: "#FEF3C7", border: "1.5px solid #F59E0B", borderRadius: 8, padding: "9px 12px", marginBottom: 14, fontWeight: 600 }}>
++            Still needed: {missing.join(", ")}
++          </div>
++        )}
++
++        <button className="btn" disabled={!complete || submitting} onClick={handleSubmit} style={{ opacity: !complete || submitting ? 0.6 : 1 }}>
++          {submitting ? "Submitting…" : "Submit for Review"}
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/Profile.jsx b/src/screens/Profile.jsx
+index 4e4f87e..b3f55ed 100644
+--- a/src/screens/Profile.jsx
++++ b/src/screens/Profile.jsx
+@@ -82,6 +82,15 @@ export default function Profile() {
+             )}
+           </div>
+           <div className="profile-sub">Dealer ID: {dealer.dealer_code}</div>
++          {isPending && (
++            <button
++              className="btn small"
++              onClick={() => navigate("/dealer/apply")}
++              style={{ marginTop: 10 }}
++            >
++              {dealerApplicationStatus === "rejected" ? "Reapply" : "Complete Application"}
++            </button>
++          )}
+         </div>
+ 
+         <div className="list-card">
+diff --git a/src/utils/dealerDocuments.js b/src/utils/dealerDocuments.js
+new file mode 100644
+index 0000000..72d7273
+--- /dev/null
++++ b/src/utils/dealerDocuments.js
+@@ -0,0 +1,83 @@
++import { supabase } from "../lib/supabase";
++
++// Dealer onboarding uploads live in two buckets:
++//
++//  - "dealer-media" (public): owner/staff/shop photos + the two onboarding
++//    videos. Same bucket AdminDealers.jsx already writes to on the
++//    dealer's behalf (uploadFile() there) — this file adds the
++//    self-service half, now that a dealer can also write into their own
++//    "<their-uid>/<key>.<ext>" folder (see
++//    supabase/migrations/dealer_onboarding_documents.sql).
++//  - "dealer-documents" (private): Aadhaar / PAN / GST certificate. Kept
++//    out of the public bucket since these are identity documents, not
++//    photos — only the owning dealer or an admin can read them, and only
++//    via a short-lived signed URL, never a public one.
++
++const MEDIA_BUCKET = "dealer-media";
++const DOC_BUCKET = "dealer-documents";
++
++function extFor(blobOrFile, fallback) {
++  const name = blobOrFile?.name;
++  if (name && name.includes(".")) return name.split(".").pop().toLowerCase();
++  const type = blobOrFile?.type || "";
++  if (type.includes("jpeg") || type.includes("jpg")) return "jpg";
++  if (type.includes("png")) return "png";
++  if (type.includes("webm")) return "webm";
++  if (type.includes("mp4")) return "mp4";
++  if (type.includes("quicktime")) return "mov";
++  if (type.includes("pdf")) return "pdf";
++  return fallback;
++}
++
++// Photos/videos captured via CameraPhotoSlot/CameraVideoSlot come back as
++// bare Blobs (no .name), so this always resolves *some* extension via the
++// blob's MIME type rather than assuming a File.
++export async function uploadDealerMedia(dealerId, key, blobOrFile) {
++  const ext = extFor(blobOrFile, "jpg");
++  const path = `${dealerId}/${key}.${ext}`;
++  const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, blobOrFile, { upsert: true });
++  if (error) throw error;
++  const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
++  // Cache-bust — the path is reused on every re-upload (upsert), so
++  // without this the browser would keep showing the old cached image.
++  return `${data.publicUrl}?t=${Date.now()}`;
++}
++
++// Identity documents (file-picker uploads, not live camera captures) —
++// returns the storage *path*, not a URL, since the bucket is private and
++// there is no public URL to hand back.
++export async function uploadDealerDocument(dealerId, key, file) {
++  const ext = extFor(file, "jpg");
++  const path = `${dealerId}/${key}.${ext}`;
++  const { error } = await supabase.storage.from(DOC_BUCKET).upload(path, file, { upsert: true });
++  if (error) throw error;
++  return path;
++}
++
++// Resolves a stored dealer-documents path into a short-lived signed URL
++// for viewing/downloading. Called on demand (not cached) by whoever is
++// displaying the document — the dealer's own upload screen or an admin's
++// review screen; the storage RLS policy only allows the owning dealer or
++// an admin to successfully sign a URL for a given path.
++export async function getDealerDocumentUrl(path) {
++  if (!path) return null;
++  const { data, error } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, 3600);
++  if (error) throw error;
++  return data.signedUrl;
++}
++
++// The unified onboarding checklist (same set for every shop type, plus
++// one GST-only extra) — shared between the dealer-facing upload screen
++// and anything that needs to describe/label the same fields consistently.
++export const DEALER_DOC_FIELDS = [
++  { key: "doc_aadhaar", label: "Aadhaar Card", kind: "document" },
++  { key: "doc_pan", label: "PAN Card", kind: "document" },
++  { key: "owner_photo", label: "Owner Photo", kind: "photo" },
++  { key: "staff1_photo", label: "Staff Photo", kind: "photo" },
++  { key: "shop_outside_photo", label: "Shop Outside Photo", kind: "photo" },
++  { key: "shop_board_photo", label: "Shop Board Photo", kind: "photo" },
++  { key: "shop_video", label: "Shop Inside Video (5s)", kind: "video", maxSeconds: 5 },
++  { key: "intro_video", label: "Intro Video (15s)", kind: "video", maxSeconds: 15 },
++];
++
++export const DEALER_DOC_FIELD_GST = { key: "doc_gst_cert", label: "GST Certificate", kind: "document" };
+diff --git a/supabase/migrations/dealer_onboarding_documents.sql b/supabase/migrations/dealer_onboarding_documents.sql
+new file mode 100644
+index 0000000..b02535d
+--- /dev/null
++++ b/supabase/migrations/dealer_onboarding_documents.sql
+@@ -0,0 +1,174 @@
++-- ═══════════════════════════════════════════════════════════════════════
++-- Dealer onboarding: self-service document upload
++-- ═══════════════════════════════════════════════════════════════════════
++-- Lets a pending dealer (dealer_application_status = 'pending_details' or
++-- 'rejected') submit their own identity documents and shop photos/videos
++-- from the app, instead of an admin having to enter everything by hand in
++-- AdminDealers.jsx. Reuses the existing owner_photo / staff1_photo /
++-- shop_board_photo / shop_video columns (already admin-writable — see
++-- dealer_profile_expanded.sql) so those admin screens automatically show
++-- whatever the dealer uploads; only adds the columns that didn't already
++-- exist for this flow.
++
++alter table public.profiles
++  add column if not exists doc_aadhaar           text,
++  add column if not exists doc_pan               text,
++  add column if not exists doc_gst_cert           text,
++  add column if not exists shop_outside_photo     text,
++  add column if not exists intro_video            text,
++  add column if not exists documents_submitted_at timestamptz;
++
++-- ── dealer-documents bucket: Aadhaar / PAN / GST certificate ──────────
++-- Private (not public, unlike dealer-media/staff-media) — these are
++-- sensitive identity documents, not shop photos. Only the owning dealer
++-- or an admin can read or write; viewing requires a signed URL, never a
++-- public one (see getDealerDocumentUrl() in src/utils/dealerDocuments.js).
++insert into storage.buckets (id, name, public)
++  values ('dealer-documents', 'dealer-documents', false)
++  on conflict (id) do nothing;
++
++drop policy if exists "Dealer can view own documents or admin any" on storage.objects;
++create policy "Dealer can view own documents or admin any"
++  on storage.objects for select
++  to authenticated
++  using (
++    bucket_id = 'dealer-documents'
++    and ((storage.foldername(name))[1] = auth.uid()::text or public.is_admin())
++  );
++
++drop policy if exists "Dealer can upload own documents or admin any" on storage.objects;
++create policy "Dealer can upload own documents or admin any"
++  on storage.objects for insert
++  to authenticated
++  with check (
++    bucket_id = 'dealer-documents'
++    and ((storage.foldername(name))[1] = auth.uid()::text or public.is_admin())
++  );
++
++drop policy if exists "Dealer can replace own documents or admin any" on storage.objects;
++create policy "Dealer can replace own documents or admin any"
++  on storage.objects for update
++  to authenticated
++  using (
++    bucket_id = 'dealer-documents'
++    and ((storage.foldername(name))[1] = auth.uid()::text or public.is_admin())
++  );
++
++-- ── dealer-media bucket: dealer can now also write to their own folder ──
++-- Previously admin-only (see "Admins can upload dealer media" in
++-- dealer_profile_expanded.sql). Adds the self-upload path for owner/
++-- staff/shop photos + the two onboarding videos, alongside that existing
++-- admin-can-upload-any policy — both insert and update, mirroring the
++-- staff-media pattern (upsert:true needs both to replace an object).
++drop policy if exists "Dealer can upload own media" on storage.objects;
++create policy "Dealer can upload own media"
++  on storage.objects for insert
++  to authenticated
++  with check (
++    bucket_id = 'dealer-media'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++drop policy if exists "Dealer can replace own media" on storage.objects;
++create policy "Dealer can replace own media"
++  on storage.objects for update
++  to authenticated
++  using (
++    bucket_id = 'dealer-media'
++    and (storage.foldername(name))[1] = auth.uid()::text
++  );
++
++-- ── Self-service field writer ──────────────────────────────────────────
++-- Narrow, whitelisted RPC (not a blanket "dealer can edit own profile
++-- row" policy) — same defense-in-depth reasoning as update_my_photo() in
++-- dealer_access_control.sql: a dealer must not be able to touch
++-- is_dealer, credit_limit, dealer_application_status, etc. through this
++-- path, only the specific onboarding fields below. Blocked once the
++-- application is already approved, so an approved dealer can't quietly
++-- swap out their submitted documents afterward.
++create or replace function public.update_my_dealer_field(p_field text, p_value text)
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++begin
++  if not exists (
++    select 1 from public.profiles
++    where id = auth.uid()
++      and is_dealer = true
++      and coalesce(dealer_application_status, '') <> 'approved'
++  ) then
++    raise exception 'Not allowed: no editable dealer application for this account.';
++  end if;
++
++  case p_field
++    when 'registration_type' then
++      if p_value not in ('Registered', 'Unregistered') then
++        raise exception 'Invalid registration_type.';
++      end if;
++      update public.profiles set registration_type = p_value where id = auth.uid();
++    when 'gstin'              then update public.profiles set gstin              = p_value where id = auth.uid();
++    when 'owner_photo'        then update public.profiles set owner_photo        = p_value where id = auth.uid();
++    when 'staff1_photo'       then update public.profiles set staff1_photo       = p_value where id = auth.uid();
++    when 'shop_outside_photo' then update public.profiles set shop_outside_photo = p_value where id = auth.uid();
++    when 'shop_board_photo'   then update public.profiles set shop_board_photo   = p_value where id = auth.uid();
++    when 'shop_video'         then update public.profiles set shop_video         = p_value where id = auth.uid();
++    when 'intro_video'        then update public.profiles set intro_video        = p_value where id = auth.uid();
++    when 'doc_aadhaar'        then update public.profiles set doc_aadhaar        = p_value where id = auth.uid();
++    when 'doc_pan'            then update public.profiles set doc_pan            = p_value where id = auth.uid();
++    when 'doc_gst_cert'       then update public.profiles set doc_gst_cert       = p_value where id = auth.uid();
++    else raise exception 'Unknown field: %', p_field;
++  end case;
++end;
++$$;
++
++grant execute on function public.update_my_dealer_field(text, text) to authenticated;
++
++-- ── Submit application: server-side completeness check + status flip ──
++-- Mirrors missingApplicationItems() in AdminDealers.jsx/DealerCRM.jsx —
++-- keep both in sync if the required document set ever changes.
++create or replace function public.submit_dealer_application()
++returns void
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  p public.profiles%rowtype;
++  missing text[] := '{}';
++begin
++  select * into p from public.profiles where id = auth.uid();
++
++  if p.id is null or p.is_dealer is not true then
++    raise exception 'Not allowed: this account is not a dealer application.';
++  end if;
++  if coalesce(p.dealer_application_status, '') = 'approved' then
++    raise exception 'This application is already approved.';
++  end if;
++
++  if p.doc_aadhaar         is null then missing := missing || 'Aadhaar'; end if;
++  if p.doc_pan             is null then missing := missing || 'PAN'; end if;
++  if p.owner_photo         is null then missing := missing || 'Owner photo'; end if;
++  if p.staff1_photo        is null then missing := missing || 'Staff photo'; end if;
++  if p.shop_outside_photo  is null then missing := missing || 'Shop outside photo'; end if;
++  if p.shop_board_photo    is null then missing := missing || 'Shop board photo'; end if;
++  if p.shop_video          is null then missing := missing || 'Shop inside video'; end if;
++  if p.intro_video         is null then missing := missing || 'Intro video'; end if;
++  if p.registration_type = 'Registered' then
++    if p.doc_gst_cert is null           then missing := missing || 'GST certificate'; end if;
++    if p.gstin is null or p.gstin = '' then missing := missing || 'GSTIN'; end if;
++  end if;
++
++  if array_length(missing, 1) > 0 then
++    raise exception 'Missing: %', array_to_string(missing, ', ');
++  end if;
++
++  update public.profiles
++    set documents_submitted_at = now(),
++        dealer_application_status = 'under_review'
++    where id = auth.uid();
++end;
++$$;
++
++grant execute on function public.submit_dealer_application() to authenticated;
+-- 
+2.43.0
+

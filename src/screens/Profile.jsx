@@ -82,6 +82,15 @@ export default function Profile() {
             )}
           </div>
           <div className="profile-sub">Dealer ID: {dealer.dealer_code}</div>
+          {isPending && (
+            <button
+              className="btn small"
+              onClick={() => navigate("/dealer/apply")}
+              style={{ marginTop: 10 }}
+            >
+              {dealerApplicationStatus === "rejected" ? "Reapply" : "Complete Application"}
+            </button>
+          )}
         </div>
 
         <div className="list-card">

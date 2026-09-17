@@ -2,8 +2,44 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import { isDebitEntry as entryDr, isCreditEntry as entryCr } from "../lib/ledgerUtils";
+import { getDealerDocumentUrl } from "../utils/dealerDocuments";
 
 const TABS = ["Overview", "Orders", "Activity", "Ledger", "AI Assistant"];
+
+const IDENTITY_DOC_FIELDS = [
+  { key: "doc_aadhaar", label: "Aadhaar Card" },
+  { key: "doc_pan", label: "PAN Card" },
+  { key: "doc_gst_cert", label: "GST Certificate" },
+];
+const MEDIA_FIELDS = [
+  { key: "owner_photo", label: "Owner Photo" },
+  { key: "staff1_photo", label: "Staff Photo" },
+  { key: "shop_outside_photo", label: "Shop Outside" },
+  { key: "shop_board_photo", label: "Shop Board" },
+  { key: "shop_video", label: "Shop Inside Video" },
+  { key: "intro_video", label: "Intro Video" },
+];
+
+// Mirrors submit_dealer_application()'s server-side completeness check
+// (see supabase/migrations/dealer_onboarding_documents.sql) — used here
+// only to warn an admin before they approve an incomplete application.
+function missingApplicationItems(p) {
+  if (!p) return [];
+  const missing = [];
+  if (!p.doc_aadhaar) missing.push("Aadhaar");
+  if (!p.doc_pan) missing.push("PAN");
+  if (!p.owner_photo) missing.push("Owner photo");
+  if (!p.staff1_photo) missing.push("Staff photo");
+  if (!p.shop_outside_photo) missing.push("Shop outside photo");
+  if (!p.shop_board_photo) missing.push("Shop board photo");
+  if (!p.shop_video) missing.push("Shop inside video");
+  if (!p.intro_video) missing.push("Intro video");
+  if (p.registration_type === "Registered") {
+    if (!p.doc_gst_cert) missing.push("GST certificate");
+    if (!p.gstin) missing.push("GSTIN");
+  }
+  return missing;
+}
 
 const ACTIVITY_ICONS = { call: "📞", whatsapp: "💬", visit: "🤝", note: "📝" };
 
@@ -57,7 +93,12 @@ export default function DealerCRM() {
 
   // Application status
   const [appStatusBusy, setAppStatusBusy] = useState(false);
+  const [docUrls, setDocUrls] = useState({}); // { [field]: signed url } for the private identity documents
   const handleAction = async (action) => {
+    if (action === 'approve') {
+      const missing = missingApplicationItems(dealer);
+      if (missing.length > 0 && !window.confirm(`This application is missing: ${missing.join(', ')}. Approve anyway?`)) return;
+    }
     const updates = {
       approve:   { is_dealer: true,  dealer_application_status: 'approved' },
       reject:    { is_dealer: false, dealer_application_status: 'rejected' },
@@ -113,7 +154,15 @@ export default function DealerCRM() {
       supabase.from("dealer_activities").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
       supabase.from("dealer_ledger").select("*").eq("dealer_id", dealerId).order("created_at", { ascending: false }),
     ]).then(async ([d, o, a, l]) => {
-      if (d.data) setDealer(d.data);
+      if (d.data) {
+        setDealer(d.data);
+        IDENTITY_DOC_FIELDS.forEach(({ key }) => {
+          if (!d.data[key]) return;
+          getDealerDocumentUrl(d.data[key])
+            .then((url) => setDocUrls((p) => ({ ...p, [key]: url })))
+            .catch((e) => console.warn(`[DealerCRM] couldn't sign URL for ${key}:`, e.message));
+        });
+      }
       const fetchedOrders = o.data || [];
       setOrders(fetchedOrders);
       setActivities(a.data || []);
@@ -575,6 +624,60 @@ ${activities.slice(0, 5).map(a => `  ${a.type} on ${fmtDateOnly(a.created_at)}: 
                   <div style={label}>Address</div>
                   <div style={val}>{dealer.address || "—"}</div>
                 </div>
+              </div>
+            </div>
+
+            <div style={card}>
+              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>Documents &amp; Photos</div>
+              <div style={{ fontSize: 11, color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Identity Documents</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+                {IDENTITY_DOC_FIELDS.map(({ key, label: docLabel }) => {
+                  const has = Boolean(dealer[key]);
+                  const url = docUrls[key];
+                  return (
+                    <a
+                      key={key}
+                      href={url || undefined}
+                      target="_blank" rel="noreferrer"
+                      onClick={(e) => { if (!url) e.preventDefault(); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+                        padding: "6px 12px", borderRadius: 8, textDecoration: "none",
+                        background: has ? "#eafaf0" : "#f5f5f5", color: has ? "#166534" : "#999",
+                        border: `1.5px solid ${has ? "#86efac" : "#ddd"}`,
+                        cursor: has ? "pointer" : "default",
+                      }}
+                    >
+                      {has ? "📄" : "—"} {docLabel}
+                    </a>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "#888", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Photos &amp; Video</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {MEDIA_FIELDS.map(({ key, label: mLabel }) => {
+                  const url = dealer[key];
+                  return (
+                    <a
+                      key={key}
+                      href={url || undefined}
+                      target="_blank" rel="noreferrer"
+                      onClick={(e) => { if (!url) e.preventDefault(); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600,
+                        padding: "6px 12px", borderRadius: 8, textDecoration: "none",
+                        background: url ? "#eafaf0" : "#f5f5f5", color: url ? "#166534" : "#999",
+                        border: `1.5px solid ${url ? "#86efac" : "#ddd"}`,
+                        cursor: url ? "pointer" : "default",
+                      }}
+                    >
+                      {url ? "🖼️" : "—"} {mLabel}
+                    </a>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted, #888)", marginTop: 10 }}>
+                Uploads here are view-only — use Admin → Dealers &amp; Customers to replace a photo or document.
               </div>
             </div>
 

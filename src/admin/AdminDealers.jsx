@@ -5,8 +5,37 @@ import * as XLSX from "xlsx";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 import ScrollFade from "../components/ScrollFade";
 import { staffRoleLabel } from "../utils/staffRoles";
+import { uploadDealerDocument, getDealerDocumentUrl } from "../utils/dealerDocuments";
 
 const BUCKET = "dealer-media";
+const IDENTITY_DOC_FIELDS = [
+  { key: "doc_aadhaar", label: "Aadhaar Card" },
+  { key: "doc_pan", label: "PAN Card" },
+  { key: "doc_gst_cert", label: "GST Certificate" },
+];
+
+// What a dealer's application must have before it can be safely approved —
+// mirrors the server-side check in submit_dealer_application() (see
+// supabase/migrations/dealer_onboarding_documents.sql). Kept here too so
+// the admin gets a clear warning instead of just relying on the dealer's
+// own submit-time validation.
+function missingApplicationItems(p) {
+  if (!p) return [];
+  const missing = [];
+  if (!p.doc_aadhaar) missing.push("Aadhaar");
+  if (!p.doc_pan) missing.push("PAN");
+  if (!p.owner_photo) missing.push("Owner photo");
+  if (!p.staff1_photo) missing.push("Staff photo");
+  if (!p.shop_outside_photo) missing.push("Shop outside photo");
+  if (!p.shop_board_photo) missing.push("Shop board photo");
+  if (!p.shop_video) missing.push("Shop inside video");
+  if (!p.intro_video) missing.push("Intro video");
+  if (p.registration_type === "Registered") {
+    if (!p.doc_gst_cert) missing.push("GST certificate");
+    if (!p.gstin) missing.push("GSTIN");
+  }
+  return missing;
+}
 
 async function uploadFile(dealerId, key, file) {
   const ext = file.name.split(".").pop();
@@ -306,6 +335,7 @@ export default function AdminDealers() {
   const typeDropdownBtnRef = useRef(null);     // ref on the trigger <button> for positioning
   const typeDropdownPortalRef = useRef(null);  // ref on the portal div — kept out of the <th> DOM tree
   const [deletedGuests, setDeletedGuests]     = useState([]);
+  const [docUrls, setDocUrls]                 = useState({}); // { [field]: signed url }
 
   // ── Column-resize state ──────────────────────────────────────────────────────
   // Indices: 0=checkbox 1=# 2=Type 3=Name 4=AppStatus 5=Phone 6=Email 7=Orders 8=Spent 9=LastOrder 10=Actions
@@ -808,6 +838,13 @@ export default function AdminDealers() {
     setLightbox(null);
     setEditingCreditLimit(false);
     setCreditLimitDraft("");
+    setDocUrls({});
+    IDENTITY_DOC_FIELDS.forEach(({ key }) => {
+      if (!d[key]) return;
+      getDealerDocumentUrl(d[key])
+        .then((url) => setDocUrls((p) => ({ ...p, [key]: url })))
+        .catch((e) => console.warn(`[AdminDealers] couldn't sign URL for ${key}:`, e.message));
+    });
     if (isSupabaseConfigured) {
       // Live ledger-based outstanding — matches the real credit-limit gate in
       // AppContext.jsx's placeOrder() (Dr: order + journal-dr, Cr: payment +
@@ -988,6 +1025,28 @@ export default function AdminDealers() {
       const updated = { ...selected, [key]: url };
       setSelected(updated);
       setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
+    } catch (e) {
+      alert("Upload failed: " + e.message);
+    }
+    setUploading(p => ({ ...p, [key]: false }));
+  };
+
+  // Identity documents (Aadhaar/PAN/GST cert) live in the private
+  // "dealer-documents" bucket, unlike the rest of Photos & Media above
+  // (public "dealer-media") — profiles.<key> stores a storage *path*
+  // here, not a public URL, so viewing needs a fresh signed URL each
+  // time. Admin can still upload/replace these as a fallback, same as
+  // every other tile in this section.
+  const handleDocUpload = async (key, file) => {
+    setUploading(p => ({ ...p, [key]: true }));
+    try {
+      const path = await uploadDealerDocument(selected.id, key, file);
+      await supabase.from("profiles").update({ [key]: path }).eq("id", selected.id);
+      const updated = { ...selected, [key]: path };
+      setSelected(updated);
+      setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
+      const signedUrl = await getDealerDocumentUrl(path);
+      setDocUrls(p => ({ ...p, [key]: signedUrl }));
     } catch (e) {
       alert("Upload failed: " + e.message);
     }
@@ -1323,7 +1382,9 @@ export default function AdminDealers() {
       { key: "staff2_photo",      label: `${selected.staff2_name || "Staff 2"} Photo`, filename: `${code}_staff2-photo.jpg`, accept: "image/*" },
       { key: "shop_inside_photo", label: "Shop Inside",          filename: `${code}_shop-inside.jpg`,       accept: "image/*" },
       { key: "shop_board_photo",  label: "Shop Board",           filename: `${code}_shop-board.jpg`,        accept: "image/*" },
+      { key: "shop_outside_photo",label: "Shop Outside",         filename: `${code}_shop-outside.jpg`,      accept: "image/*" },
       { key: "shop_video",        label: "Interior Video",       filename: `${code}_interior-video.mp4`,    accept: "video/*" },
+      { key: "intro_video",       label: "Intro Video",          filename: `${code}_intro-video.mp4`,       accept: "video/*" },
     ]
       .filter(m => !!selected[m.key])
       .map(m => ({ ...m, url: selected[m.key] }));
@@ -1433,7 +1494,14 @@ export default function AdminDealers() {
                 );
                 if (isPending) return (
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => handleAction('approve')} style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✓ Approve</button>
+                    <button
+                      onClick={() => {
+                        const missing = missingApplicationItems(selected);
+                        if (missing.length > 0 && !window.confirm(`This application is missing: ${missing.join(', ')}. Approve anyway?`)) return;
+                        handleAction('approve');
+                      }}
+                      style={{ background: '#16a34a', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                    >✓ Approve</button>
                     <button onClick={() => handleAction('reject')}  style={{ background: '#dc2626', border: 'none', color: '#fff', borderRadius: 8, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>✕ Reject</button>
                   </div>
                 );
@@ -1682,12 +1750,36 @@ export default function AdminDealers() {
 
             <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop &amp; Owner</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-              <MediaTile label="Owner Photo"          url={selected.owner_photo}       uploading={uploading.owner_photo}       onPick={f => handleMediaUpload("owner_photo", f)}       editing={true} onView={() => openLightbox("owner_photo")} />
-              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo} uploading={uploading.shop_inside_photo} onPick={f => handleMediaUpload("shop_inside_photo", f)} editing={true} onView={() => openLightbox("shop_inside_photo")} />
-              <MediaTile label="Shop Board"           url={selected.shop_board_photo}  uploading={uploading.shop_board_photo}  onPick={f => handleMediaUpload("shop_board_photo", f)}  editing={true} onView={() => openLightbox("shop_board_photo")} />
-              <MediaTile label="Interior Video (30s)" url={selected.shop_video}        uploading={uploading.shop_video}        onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
+              <MediaTile label="Owner Photo"          url={selected.owner_photo}        uploading={uploading.owner_photo}        onPick={f => handleMediaUpload("owner_photo", f)}        editing={true} onView={() => openLightbox("owner_photo")} />
+              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo}  uploading={uploading.shop_inside_photo}  onPick={f => handleMediaUpload("shop_inside_photo", f)}  editing={true} onView={() => openLightbox("shop_inside_photo")} />
+              <MediaTile label="Shop Board"           url={selected.shop_board_photo}   uploading={uploading.shop_board_photo}   onPick={f => handleMediaUpload("shop_board_photo", f)}   editing={true} onView={() => openLightbox("shop_board_photo")} />
+              <MediaTile label="Shop Outside"         url={selected.shop_outside_photo} uploading={uploading.shop_outside_photo} onPick={f => handleMediaUpload("shop_outside_photo", f)} editing={true} onView={() => openLightbox("shop_outside_photo")} />
+              <MediaTile label="Interior Video (30s)" url={selected.shop_video}         uploading={uploading.shop_video}         onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
+              <MediaTile label="Intro Video (15s)"    url={selected.intro_video}        uploading={uploading.intro_video}        onPick={f => handleMediaUpload("intro_video", f)}        editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("intro_video")} />
             </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov, max 30 seconds.</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov.</div>
+          </div>
+
+          <div style={{ marginTop: 22 }}>
+            <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Identity Documents</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+              {IDENTITY_DOC_FIELDS.map(({ key, label }) => (
+                <MediaTile
+                  key={key}
+                  label={label}
+                  url={docUrls[key]}
+                  uploading={uploading[key]}
+                  accept="image/*,application/pdf"
+                  onPick={f => handleDocUpload(key, f)}
+                  editing={true}
+                  onView={() => docUrls[key] && window.open(docUrls[key], "_blank", "noopener,noreferrer")}
+                />
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>
+              Private documents — links open with a temporary signed URL, not stored as a public link.
+              {selected.registration_type !== "Registered" && " GST Certificate only applies to registered shops."}
+            </div>
           </div>
 
           <div style={{ borderTop: "2px solid var(--red-light)", paddingTop: 6, marginTop: 20 }}>

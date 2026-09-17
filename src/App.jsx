@@ -19,6 +19,7 @@ import OrderConfirm from "./screens/OrderConfirm";
 import OrderTracking from "./screens/OrderTracking";
 import Ledger from "./screens/Ledger";
 import Profile from "./screens/Profile";
+import DealerApply from "./screens/DealerApply";
 import Schemes from "./screens/Schemes";
 import Support from "./screens/Support";
 import StaffHome from "./screens/StaffHome";
@@ -78,6 +79,7 @@ export default function App() {
         </Route>
         <Route element={<DealerProfileRoute />}>
           <Route path="/profile" element={<Profile />} />
+          <Route path="/dealer/apply" element={<DealerApply />} />
         </Route>
       </Route>
 
