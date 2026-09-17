@@ -21,7 +21,7 @@ export default function StaffHome() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #eee" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <img

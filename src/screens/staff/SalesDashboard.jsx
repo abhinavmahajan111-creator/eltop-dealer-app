@@ -375,7 +375,7 @@ export default function SalesDashboard() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "22px 24px 44px", color: "#fff" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -15,7 +15,7 @@ const STATUS_STYLE = {
 };
 
 // ── styles ─────────────────────────────────────────────────────────────────
-const wrap  = { minHeight: "100vh", background: "#f5f5f5", fontFamily: "inherit", padding: "0 0 40px" };
+const wrap  = { minHeight: "100vh", background: "#f8ecf6", fontFamily: "inherit", padding: "0 0 40px" };
 const card  = { background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 14 };
 const inp   = { width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, fontFamily: "inherit", outline: "none" };
 const btn   = { width: "100%", padding: "12px", borderRadius: 8, border: "none", background: "#7B2D8B", color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" };

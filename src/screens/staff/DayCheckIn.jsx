@@ -413,7 +413,7 @@ export default function DayCheckIn() {
   }, [autoCheckInDealerId, loadingDayStart, loadingOpenVisit, loadingDealers, dayStarted, dayEnded, openVisit, checkingInId]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 0", color: "#fff" }}>
         <button onClick={() => navigate("/staff/sales")} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
           ← Dashboard

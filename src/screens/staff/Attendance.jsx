@@ -84,7 +84,7 @@ export default function Attendance() {
   for (let d = 1; d <= totalDays; d++) cells.push(d);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
         <button
           onClick={() => navigate("/staff/sales")}

@@ -277,7 +277,7 @@ function DealerAccessCard({ row, number, granterEmail, granterName, canRevokeAll
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         <div
           style={{
-            width: 22, height: 22, borderRadius: 999, background: "#f5f5f7", color: "#7B2D8B",
+            width: 22, height: 22, borderRadius: 999, background: "#f8ecf6", color: "#7B2D8B",
             fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0, marginTop: 1,
           }}
@@ -460,7 +460,7 @@ export default function TeamAccess() {
   const [tab, setTab] = useState("team");
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 20px", color: "#fff" }}>
         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 4 }}>
           ← Dashboard

@@ -1,0 +1,316 @@
+From fbd47f0560e63b35f299594407923126acd61f44 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 17 Sep 2026 09:48:53 +0000
+Subject: [PATCH] Apply light pink-lavender page background theme across the
+ app
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Swaps the neutral grey page background (#f5f5f7 / #F1F3F6 / #f5f5f5 /
+#f8f4f8) for a soft pink-lavender tint (#f8ecf6) everywhere a screen
+sets its own background, and updates the central --bg CSS variable in
+index.css so every dealer/customer screen already using the shared
+.screen/#phone wrapper (Dashboard, Ledger, Cart, Catalogue, Profile,
+Schemes, Support, etc.) and the whole Admin shell (.admin-app) pick it
+up automatically.
+
+Screens updated directly (each hardcoded its own background instead of
+inheriting from --bg): Login, Store (guest/customer), MyAccount,
+TrackOrder, ContactSupport, StaffHome, and every staff screen
+(SalesDashboard, MyDealersPage, DuesToCollectPage, DayCheckIn,
+Attendance, ComingSoon, DealerDetail, FieldDealerDetail, TeamAccess).
+
+Purple brand accent (#7B2D8B) and all semantic colors (danger/success/
+warning) are unchanged — this only touches the page-background layer.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/index.css                           | 2 +-
+ src/pages/ContactSupport.jsx            | 2 +-
+ src/pages/MyAccount.jsx                 | 6 +++---
+ src/pages/Store.jsx                     | 2 +-
+ src/pages/TrackOrder.jsx                | 2 +-
+ src/screens/Login.jsx                   | 2 +-
+ src/screens/StaffHome.jsx               | 2 +-
+ src/screens/staff/Attendance.jsx        | 2 +-
+ src/screens/staff/ComingSoon.jsx        | 2 +-
+ src/screens/staff/DayCheckIn.jsx        | 2 +-
+ src/screens/staff/DealerDetail.jsx      | 6 +++---
+ src/screens/staff/DuesToCollectPage.jsx | 2 +-
+ src/screens/staff/FieldDealerDetail.jsx | 6 +++---
+ src/screens/staff/MyDealersPage.jsx     | 2 +-
+ src/screens/staff/SalesDashboard.jsx    | 2 +-
+ src/screens/staff/TeamAccess.jsx        | 4 ++--
+ 16 files changed, 23 insertions(+), 23 deletions(-)
+
+diff --git a/src/index.css b/src/index.css
+index 744ead5..ef4e010 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -5,7 +5,7 @@
+     --red-dark:#6B3A73;
+     --red-light:#D6A3F7;
+     --white:#ffffff;
+-    --bg:#f5f5f7;
++    --bg:#f8ecf6;
+     --text:#222;
+     --muted:#777;
+     --border:#e6e6e6;
+diff --git a/src/pages/ContactSupport.jsx b/src/pages/ContactSupport.jsx
+index db20048..faab2ac 100644
+--- a/src/pages/ContactSupport.jsx
++++ b/src/pages/ContactSupport.jsx
+@@ -1,7 +1,7 @@
+ import { useState } from "react";
+ import { isSupabaseConfigured, supabase } from "../lib/supabase";
+ 
+-const wrap = { minHeight: "100vh", background: "#f5f5f5", fontFamily: "inherit", padding: "0 0 40px" };
++const wrap = { minHeight: "100vh", background: "#f8ecf6", fontFamily: "inherit", padding: "0 0 40px" };
+ const card = { background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 14 };
+ const inp  = { width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, fontFamily: "inherit", outline: "none" };
+ const btn  = { width: "100%", padding: "12px", borderRadius: 8, border: "none", background: "#7B2D8B", color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" };
+diff --git a/src/pages/MyAccount.jsx b/src/pages/MyAccount.jsx
+index 9c4afbf..f5fa863 100644
+--- a/src/pages/MyAccount.jsx
++++ b/src/pages/MyAccount.jsx
+@@ -216,13 +216,13 @@ export default function MyAccount() {
+   const btnOutline = { background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
+ 
+   if (loading) return (
+-    <div style={{ position: "fixed", inset: 0, background: "#f8f4f8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#94a3b8" }}>
++    <div style={{ position: "fixed", inset: 0, background: "#f8ecf6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#94a3b8" }}>
+       Loading…
+     </div>
+   );
+ 
+   return (
+-    <div style={{ fontFamily: "inherit", minHeight: "100vh", background: "#f8f4f8", color: "#222" }}>
++    <div style={{ fontFamily: "inherit", minHeight: "100vh", background: "#f8ecf6", color: "#222" }}>
+       <style>{`
+         .ma-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+         .ma-filter-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 0; }
+@@ -450,7 +450,7 @@ export default function MyAccount() {
+                         </tr>,
+                         expandedOrderId === o.id && (
+                           <tr key={`${o.id}-d`}>
+-                            <td colSpan={4} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
++                            <td colSpan={4} style={{ background: "#f8ecf6", padding: "12px 16px" }}>
+                               {!orderItemsCache[o.id] ? (
+                                 <div style={{ color: "#94a3b8" }}>Loading…</div>
+                               ) : orderItemsCache[o.id].length === 0 ? (
+diff --git a/src/pages/Store.jsx b/src/pages/Store.jsx
+index 4f7d2e9..767d0f3 100644
+--- a/src/pages/Store.jsx
++++ b/src/pages/Store.jsx
+@@ -1329,7 +1329,7 @@ export default function Store() {
+       )}
+       <style>{`
+         *, *::before, *::after { box-sizing: border-box; }
+-        .store-root { min-height: 100vh; min-height: 100dvh; background: #F1F3F6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
++        .store-root { min-height: 100vh; min-height: 100dvh; background: #f8ecf6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
+ 
+         /* ── Header ── */
+         .store-header { position: sticky; top: 0; z-index: 200; background: #FFFFFF; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+diff --git a/src/pages/TrackOrder.jsx b/src/pages/TrackOrder.jsx
+index c995a3b..d466739 100644
+--- a/src/pages/TrackOrder.jsx
++++ b/src/pages/TrackOrder.jsx
+@@ -15,7 +15,7 @@ const STATUS_STYLE = {
+ };
+ 
+ // ── styles ─────────────────────────────────────────────────────────────────
+-const wrap  = { minHeight: "100vh", background: "#f5f5f5", fontFamily: "inherit", padding: "0 0 40px" };
++const wrap  = { minHeight: "100vh", background: "#f8ecf6", fontFamily: "inherit", padding: "0 0 40px" };
+ const card  = { background: "#fff", borderRadius: 12, padding: "20px 22px", boxShadow: "0 2px 8px rgba(0,0,0,.06)", marginBottom: 14 };
+ const inp   = { width: "100%", boxSizing: "border-box", padding: "11px 14px", borderRadius: 8, border: "1.5px solid #ddd", fontSize: 14, fontFamily: "inherit", outline: "none" };
+ const btn   = { width: "100%", padding: "12px", borderRadius: 8, border: "none", background: "#7B2D8B", color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" };
+diff --git a/src/screens/Login.jsx b/src/screens/Login.jsx
+index c55f687..2788ea2 100644
+--- a/src/screens/Login.jsx
++++ b/src/screens/Login.jsx
+@@ -437,7 +437,7 @@ export default function Login() {
+           min-height: 100vh;
+           min-height: 100dvh;
+           display: flex;
+-          background: #f5f5f7;
++          background: #f8ecf6;
+           font-family: 'Segoe UI', Arial, sans-serif;
+           color: var(--text);
+         }
+diff --git a/src/screens/StaffHome.jsx b/src/screens/StaffHome.jsx
+index c5da8db..1f1e657 100644
+--- a/src/screens/StaffHome.jsx
++++ b/src/screens/StaffHome.jsx
+@@ -21,7 +21,7 @@ export default function StaffHome() {
+   };
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", background: "#fff", borderBottom: "1px solid #eee" }}>
+         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+           <img
+diff --git a/src/screens/staff/Attendance.jsx b/src/screens/staff/Attendance.jsx
+index c374a7b..8c12c40 100644
+--- a/src/screens/staff/Attendance.jsx
++++ b/src/screens/staff/Attendance.jsx
+@@ -84,7 +84,7 @@ export default function Attendance() {
+   for (let d = 1; d <= totalDays; d++) cells.push(d);
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
+         <button
+           onClick={() => navigate("/staff/sales")}
+diff --git a/src/screens/staff/ComingSoon.jsx b/src/screens/staff/ComingSoon.jsx
+index 835374e..f71a76e 100644
+--- a/src/screens/staff/ComingSoon.jsx
++++ b/src/screens/staff/ComingSoon.jsx
+@@ -13,7 +13,7 @@ export default function ComingSoon() {
+   const feature = FEATURE_CATALOG[key];
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 24px 60px", color: "#fff" }}>
+         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
+           ← Back
+diff --git a/src/screens/staff/DayCheckIn.jsx b/src/screens/staff/DayCheckIn.jsx
+index 56a01c6..01aaca3 100644
+--- a/src/screens/staff/DayCheckIn.jsx
++++ b/src/screens/staff/DayCheckIn.jsx
+@@ -413,7 +413,7 @@ export default function DayCheckIn() {
+   }, [autoCheckInDealerId, loadingDayStart, loadingOpenVisit, loadingDealers, dayStarted, dayEnded, openVisit, checkingInId]);
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 0", color: "#fff" }}>
+         <button onClick={() => navigate("/staff/sales")} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
+           ← Dashboard
+diff --git a/src/screens/staff/DealerDetail.jsx b/src/screens/staff/DealerDetail.jsx
+index 84a1c23..55d8d79 100644
+--- a/src/screens/staff/DealerDetail.jsx
++++ b/src/screens/staff/DealerDetail.jsx
+@@ -328,7 +328,7 @@ export default function DealerDetail() {
+ 
+   if (loading) {
+     return (
+-      <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
++      <div style={{ minHeight: "100vh", background: "#f8ecf6", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Segoe UI', Arial, sans-serif", color: "#999" }}>
+         Loading…
+       </div>
+     );
+@@ -336,7 +336,7 @@ export default function DealerDetail() {
+ 
+   if (error || !dealer) {
+     return (
+-      <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+         <div style={{ padding: "18px 24px" }}>
+           <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0 }}>
+             ← Back
+@@ -358,7 +358,7 @@ export default function DealerDetail() {
+     : null;
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 18px 0", color: "#fff" }}>
+         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
+           ← Back
+diff --git a/src/screens/staff/DuesToCollectPage.jsx b/src/screens/staff/DuesToCollectPage.jsx
+index 812168c..d1dd9f2 100644
+--- a/src/screens/staff/DuesToCollectPage.jsx
++++ b/src/screens/staff/DuesToCollectPage.jsx
+@@ -47,7 +47,7 @@ export default function DuesToCollectPage() {
+   };
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
+         <button
+           onClick={() => navigate("/staff/sales")}
+diff --git a/src/screens/staff/FieldDealerDetail.jsx b/src/screens/staff/FieldDealerDetail.jsx
+index 3f063b7..f3e7111 100644
+--- a/src/screens/staff/FieldDealerDetail.jsx
++++ b/src/screens/staff/FieldDealerDetail.jsx
+@@ -76,12 +76,12 @@ export default function FieldDealerDetail() {
+   }, [id]);
+ 
+   if (loading) {
+-    return <div style={{ minHeight: "100vh", background: "#f5f5f7", display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>Loading…</div>;
++    return <div style={{ minHeight: "100vh", background: "#f8ecf6", display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>Loading…</div>;
+   }
+ 
+   if (error || !dealer) {
+     return (
+-      <div style={{ minHeight: "100vh", background: "#f5f5f7", padding: 20 }}>
++      <div style={{ minHeight: "100vh", background: "#f8ecf6", padding: 20 }}>
+         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#7B2D8B", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 16 }}>
+           ← Back
+         </button>
+@@ -96,7 +96,7 @@ export default function FieldDealerDetail() {
+     : null;
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 18px 20px", color: "#fff" }}>
+         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 12 }}>
+           ← Back
+diff --git a/src/screens/staff/MyDealersPage.jsx b/src/screens/staff/MyDealersPage.jsx
+index d4b94e0..a3d0410 100644
+--- a/src/screens/staff/MyDealersPage.jsx
++++ b/src/screens/staff/MyDealersPage.jsx
+@@ -38,7 +38,7 @@ export default function MyDealersPage() {
+   };
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
+         <button
+           onClick={() => navigate("/staff/sales")}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 7d83e0c..acd274f 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -375,7 +375,7 @@ export default function SalesDashboard() {
+   };
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "22px 24px 44px", color: "#fff" }}>
+         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+diff --git a/src/screens/staff/TeamAccess.jsx b/src/screens/staff/TeamAccess.jsx
+index a2c4047..ac9b143 100644
+--- a/src/screens/staff/TeamAccess.jsx
++++ b/src/screens/staff/TeamAccess.jsx
+@@ -277,7 +277,7 @@ function DealerAccessCard({ row, number, granterEmail, granterName, canRevokeAll
+       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+         <div
+           style={{
+-            width: 22, height: 22, borderRadius: 999, background: "#f5f5f7", color: "#7B2D8B",
++            width: 22, height: 22, borderRadius: 999, background: "#f8ecf6", color: "#7B2D8B",
+             fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+             flexShrink: 0, marginTop: 1,
+           }}
+@@ -460,7 +460,7 @@ export default function TeamAccess() {
+   const [tab, setTab] = useState("team");
+ 
+   return (
+-    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++    <div style={{ minHeight: "100vh", background: "#f8ecf6", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
+       <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 20px", color: "#fff" }}>
+         <button onClick={() => navigate(-1)} style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 4 }}>
+           ← Dashboard
+-- 
+2.43.0
+

@@ -437,7 +437,7 @@ export default function Login() {
           min-height: 100vh;
           min-height: 100dvh;
           display: flex;
-          background: #f5f5f7;
+          background: #f8ecf6;
           font-family: 'Segoe UI', Arial, sans-serif;
           color: var(--text);
         }

@@ -216,13 +216,13 @@ export default function MyAccount() {
   const btnOutline = { background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" };
 
   if (loading) return (
-    <div style={{ position: "fixed", inset: 0, background: "#f8f4f8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#94a3b8" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#f8ecf6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "#94a3b8" }}>
       Loading…
     </div>
   );
 
   return (
-    <div style={{ fontFamily: "inherit", minHeight: "100vh", background: "#f8f4f8", color: "#222" }}>
+    <div style={{ fontFamily: "inherit", minHeight: "100vh", background: "#f8ecf6", color: "#222" }}>
       <style>{`
         .ma-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
         .ma-filter-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 0; }
@@ -450,7 +450,7 @@ export default function MyAccount() {
                         </tr>,
                         expandedOrderId === o.id && (
                           <tr key={`${o.id}-d`}>
-                            <td colSpan={4} style={{ background: "#f8f4f8", padding: "12px 16px" }}>
+                            <td colSpan={4} style={{ background: "#f8ecf6", padding: "12px 16px" }}>
                               {!orderItemsCache[o.id] ? (
                                 <div style={{ color: "#94a3b8" }}>Loading…</div>
                               ) : orderItemsCache[o.id].length === 0 ? (
