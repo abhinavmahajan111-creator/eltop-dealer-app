@@ -7,6 +7,7 @@ import { featuresForRole } from "../../utils/staffFeatures";
 import DashboardAiCard from "../../components/staff/DashboardAiCard";
 import NotificationBell from "../../components/staff/NotificationBell";
 import StaffAvatar from "../../components/staff/StaffAvatar";
+import DealerRow from "../../components/staff/DealerRow";
 import { getCurrentPosition } from "../../utils/visitMedia";
 import { uploadStaffPhoto } from "../../utils/staffPhoto";
 
@@ -35,11 +36,6 @@ import { uploadStaffPhoto } from "../../utils/staffPhoto";
 // those have a data model yet, so rather than show made-up numbers in a
 // live app, those sections stay clearly marked as not built yet.
 
-function initials(name) {
-  if (!name) return "?";
-  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-}
-
 const CARD_STYLE = {
   background: "#fff",
   border: "1.5px solid #7B2D8B",
@@ -60,48 +56,6 @@ function StatCard({ icon, value, label, onClick }) {
       <div style={{ fontSize: 12, color: "#888", fontWeight: 600, marginTop: 2 }}>
         {label}{onClick ? " ›" : ""}
       </div>
-    </div>
-  );
-}
-
-function DealerRow({ dealer, onClick }) {
-  const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
-  return (
-    <div
-      onClick={onClick}
-      style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
-    >
-      <div style={{
-        width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
-        display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
-      }}>
-        {initials(dealer.name)}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {dealer.name || "Unnamed"}{dealer.alias_name ? ` (${dealer.alias_name})` : ""}
-          {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
-            <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
-              🆕 New
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
-          {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
-          {dealer.owner_name ? ` · ${dealer.dealer_kind && dealer.dealer_kind !== "profile" ? "added by" : "owner"}: ${dealer.owner_name}` : ""}
-        </div>
-      </div>
-      {dealer.has_ledger_access === false ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, background: "#f3f3f3", borderRadius: 999, padding: "4px 10px" }}>
-          <span style={{ fontSize: 11 }}>🔒</span>
-          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#888" }}>Locked</span>
-        </div>
-      ) : (
-        <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
-          ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
-        </div>
-      )}
-      <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
     </div>
   );
 }
@@ -580,12 +534,12 @@ export default function SalesDashboard() {
 
       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-          <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
+          <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} onClick={() => navigate("/staff/sales/my-dealers")} />
           <StatCard
             icon="₹"
             value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`}
             label="Total outstanding"
-            onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            onClick={() => navigate("/staff/sales/dues")}
           />
         </div>
 

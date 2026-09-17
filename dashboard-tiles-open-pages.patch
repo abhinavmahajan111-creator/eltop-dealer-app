@@ -1,0 +1,375 @@
+From 927131d766fe2b5ad91f6ba17d025c10c612d339 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 16 Sep 2026 05:18:47 +0000
+Subject: [PATCH] Make dashboard's dealer-count and outstanding tiles open
+ their own pages
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- "18 · Dealers, Sales dept." previously had no onClick at all (dead
+  tap). Now opens a new /staff/sales/my-dealers page.
+- "₹X · Total outstanding" previously just scrolled down to the same
+  dashboard's inline dealer list. Now opens a new /staff/sales/dues
+  page with the same list sorted highest-dues-first.
+- Extracted DealerRow (+ its initials() helper) out of SalesDashboard.jsx
+  into src/components/staff/DealerRow.jsx so both new pages and the
+  dashboard's own inline list render dealers identically (locked-ledger
+  badge, field-dealer "New" badge, tap-through to Dealer/FieldDealer
+  detail) without duplicating that logic.
+- The dashboard's own inline "My Dealers / Parties" list, Add Dealer
+  flow, and the My Dealers/My Visits nav tiles are unchanged — only
+  the two stat tiles at the top now navigate instead of scrolling.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/App.jsx                             |  4 ++
+ src/components/staff/DealerRow.jsx      | 51 +++++++++++++++
+ src/screens/staff/DuesToCollectPage.jsx | 83 +++++++++++++++++++++++++
+ src/screens/staff/MyDealersPage.jsx     | 74 ++++++++++++++++++++++
+ src/screens/staff/SalesDashboard.jsx    | 52 +---------------
+ 5 files changed, 215 insertions(+), 49 deletions(-)
+ create mode 100644 src/components/staff/DealerRow.jsx
+ create mode 100644 src/screens/staff/DuesToCollectPage.jsx
+ create mode 100644 src/screens/staff/MyDealersPage.jsx
+
+diff --git a/src/App.jsx b/src/App.jsx
+index 52e1f56..b8d5760 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -23,6 +23,8 @@ import Schemes from "./screens/Schemes";
+ import Support from "./screens/Support";
+ import StaffHome from "./screens/StaffHome";
+ import SalesDashboard from "./screens/staff/SalesDashboard";
++import MyDealersPage from "./screens/staff/MyDealersPage";
++import DuesToCollectPage from "./screens/staff/DuesToCollectPage";
+ import DealerDetail from "./screens/staff/DealerDetail";
+ import FieldDealerDetail from "./screens/staff/FieldDealerDetail";
+ import TeamAccess from "./screens/staff/TeamAccess";
+@@ -110,6 +112,8 @@ export default function App() {
+       <Route element={<StaffRoute />}>
+         <Route path="/staff" element={<StaffHome />} />
+         <Route path="/staff/sales" element={<SalesDashboard />} />
++        <Route path="/staff/sales/my-dealers" element={<MyDealersPage />} />
++        <Route path="/staff/sales/dues" element={<DuesToCollectPage />} />
+         <Route path="/staff/sales/day-checkin" element={<DayCheckIn />} />
+         {/* Old separate Start Day / Check In routes — redirect to the
+             combined tabbed screen that replaced them. */}
+diff --git a/src/components/staff/DealerRow.jsx b/src/components/staff/DealerRow.jsx
+new file mode 100644
+index 0000000..78bc19f
+--- /dev/null
++++ b/src/components/staff/DealerRow.jsx
+@@ -0,0 +1,51 @@
++// Shared dealer list row — originally lived only in SalesDashboard.jsx's
++// inline "My Dealers / Parties" section, pulled out here so the new
++// dedicated "My Dealers" and "Dues to collect" pages (opened from the
++// dashboard's stat tiles) can render the exact same row without
++// duplicating the locked-ledger badge / "New" field-dealer badge logic.
++function initials(name) {
++  if (!name) return "?";
++  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
++}
++
++export default function DealerRow({ dealer, onClick }) {
++  const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
++  return (
++    <div
++      onClick={onClick}
++      style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
++    >
++      <div style={{
++        width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
++        display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
++      }}>
++        {initials(dealer.name)}
++      </div>
++      <div style={{ flex: 1, minWidth: 0 }}>
++        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
++          {dealer.name || "Unnamed"}{dealer.alias_name ? ` (${dealer.alias_name})` : ""}
++          {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
++            <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
++              🆕 New
++            </span>
++          )}
++        </div>
++        <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
++          {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
++          {dealer.owner_name ? ` · ${dealer.dealer_kind && dealer.dealer_kind !== "profile" ? "added by" : "owner"}: ${dealer.owner_name}` : ""}
++        </div>
++      </div>
++      {dealer.has_ledger_access === false ? (
++        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, background: "#f3f3f3", borderRadius: 999, padding: "4px 10px" }}>
++          <span style={{ fontSize: 11 }}>🔒</span>
++          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#888" }}>Locked</span>
++        </div>
++      ) : (
++        <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
++          ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
++        </div>
++      )}
++      <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/DuesToCollectPage.jsx b/src/screens/staff/DuesToCollectPage.jsx
+new file mode 100644
+index 0000000..812168c
+--- /dev/null
++++ b/src/screens/staff/DuesToCollectPage.jsx
+@@ -0,0 +1,83 @@
++import { useEffect, useMemo, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import DealerRow from "../../components/staff/DealerRow";
++
++// Dedicated page for the dashboard's "₹2,854 · Total outstanding" stat
++// tile — previously that tile just scrolled down to the same "My
++// Dealers / Parties" list further down the dashboard. This gives it its
++// own page instead, with the list sorted highest-dues-first so the
++// dealers actually worth chasing are at the top, rather than scrolling
++// to the same order the dashboard's own list uses.
++export default function DuesToCollectPage() {
++  const navigate = useNavigate();
++  const [dealers, setDealers] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoading(false); return; }
++    let cancelled = false;
++    setLoading(true);
++    supabase.rpc("get_my_dealers").then(({ data, error: err }) => {
++      if (cancelled) return;
++      if (err) { setError(err.message); setLoading(false); return; }
++      setError(null);
++      setDealers(data || []);
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, []);
++
++  const duesSorted = useMemo(
++    () => [...dealers].sort((a, b) => Number(b.outstanding || 0) - Number(a.outstanding || 0)),
++    [dealers]
++  );
++  const totalOutstanding = useMemo(
++    () => dealers.reduce((sum, d) => sum + Number(d.outstanding || 0), 0),
++    [dealers]
++  );
++
++  const goToDealer = (d) => {
++    if (d.dealer_kind && d.dealer_kind !== "profile") {
++      navigate(`/staff/sales/field-dealer/${d.id}`);
++    } else {
++      navigate(`/staff/sales/dealer/${d.id}`);
++    }
++  };
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
++        <button
++          onClick={() => navigate("/staff/sales")}
++          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}
++        >
++          ← Dashboard
++        </button>
++        <div style={{ fontSize: 18, fontWeight: 800 }}>₹ Dues to collect</div>
++        <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
++          {loading ? "Loading…" : `Total outstanding: ₹${totalOutstanding.toLocaleString("en-IN")}`}
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 60px" }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++          {loading ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++          ) : error ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>
++              Couldn't load your dealers ({error}).
++            </div>
++          ) : duesSorted.length === 0 ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999", lineHeight: 1.6 }}>
++              No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
++            </div>
++          ) : (
++            duesSorted.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => goToDealer(d)} />)
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/MyDealersPage.jsx b/src/screens/staff/MyDealersPage.jsx
+new file mode 100644
+index 0000000..d4b94e0
+--- /dev/null
++++ b/src/screens/staff/MyDealersPage.jsx
+@@ -0,0 +1,74 @@
++import { useEffect, useState } from "react";
++import { useNavigate } from "react-router-dom";
++import { isSupabaseConfigured, supabase } from "../../lib/supabase";
++import DealerRow from "../../components/staff/DealerRow";
++
++// Dedicated page for the dashboard's "18 · Dealers, Sales dept." stat
++// tile — previously that tile did nothing at all (no onClick), the only
++// way to reach the dealer list was scrolling down the dashboard itself.
++// Same get_my_dealers() RPC and same DealerRow as the dashboard's inline
++// list; this page just gives the tile somewhere real to go, matching how
++// "This Month"/Attendance already opens its own page.
++export default function MyDealersPage() {
++  const navigate = useNavigate();
++  const [dealers, setDealers] = useState([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState(null);
++
++  useEffect(() => {
++    if (!isSupabaseConfigured) { setLoading(false); return; }
++    let cancelled = false;
++    setLoading(true);
++    supabase.rpc("get_my_dealers").then(({ data, error: err }) => {
++      if (cancelled) return;
++      if (err) { setError(err.message); setLoading(false); return; }
++      setError(null);
++      setDealers(data || []);
++      setLoading(false);
++    });
++    return () => { cancelled = true; };
++  }, []);
++
++  const goToDealer = (d) => {
++    if (d.dealer_kind && d.dealer_kind !== "profile") {
++      navigate(`/staff/sales/field-dealer/${d.id}`);
++    } else {
++      navigate(`/staff/sales/dealer/${d.id}`);
++    }
++  };
++
++  return (
++    <div style={{ minHeight: "100vh", background: "#f5f5f7", fontFamily: "'Segoe UI', Arial, sans-serif" }}>
++      <div style={{ background: "linear-gradient(135deg, #7B2D8B 0%, #a13ea9 100%)", padding: "18px 20px 22px", color: "#fff" }}>
++        <button
++          onClick={() => navigate("/staff/sales")}
++          style={{ background: "none", border: "none", color: "#fff", opacity: 0.9, fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}
++        >
++          ← Dashboard
++        </button>
++        <div style={{ fontSize: 18, fontWeight: 800 }}>🏬 My Dealers</div>
++        <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
++          {loading ? "Loading…" : `${dealers.length} dealer${dealers.length === 1 ? "" : "s"} assigned to you`}
++        </div>
++      </div>
++
++      <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 60px" }}>
++        <div style={{ background: "#fff", border: "1.5px solid #7B2D8B", borderRadius: 14, boxShadow: "0 2px 10px rgba(0,0,0,0.05)", overflow: "hidden" }}>
++          {loading ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999" }}>Loading…</div>
++          ) : error ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#d64545" }}>
++              Couldn't load your dealers ({error}).
++            </div>
++          ) : dealers.length === 0 ? (
++            <div style={{ padding: "24px 16px", textAlign: "center", fontSize: 13, color: "#999", lineHeight: 1.6 }}>
++              No dealers assigned to you yet.<br />Ask Admin to assign dealers via Dealer Management.
++            </div>
++          ) : (
++            dealers.map((d) => <DealerRow key={d.id} dealer={d} onClick={() => goToDealer(d)} />)
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/src/screens/staff/SalesDashboard.jsx b/src/screens/staff/SalesDashboard.jsx
+index 7a7f6f4..7d83e0c 100644
+--- a/src/screens/staff/SalesDashboard.jsx
++++ b/src/screens/staff/SalesDashboard.jsx
+@@ -7,6 +7,7 @@ import { featuresForRole } from "../../utils/staffFeatures";
+ import DashboardAiCard from "../../components/staff/DashboardAiCard";
+ import NotificationBell from "../../components/staff/NotificationBell";
+ import StaffAvatar from "../../components/staff/StaffAvatar";
++import DealerRow from "../../components/staff/DealerRow";
+ import { getCurrentPosition } from "../../utils/visitMedia";
+ import { uploadStaffPhoto } from "../../utils/staffPhoto";
+ 
+@@ -35,11 +36,6 @@ import { uploadStaffPhoto } from "../../utils/staffPhoto";
+ // those have a data model yet, so rather than show made-up numbers in a
+ // live app, those sections stay clearly marked as not built yet.
+ 
+-function initials(name) {
+-  if (!name) return "?";
+-  return name.trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+-}
+-
+ const CARD_STYLE = {
+   background: "#fff",
+   border: "1.5px solid #7B2D8B",
+@@ -64,48 +60,6 @@ function StatCard({ icon, value, label, onClick }) {
+   );
+ }
+ 
+-function DealerRow({ dealer, onClick }) {
+-  const territories = Array.isArray(dealer.territory) ? dealer.territory : [];
+-  return (
+-    <div
+-      onClick={onClick}
+-      style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: "1px solid #f2f2f2", cursor: "pointer" }}
+-    >
+-      <div style={{
+-        width: 36, height: 36, borderRadius: 10, background: "#f3e6f6", color: "#7B2D8B",
+-        display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0,
+-      }}>
+-        {initials(dealer.name)}
+-      </div>
+-      <div style={{ flex: 1, minWidth: 0 }}>
+-        <div style={{ fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+-          {dealer.name || "Unnamed"}{dealer.alias_name ? ` (${dealer.alias_name})` : ""}
+-          {dealer.dealer_kind && dealer.dealer_kind !== "profile" && (
+-            <span style={{ fontSize: 9.5, fontWeight: 800, color: "#c98400", background: "#fff4e0", borderRadius: 999, padding: "2px 7px" }}>
+-              🆕 New
+-            </span>
+-          )}
+-        </div>
+-        <div style={{ fontSize: 11.5, color: "#999", marginTop: 1 }}>
+-          {dealer.dealer_code || "—"}{territories.length ? ` · ${territories.join(", ")}` : ""}
+-          {dealer.owner_name ? ` · ${dealer.dealer_kind && dealer.dealer_kind !== "profile" ? "added by" : "owner"}: ${dealer.owner_name}` : ""}
+-        </div>
+-      </div>
+-      {dealer.has_ledger_access === false ? (
+-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, background: "#f3f3f3", borderRadius: 999, padding: "4px 10px" }}>
+-          <span style={{ fontSize: 11 }}>🔒</span>
+-          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#888" }}>Locked</span>
+-        </div>
+-      ) : (
+-        <div style={{ fontSize: 12, fontWeight: 700, color: dealer.outstanding > 0 ? "#d64545" : "#2fa84f", whiteSpace: "nowrap" }}>
+-          ₹{Number(dealer.outstanding || 0).toLocaleString("en-IN")}
+-        </div>
+-      )}
+-      <div style={{ color: "#ccc", fontSize: 14, marginLeft: 2 }}>›</div>
+-    </div>
+-  );
+-}
+-
+ function formatDateTime(iso) {
+   if (!iso) return "";
+   return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+@@ -580,12 +534,12 @@ export default function SalesDashboard() {
+ 
+       <div style={{ maxWidth: 640, margin: "-28px auto 0", padding: "0 20px 60px", position: "relative", zIndex: 2 }}>
+         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+-          <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} />
++          <StatCard icon="🏬" value={loadingDealers ? "…" : dealers.length} label={dealersLabel} onClick={() => navigate("/staff/sales/my-dealers")} />
+           <StatCard
+             icon="₹"
+             value={loadingDealers ? "…" : `₹${totalOutstanding.toLocaleString("en-IN")}`}
+             label="Total outstanding"
+-            onClick={() => dealersSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
++            onClick={() => navigate("/staff/sales/dues")}
+           />
+         </div>
+ 
+-- 
+2.43.0
+

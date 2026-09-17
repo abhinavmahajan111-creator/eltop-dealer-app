@@ -23,6 +23,8 @@ import Schemes from "./screens/Schemes";
 import Support from "./screens/Support";
 import StaffHome from "./screens/StaffHome";
 import SalesDashboard from "./screens/staff/SalesDashboard";
+import MyDealersPage from "./screens/staff/MyDealersPage";
+import DuesToCollectPage from "./screens/staff/DuesToCollectPage";
 import DealerDetail from "./screens/staff/DealerDetail";
 import FieldDealerDetail from "./screens/staff/FieldDealerDetail";
 import TeamAccess from "./screens/staff/TeamAccess";
@@ -110,6 +112,8 @@ export default function App() {
       <Route element={<StaffRoute />}>
         <Route path="/staff" element={<StaffHome />} />
         <Route path="/staff/sales" element={<SalesDashboard />} />
+        <Route path="/staff/sales/my-dealers" element={<MyDealersPage />} />
+        <Route path="/staff/sales/dues" element={<DuesToCollectPage />} />
         <Route path="/staff/sales/day-checkin" element={<DayCheckIn />} />
         {/* Old separate Start Day / Check In routes — redirect to the
             combined tabbed screen that replaced them. */}
