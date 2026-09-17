@@ -180,9 +180,63 @@ export default function DealerApply() {
 
   return (
     <div className="screen" id="screen-dealer-apply">
-      <div className="topbar">
-        <span className="back" onClick={() => navigate("/store")}>&#8592;</span>
-        <h1>Complete Your Application</h1>
+      <style>{`
+        @keyframes fanman-bounce {
+          0%, 100% { transform: translateY(0); }
+          50%       { transform: translateY(-8px); }
+        }
+        @keyframes cape-flow {
+          0%, 100% { transform: translateX(0) skewY(-2deg); }
+          50%       { transform: translateX(-6px) skewY(3deg); }
+        }
+        .apply-hero-fanman { animation: fanman-bounce 1.3s ease-in-out infinite; position: relative; }
+        .apply-hero-cape   { animation: cape-flow 1.3s ease-in-out infinite; transform-origin: right center; }
+      `}</style>
+
+      <div
+        style={{
+          background: "linear-gradient(135deg, #8B3D9B 0%, #B06DC8 100%)",
+          color: "#fff", display: "flex", alignItems: "center", gap: 14,
+          padding: "16px 16px 18px", position: "relative", overflow: "hidden",
+        }}
+      >
+        <span
+          onClick={() => navigate("/store")}
+          style={{ fontSize: 20, cursor: "pointer", flexShrink: 0, lineHeight: 1 }}
+        >
+          &#8592;
+        </span>
+        <div style={{ position: "relative", flexShrink: 0, display: "inline-flex" }}>
+          <svg
+            className="apply-hero-cape"
+            width={70} height={50} viewBox="0 0 240 170"
+            style={{ position: "absolute", right: "calc(100% - 22px)", top: 2, opacity: 0.92, pointerEvents: "none" }}
+          >
+            <defs>
+              <linearGradient id="applyCapeGrad" x1="240" y1="85" x2="0" y2="85" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#E8A800" />
+                <stop offset="55%" stopColor="#FFC93C" />
+                <stop offset="100%" stopColor="#FFF3B0" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M 232 28 C 185 32, 120 36, 75 42 C 55 48, 44 54, 42 58 C 42 66, 10 70, 10 84 C 10 96, 30 100, 30 106 C 30 114, 8 118, 10 128 C 12 138, 36 140, 38 146 C 38 150, 22 152, 28 156 C 34 160, 58 160, 65 155 C 105 150, 158 146, 192 142 C 212 139, 226 135, 232 132 Z"
+              fill="url(#applyCapeGrad)"
+            />
+          </svg>
+          <div className="apply-hero-fanman">
+            <img
+              src="/assets/fan%20man%20eltop.png"
+              alt="Eltop Fanman"
+              style={{ height: 50, width: "auto", display: "block" }}
+              onError={(e) => { e.target.style.display = "none"; }}
+            />
+          </div>
+        </div>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Complete Your Application</div>
+          <div style={{ fontSize: 12, opacity: 0.9, color: "#F0DFF5" }}>Almost there — let's get you dealer pricing!</div>
+        </div>
       </div>
 
       <div className="content">
@@ -254,32 +308,49 @@ export default function DealerApply() {
             Photos
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-            {fields.filter((f) => f.kind === "photo").map((f) => (
-              <div key={f.key} style={{ position: "relative" }}>
-                {/* file is always null here — CameraPhotoSlot's own preview needs a
-                    real Blob (it calls URL.createObjectURL on it), and the uploaded
-                    blob is discarded right after upload. Already-uploaded state and
-                    the busy spinner are drawn as overlays instead, on top of the
-                    slot's own (otherwise-empty) tile. */}
-                <CameraPhotoSlot
-                  label={f.label}
-                  file={null}
-                  disabled={Boolean(busy[f.key])}
-                  onChange={(blob) => handleMediaCapture(f.key, blob)}
-                />
-                {dealer?.[f.key] && !busy[f.key] && (
-                  <img src={dealer[f.key]} alt={f.label} style={{ position: "absolute", inset: 0, width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 10, pointerEvents: "none" }} />
-                )}
-                {dealer?.[f.key] && !busy[f.key] && (
-                  <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
-                )}
-                {busy[f.key] && (
-                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.7)", borderRadius: 10, fontSize: 20 }}>⏳</div>
-                )}
-              </div>
-            ))}
+            {fields.filter((f) => f.kind === "photo").map((f) => {
+              const uploaded = Boolean(dealer?.[f.key]);
+              const isBusy = Boolean(busy[f.key]);
+              // Once a photo is on file, this tile is view-only for the
+              // dealer — tapping opens it full-size instead of silently
+              // reopening the camera and overwriting it. Only an admin
+              // clearing it (AdminDealers.jsx) brings back the capture
+              // tile, per Sumaksh's ask: no silent self-edit, view or
+              // nothing.
+              if (uploaded && !isBusy) {
+                return (
+                  <div key={f.key} style={{ textAlign: "center" }}>
+                    <div
+                      onClick={() => window.open(dealer[f.key], "_blank", "noopener,noreferrer")}
+                      style={{
+                        width: "100%", aspectRatio: "1", borderRadius: 10, overflow: "hidden",
+                        border: "2px solid #2fa84f", cursor: "pointer", position: "relative",
+                      }}
+                    >
+                      <img src={dealer[f.key]} alt={f.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <span style={{ position: "absolute", top: 4, right: 4, background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 18, height: 18, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#666", marginTop: 5 }}>{f.label}</div>
+                    <div style={{ fontSize: 9.5, color: "#2fa84f", fontWeight: 700, marginTop: 1 }}>Uploaded — tap to view</div>
+                  </div>
+                );
+              }
+              return (
+                <div key={f.key} style={{ position: "relative" }}>
+                  <CameraPhotoSlot
+                    label={f.label}
+                    file={null}
+                    disabled={isBusy}
+                    onChange={(blob) => handleMediaCapture(f.key, blob)}
+                  />
+                  {isBusy && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.7)", borderRadius: 10, fontSize: 20 }}>⏳</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 10 }}>Tap a tile to open the camera. Tap again to retake.</div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 10 }}>Tap an empty tile to open the camera. Once uploaded, a tile is view-only — if something's wrong, ask your sales person to reset it so you can retake it.</div>
         </div>
 
         <div className="list-card" style={{ padding: 14, marginBottom: 16 }}>
@@ -287,17 +358,48 @@ export default function DealerApply() {
             Videos
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {fields.filter((f) => f.kind === "video").map((f) => (
-              <CameraVideoSlot
-                key={f.key}
-                label={f.label}
-                maxSeconds={f.maxSeconds}
-                file={dealer?.[f.key] ? "done" : (busy[f.key] ? "uploading" : null)}
-                disabled={Boolean(busy[f.key])}
-                onChange={(blob) => handleMediaCapture(f.key, blob)}
-              />
-            ))}
+            {fields.filter((f) => f.kind === "video").map((f) => {
+              const uploaded = Boolean(dealer?.[f.key]);
+              const isBusy = Boolean(busy[f.key]);
+              // Same view-only-once-uploaded treatment as photos above —
+              // CameraVideoSlot's handleOpen only gates on `disabled`, so
+              // without this it would let a dealer silently re-record over
+              // an already-submitted video by tapping the tile again.
+              if (uploaded && !isBusy) {
+                return (
+                  <div
+                    key={f.key}
+                    onClick={() => window.open(dealer[f.key], "_blank", "noopener,noreferrer")}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      border: "2px solid #2fa84f", borderRadius: 10, padding: "10px 12px", cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: "#333" }}>{f.label}</span>
+                    <span style={{ fontSize: 11, color: "#2fa84f", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ background: "#2fa84f", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 10, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>✓</span>
+                      Uploaded — tap to view
+                    </span>
+                  </div>
+                );
+              }
+              return (
+                <div key={f.key} style={{ position: "relative" }}>
+                  <CameraVideoSlot
+                    label={f.label}
+                    maxSeconds={f.maxSeconds}
+                    file={isBusy ? "uploading" : null}
+                    disabled={isBusy}
+                    onChange={(blob) => handleMediaCapture(f.key, blob)}
+                  />
+                  {isBusy && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.7)", borderRadius: 10, fontSize: 20 }}>⏳</div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+          <div style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 10 }}>Once uploaded, a video is view-only — if something's wrong, ask your sales person to reset it so you can retake it.</div>
         </div>
 
         {!complete && (

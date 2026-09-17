@@ -170,7 +170,7 @@ function Lightbox({ items, index, onClose, onNav }) {
 }
 
 // ─── Media tile ───────────────────────────────────────────────────────────────
-function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing, onView }) {
+function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing, onView, onClear }) {
   const ref = useRef();
   const [hovered, setHovered] = useState(false);
   const isVideo = accept.includes("video");
@@ -220,6 +220,17 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
               style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
               ⬇️
             </button>
+            {onClear && editing && (
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  if (window.confirm(`Clear "${label}"? The dealer will be able to upload it again.`)) onClear();
+                }}
+                title="Clear — lets the dealer re-upload this"
+                style={{ background: "rgba(220,38,38,.75)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+                🗑️
+              </button>
+            )}
           </div>
         )}
 
@@ -1053,6 +1064,23 @@ export default function AdminDealers() {
     setUploading(p => ({ ...p, [key]: false }));
   };
 
+  // Clears one submitted document/photo/video field so the dealer's own
+  // /dealer/apply screen shows that tile empty again and lets them
+  // re-upload it — per Sumaksh's ask, the dealer has no self-edit/replace
+  // path on a field once submitted (view-only there), only an admin can
+  // reset one. Only touches the profiles column, not the storage object
+  // itself (the old file is simply orphaned, not deleted — low risk,
+  // avoids adding storage-delete permissions for this).
+  const handleClearField = async (key) => {
+    await supabase.from("profiles").update({ [key]: null }).eq("id", selected.id);
+    const updated = { ...selected, [key]: null };
+    setSelected(updated);
+    setAllProfiles(prev => prev.map(d => d.id === selected.id ? updated : d));
+    if (IDENTITY_DOC_FIELDS.some(f => f.key === key)) {
+      setDocUrls(p => ({ ...p, [key]: null }));
+    }
+  };
+
   const fetchLocation = () => {
     if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
     navigator.geolocation.getCurrentPosition(
@@ -1732,14 +1760,14 @@ export default function AdminDealers() {
               <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Staff Members</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <MediaTile label="Staff 1 Photo" url={selected.staff1_photo} uploading={uploading.staff1_photo} onPick={f => handleMediaUpload("staff1_photo", f)} editing={true} onView={() => openLightbox("staff1_photo")} />
+                  <MediaTile label="Staff 1 Photo" url={selected.staff1_photo} uploading={uploading.staff1_photo} onPick={f => handleMediaUpload("staff1_photo", f)} editing={true} onView={() => openLightbox("staff1_photo")} onClear={() => handleClearField("staff1_photo")} />
                   {editing
                     ? <input value={E("staff1_name")} onChange={e => set("staff1_name", e.target.value)} placeholder="Staff 1 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
                     : <div style={{ fontSize: 11, color: "#333", fontWeight: 600, textAlign: "center" }}>{selected.staff1_name || "Staff 1"}</div>
                   }
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  <MediaTile label="Staff 2 Photo" url={selected.staff2_photo} uploading={uploading.staff2_photo} onPick={f => handleMediaUpload("staff2_photo", f)} editing={true} onView={() => openLightbox("staff2_photo")} />
+                  <MediaTile label="Staff 2 Photo" url={selected.staff2_photo} uploading={uploading.staff2_photo} onPick={f => handleMediaUpload("staff2_photo", f)} editing={true} onView={() => openLightbox("staff2_photo")} onClear={() => handleClearField("staff2_photo")} />
                   {editing
                     ? <input value={E("staff2_name")} onChange={e => set("staff2_name", e.target.value)} placeholder="Staff 2 Name" style={{ width: 96, fontSize: 11, textAlign: "center", marginBottom: 0, padding: "4px 6px" }} />
                     : <div style={{ fontSize: 11, color: "#333", fontWeight: 600, textAlign: "center" }}>{selected.staff2_name || "Staff 2"}</div>
@@ -1750,14 +1778,14 @@ export default function AdminDealers() {
 
             <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Shop &amp; Owner</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-              <MediaTile label="Owner Photo"          url={selected.owner_photo}        uploading={uploading.owner_photo}        onPick={f => handleMediaUpload("owner_photo", f)}        editing={true} onView={() => openLightbox("owner_photo")} />
-              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo}  uploading={uploading.shop_inside_photo}  onPick={f => handleMediaUpload("shop_inside_photo", f)}  editing={true} onView={() => openLightbox("shop_inside_photo")} />
-              <MediaTile label="Shop Board"           url={selected.shop_board_photo}   uploading={uploading.shop_board_photo}   onPick={f => handleMediaUpload("shop_board_photo", f)}   editing={true} onView={() => openLightbox("shop_board_photo")} />
-              <MediaTile label="Shop Outside"         url={selected.shop_outside_photo} uploading={uploading.shop_outside_photo} onPick={f => handleMediaUpload("shop_outside_photo", f)} editing={true} onView={() => openLightbox("shop_outside_photo")} />
-              <MediaTile label="Interior Video (30s)" url={selected.shop_video}         uploading={uploading.shop_video}         onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} />
-              <MediaTile label="Intro Video (15s)"    url={selected.intro_video}        uploading={uploading.intro_video}        onPick={f => handleMediaUpload("intro_video", f)}        editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("intro_video")} />
+              <MediaTile label="Owner Photo"          url={selected.owner_photo}        uploading={uploading.owner_photo}        onPick={f => handleMediaUpload("owner_photo", f)}        editing={true} onView={() => openLightbox("owner_photo")} onClear={() => handleClearField("owner_photo")} />
+              <MediaTile label="Shop Inside"          url={selected.shop_inside_photo}  uploading={uploading.shop_inside_photo}  onPick={f => handleMediaUpload("shop_inside_photo", f)}  editing={true} onView={() => openLightbox("shop_inside_photo")} onClear={() => handleClearField("shop_inside_photo")} />
+              <MediaTile label="Shop Board"           url={selected.shop_board_photo}   uploading={uploading.shop_board_photo}   onPick={f => handleMediaUpload("shop_board_photo", f)}   editing={true} onView={() => openLightbox("shop_board_photo")} onClear={() => handleClearField("shop_board_photo")} />
+              <MediaTile label="Shop Outside"         url={selected.shop_outside_photo} uploading={uploading.shop_outside_photo} onPick={f => handleMediaUpload("shop_outside_photo", f)} editing={true} onView={() => openLightbox("shop_outside_photo")} onClear={() => handleClearField("shop_outside_photo")} />
+              <MediaTile label="Interior Video (30s)" url={selected.shop_video}         uploading={uploading.shop_video}         onPick={f => handleMediaUpload("shop_video", f)}         editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("shop_video")} onClear={() => handleClearField("shop_video")} />
+              <MediaTile label="Intro Video (15s)"    url={selected.intro_video}        uploading={uploading.intro_video}        onPick={f => handleMediaUpload("intro_video", f)}        editing={true} accept="video/mp4,video/quicktime,video/*" onView={() => openLightbox("intro_video")} onClear={() => handleClearField("intro_video")} />
             </div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click any tile to upload or replace. Videos: mp4 / mov.</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>Click an empty tile to upload. Once uploaded, hover an uploaded tile for View/Download/🗑️ Clear — Clear resets it so the dealer can re-upload from their own screen. Videos: mp4 / mov.</div>
           </div>
 
           <div style={{ marginTop: 22 }}>
@@ -1773,6 +1801,7 @@ export default function AdminDealers() {
                   onPick={f => handleDocUpload(key, f)}
                   editing={true}
                   onView={() => docUrls[key] && window.open(docUrls[key], "_blank", "noopener,noreferrer")}
+                  onClear={() => handleClearField(key)}
                 />
               ))}
             </div>
