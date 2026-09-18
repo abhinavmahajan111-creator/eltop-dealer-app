@@ -1328,6 +1328,13 @@ export default function Store() {
         </div>
       )}
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&display=swap');
+        @keyframes store-banner-sparkle-twinkle {
+          0%, 100% { opacity: .35; transform: scale(.85); }
+          50%       { opacity: 1;  transform: scale(1.1); }
+        }
+        .store-banner-sparkle { position: absolute; color: #FFC93C; animation: store-banner-sparkle-twinkle 1.8s ease-in-out infinite; pointer-events: none; }
+        .store-banner-fredoka { font-family: 'Fredoka', 'Segoe UI', Arial, sans-serif; }
         *, *::before, *::after { box-sizing: border-box; }
         .store-root { min-height: 100vh; min-height: 100dvh; background: #f8ecf6; font-family: inherit; overflow-x: hidden; max-width: 100vw; }
 
@@ -1632,15 +1639,17 @@ export default function Store() {
 
       {/* ── Dealer application status banners ── */}
       {isDealer && profileLoaded && dealerApplicationStatus === 'pending_details' && (
-        <div style={{ background: '#FEF3C7', borderBottom: '2px solid #F59E0B', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>
-            ⚠️ Your application is incomplete. Complete your application to unlock dealer discounts.
+        <div style={{ background: 'linear-gradient(120deg, #8B3D9B 0%, #B06DC8 100%)', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', position: 'relative', overflow: 'hidden' }}>
+          <svg className="store-banner-sparkle" style={{ top: 6, left: '38%' }} width={13} height={13} viewBox="0 0 24 24" fill="currentColor"><path d="M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z" /></svg>
+          <span className="store-banner-fredoka" style={{ fontSize: 13.5, color: '#fff', fontWeight: 600, lineHeight: 1.4 }}>
+            ⚡ Almost there! Self-complete your profile &amp; start saving today.
           </span>
           <button
             onClick={() => navigate('/dealer/apply')}
-            style={{ background: '#F59E0B', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 700, fontSize: 12, padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
+            className="store-banner-fredoka"
+            style={{ background: '#fff', border: 'none', borderRadius: 999, color: '#7B2D8B', fontWeight: 700, fontSize: 12.5, padding: '8px 16px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}
           >
-            Complete Application
+            Complete now →
           </button>
         </div>
       )}
