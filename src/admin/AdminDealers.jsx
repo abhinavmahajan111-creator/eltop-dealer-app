@@ -179,35 +179,46 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
     <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "center" }}>
       <div
         style={{
-          width: 96, height: 96, borderRadius: 10,
-          border: `2px ${editing && !url ? "dashed" : "solid"} ${editing && !url ? "var(--red-light)" : "#eee"}`,
-          background: "#f8f4f8", overflow: "hidden",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: url ? undefined : 24, color: "var(--muted)",
-          position: "relative", cursor: url ? "pointer" : editing ? "pointer" : "default",
+          width: 96, height: 96, position: "relative",
+          cursor: url ? "pointer" : editing ? "pointer" : "default",
+          transform: hovered ? "scale(1.35)" : "scale(1)",
+          transformOrigin: "center center",
+          transition: "transform .15s ease",
+          zIndex: hovered ? 30 : 1,
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onClick={() => { if (url) onView?.(); else if (editing) ref.current?.click(); }}
       >
-        {uploading
-          ? <span style={{ fontSize: 12 }}>⏳</span>
-          : url
-            ? isVideo
-              ? <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
-              : <img src={url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            : editing ? <span style={{ fontSize: 24 }}>+</span> : <span style={{ fontSize: 11, color: "#ccc" }}>—</span>
-        }
+        <div
+          style={{
+            width: "100%", height: "100%", borderRadius: 10,
+            border: `2px ${editing && !url ? "dashed" : "solid"} ${editing && !url ? "var(--red-light)" : "#eee"}`,
+            background: "#f8f4f8", overflow: "hidden",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: url ? undefined : 24, color: "var(--muted)",
+            boxShadow: hovered ? "0 6px 18px rgba(0,0,0,.28)" : "none",
+          }}
+        >
+          {uploading
+            ? <span style={{ fontSize: 12 }}>⏳</span>
+            : url
+              ? isVideo
+                ? <video src={url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
+                : <img src={url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : editing ? <span style={{ fontSize: 24 }}>+</span> : <span style={{ fontSize: 11, color: "#ccc" }}>—</span>
+          }
+        </div>
 
         {url && hovered && (
           <div style={{
-            position: "absolute", inset: 0, background: "rgba(0,0,0,.55)",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            position: "absolute", inset: 0, borderRadius: 10, background: "rgba(0,0,0,.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}>
             <button
               onClick={e => { e.stopPropagation(); onView?.(); }}
               title="View"
-              style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+              style={{ background: "rgba(255,255,255,.25)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 6px", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>
               🔍
             </button>
             <button
@@ -217,7 +228,7 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
                 a.href = url; a.download = label; a.target = "_blank"; a.click();
               }}
               title="Download"
-              style={{ background: "rgba(255,255,255,.2)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+              style={{ background: "rgba(255,255,255,.25)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 6px", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>
               ⬇️
             </button>
             {onClear && editing && (
@@ -227,7 +238,7 @@ function MediaTile({ label, url, uploading, onPick, accept = "image/*", editing,
                   if (window.confirm(`Clear "${label}"? The dealer will be able to upload it again.`)) onClear();
                 }}
                 title="Clear — lets the dealer re-upload this"
-                style={{ background: "rgba(220,38,38,.75)", border: "none", borderRadius: 6, color: "#fff", padding: "5px 8px", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>
+                style={{ background: "rgba(220,38,38,.85)", border: "none", borderRadius: 6, color: "#fff", padding: "4px 6px", cursor: "pointer", fontSize: 13, lineHeight: 1 }}>
                 🗑️
               </button>
             )}
