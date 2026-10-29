@@ -1306,10 +1306,15 @@ export default function AdminProducts() {
                       discountCols,
                       includeDiscountCols: includePdfDiscountCols,
                       returnBlob: true,
+                      waitForUpload: true,
                     });
-                    // result.publicUrl is already a blob: URL (generatePriceListPDF creates
-                    // it internally); calling createObjectURL again on result.blob is wrong
-                    // — result.blob is undefined in the returnBlob=true path.
+                    // waitForUpload:true makes generatePriceListPDF upload the PDF to
+                    // Supabase Storage and return the real HTTPS public URL instead of a
+                    // local blob: URL. PdfViewerModal's Open/Download/Share handlers all
+                    // require a real fetchable URL — a blob: URL opened in a new tab or
+                    // handed off to an external PDF app produced a blank about:blank tab
+                    // and a "corrupted/damaged" file on mobile. Matches the pattern
+                    // handleRegenerate() already uses for customer/dealer roles.
                     setPdfViewer({ blobUrl: result.publicUrl, filename: result.filename });
                   } catch (err) {
                     alert('Could not generate PDF: ' + err.message);
