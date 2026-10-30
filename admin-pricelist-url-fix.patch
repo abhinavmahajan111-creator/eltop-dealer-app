@@ -1,0 +1,54 @@
+From a042c7439647763ed99ec1b418cde2437ad8ea5e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 29 Oct 2026 04:39:21 +0000
+Subject: [PATCH] Fix admin Price List PDF: use real Storage URL, not blob: URL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The admin "⬇ Price List" button generated its PDF without
+waitForUpload, so generatePriceListPDF() returned a local blob: URL
+and fed it straight to PdfViewerModal. That component's url prop is
+documented to expect a real HTTPS Supabase Storage URL - its Open
+button does window.open(url), which on mobile opened a blank
+about:blank tab instead of the PDF, and the downloaded file opened
+in an external PDF app as corrupted/damaged.
+
+Pass waitForUpload: true (already used by handleRegenerate() for the
+customer/dealer roles) so the admin button also uploads to Storage
+first and gets back the real public URL before showing the preview
+sheet. The button already shows a disabled "..." state while busy,
+so no UI/state changes are needed beyond the one extra flag.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01GxWPdEf21EL6SvRpGBbX8q
+---
+ src/admin/AdminProducts.jsx | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/admin/AdminProducts.jsx b/src/admin/AdminProducts.jsx
+index 7a4d270..b46e954 100644
+--- a/src/admin/AdminProducts.jsx
++++ b/src/admin/AdminProducts.jsx
+@@ -1306,10 +1306,15 @@ export default function AdminProducts() {
+                       discountCols,
+                       includeDiscountCols: includePdfDiscountCols,
+                       returnBlob: true,
++                      waitForUpload: true,
+                     });
+-                    // result.publicUrl is already a blob: URL (generatePriceListPDF creates
+-                    // it internally); calling createObjectURL again on result.blob is wrong
+-                    // — result.blob is undefined in the returnBlob=true path.
++                    // waitForUpload:true makes generatePriceListPDF upload the PDF to
++                    // Supabase Storage and return the real HTTPS public URL instead of a
++                    // local blob: URL. PdfViewerModal's Open/Download/Share handlers all
++                    // require a real fetchable URL — a blob: URL opened in a new tab or
++                    // handed off to an external PDF app produced a blank about:blank tab
++                    // and a "corrupted/damaged" file on mobile. Matches the pattern
++                    // handleRegenerate() already uses for customer/dealer roles.
+                     setPdfViewer({ blobUrl: result.publicUrl, filename: result.filename });
+                   } catch (err) {
+                     alert('Could not generate PDF: ' + err.message);
+-- 
+2.43.0
+
